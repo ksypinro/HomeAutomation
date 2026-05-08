@@ -1,0 +1,221 @@
+import Foundation
+import HomeAutomationCore
+
+enum LegacyTextParser {
+    static let knownRooms = [
+        "living room",
+        "bedroom",
+        "kitchen",
+        "porch",
+        "entry",
+        "garage",
+        "patio",
+        "hallway",
+        "nursery",
+        "laundry",
+        "basement",
+        "home",
+        "guest room",
+        "dining room",
+        "media room"
+    ]
+
+    static func deterministicState(
+        for text: String,
+        confidence: Double,
+        riskReason: String = "legacy deterministic fallback"
+    ) -> HomeResolutionState {
+        let normalized = text.legacyNormalizedHomeTokenString
+        let family = intentFamily(for: normalized)
+        let deviceTypes = deviceTypes(for: normalized)
+        let rooms = knownRooms.filter { normalized.contains($0) }
+        let values = extractedNumbers(from: normalized).map {
+            HomeExtractedSlot(
+                name: "value",
+                rawValue: String($0),
+                numericValue: Double($0),
+                unit: normalized.contains("percent") ? "percent" : nil,
+                confidence: confidence
+            )
+        }
+        let modes = modeCandidates(in: normalized)
+        let domain: HomeAutomationCommandDomain = family == .unsupported && deviceTypes.isEmpty ? .unsupported : .homeAutomation
+        let risk = riskLevel(for: normalized)
+
+        return HomeResolutionState(
+            rawText: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            language: HomeLanguageDetectionResult(
+                languageCode: "en",
+                isMixedLanguage: false,
+                confidence: confidence,
+                unsupportedLanguageLikely: false
+            ),
+            domain: HomeDomainClassificationResult(domain: domain, confidence: confidence),
+            intent: HomeIntentFamilyResult(topFamilies: [family], confidence: confidence),
+            deviceType: HomeDeviceTypeResult(deviceTypes: deviceTypes, confidence: confidence),
+            slots: HomeSlotExtractionResult(
+                rooms: rooms,
+                deviceNicknames: [],
+                values: values,
+                modes: modes,
+                confidence: confidence
+            ),
+            risk: HomeRiskClassificationResult(
+                riskLevel: risk,
+                requiresConfirmation: risk == .high || risk == .critical,
+                reason: riskReason,
+                confidence: confidence
+            )
+        )
+    }
+
+    static func intentFamily(for normalized: String) -> HomeAutomationIntentFamily {
+        if containsAny(normalized, ["unlock", "lock the", "secure"]) {
+            return .lockUnlock
+        }
+        if containsAny(normalized, ["open", "close", "raise", "lower"]) &&
+            containsAny(normalized, ["door", "garage", "blind", "shade", "valve"]) {
+            return .openClose
+        }
+        if containsAny(normalized, ["routine", "scene", "movie time", "good night"]) {
+            return .routine
+        }
+        if containsAny(normalized, ["status", "check", "what is", "is the", "tell me", "battery"]) {
+            return .statusQuery
+        }
+        if containsAny(normalized, ["temperature", "cooler", "warmer", "thermostat", "ac", "air conditioner", "fan mode"]) {
+            return .temperature
+        }
+        if containsAny(normalized, ["brightness", "bright", "dim", "percent", "level", "color", "hue", "saturation"]) {
+            return .brightness
+        }
+        if containsAny(normalized, ["tv", "speaker", "volume", "channel", "play", "pause", "mute"]) {
+            return .media
+        }
+        if containsAny(normalized, ["washer", "dryer", "oven", "vacuum", "cleaner", "start", "stop"]) {
+            return .applianceCycle
+        }
+        if containsAny(normalized, ["turn on", "turn off", "switch on", "switch off", "power"]) {
+            return .power
+        }
+        return .unsupported
+    }
+
+    static func deviceTypes(for normalized: String) -> [String] {
+        var values: [String] = []
+
+        append("light", to: &values, if: containsAny(normalized, ["light", "lamp", "bulb"]))
+        append("airConditioner", to: &values, if: containsAny(normalized, ["ac", "air conditioner"]))
+        append("thermostat", to: &values, if: normalized.contains("thermostat"))
+        append("lock", to: &values, if: containsAny(normalized, ["lock", "front door"]))
+        append("garageDoor", to: &values, if: normalized.contains("garage door"))
+        append("blind", to: &values, if: containsAny(normalized, ["blind", "shade"]))
+        append("tv", to: &values, if: normalized.contains("tv"))
+        append("speaker", to: &values, if: normalized.contains("speaker"))
+        append("washer", to: &values, if: normalized.contains("washer"))
+        append("dryer", to: &values, if: normalized.contains("dryer"))
+        append("oven", to: &values, if: normalized.contains("oven"))
+        append("robotCleaner", to: &values, if: containsAny(normalized, ["vacuum", "robot cleaner", "robot vacuum"]))
+        append("camera", to: &values, if: normalized.contains("camera"))
+        append("valve", to: &values, if: normalized.contains("valve"))
+        append("routine", to: &values, if: containsAny(normalized, ["routine", "scene", "movie time", "good night"]))
+
+        return values
+    }
+
+    static func extractedNumbers(from normalized: String) -> [Int] {
+        let pattern = #"\b\d+\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        return regex.matches(in: normalized, range: range).compactMap { match in
+            guard let swiftRange = Range(match.range, in: normalized) else { return nil }
+            return Int(normalized[swiftRange])
+        }
+    }
+
+    static func modeCandidates(in normalized: String) -> [String] {
+        ["auto", "cool", "heat", "dry", "fanOnly", "low", "medium", "high", "turbo", "eco"].filter {
+            normalized.contains($0.legacyNormalizedHomeTokenString)
+        }
+    }
+
+    static func containsAny(_ value: String, _ needles: [String]) -> Bool {
+        needles.contains { value.contains($0) }
+    }
+
+    private static func append(_ value: String, to values: inout [String], if condition: Bool) {
+        guard condition, !values.contains(value) else { return }
+        values.append(value)
+    }
+
+    private static func riskLevel(for normalized: String) -> HomeAutomationRiskLevel {
+        if containsAny(normalized, ["bypass security", "disable alarm"]) {
+            return .critical
+        }
+        if containsAny(normalized, ["unlock", "open the front door", "open garage", "oven", "camera", "valve"]) {
+            return .high
+        }
+        if containsAny(normalized, ["temperature", "thermostat", "ac", "washer", "dryer", "vacuum", "blind"]) {
+            return .medium
+        }
+        return .low
+    }
+}
+
+extension String {
+    var legacyNormalizedHomeTokenString: String {
+        var value = lowercased()
+        let replacements = [
+            "enciende": "turn on",
+            "prende": "turn on",
+            "apaga": "turn off",
+            "luz": "light",
+            "lampara": "lamp",
+            "lámpara": "lamp",
+            "sala": "living room",
+            "dormitorio": "bedroom",
+            "allume": "turn on",
+            "eteins": "turn off",
+            "éteins": "turn off",
+            "lumiere": "light",
+            "lumière": "light",
+            "lampe": "lamp",
+            "salon": "living room",
+            "chambre": "bedroom",
+            "リビング": "living room",
+            "ライト": " light ",
+            "つけて": " turn on ",
+            "消して": " turn off ",
+            "লাইট": " light ",
+            "বেডরুম": " bedroom ",
+            "চালু": " turn on ",
+            "বন্ধ": " turn off "
+        ]
+        for (source, replacement) in replacements {
+            value = value.replacingOccurrences(of: source, with: replacement)
+        }
+
+        return value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(
+                of: "([a-z0-9])([A-Z])",
+                with: "$1 $2",
+                options: .regularExpression
+            )
+            .lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: #"[^a-z0-9 ]+"#, with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .joined(separator: " ")
+    }
+
+    var legacyCompactHomeTokenString: String {
+        legacyNormalizedHomeTokenString.replacingOccurrences(of: " ", with: "")
+    }
+
+    var legacyTokenSet: Set<String> {
+        Set(legacyNormalizedHomeTokenString.split(separator: " ").map(String.init))
+            .subtracting(["the", "a", "an", "my", "please", "could", "you", "can", "hey", "siri", "assistant", "to", "of", "in", "on", "for", "me", "now"])
+    }
+}

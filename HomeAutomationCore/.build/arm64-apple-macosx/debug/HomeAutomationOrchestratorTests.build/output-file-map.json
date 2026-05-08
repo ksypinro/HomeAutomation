@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationOrchestratorTests.build/master.swiftdeps"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Tests/HomeAutomationOrchestratorTests/OrchestratorInfrastructureTests.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationOrchestratorTests.build/OrchestratorInfrastructureTests.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationOrchestratorTests.build/OrchestratorInfrastructureTests.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationOrchestratorTests.build/OrchestratorInfrastructureTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationOrchestratorTests.build/OrchestratorInfrastructureTests.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationOrchestratorTests.build/OrchestratorInfrastructureTests.dia"
+  }
+}

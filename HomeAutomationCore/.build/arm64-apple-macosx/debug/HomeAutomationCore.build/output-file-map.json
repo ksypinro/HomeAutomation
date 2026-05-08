@@ -1,0 +1,103 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/master.swiftdeps"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/Errors/FoundationLabCoreError.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/FoundationLabCoreError.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/FoundationLabCoreError.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/FoundationLabCoreError~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/FoundationLabCoreError.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/FoundationLabCoreError.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeAutomationKnowledgeBase.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationKnowledgeBase.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationKnowledgeBase.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationKnowledgeBase~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationKnowledgeBase.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationKnowledgeBase.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeAutomationModels.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationModels.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationModels.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationModels~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationModels.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeAutomationModels.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeBixbyCommandCatalog.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandCatalog.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandCatalog.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandCatalog~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandCatalog.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandCatalog.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeBixbyCommandMapper.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandMapper.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandMapper.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandMapper~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandMapper.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeBixbyCommandMapper.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeCandidateContextStore.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateContextStore.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateContextStore.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateContextStore~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateContextStore.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateContextStore.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeCandidateResolving.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateResolving.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateResolving.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateResolving~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateResolving.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCandidateResolving.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeCapabilityRegistry.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCapabilityRegistry.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCapabilityRegistry.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCapabilityRegistry~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCapabilityRegistry.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCapabilityRegistry.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeCommandResolutionSupport.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCommandResolutionSupport.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCommandResolutionSupport.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCommandResolutionSupport~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCommandResolutionSupport.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeCommandResolutionSupport.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeModelInstructionPackage.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeModelInstructionPackage.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeModelInstructionPackage.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeModelInstructionPackage~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeModelInstructionPackage.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeModelInstructionPackage.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeSafetyAndParameterPolicy.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeSafetyAndParameterPolicy.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeSafetyAndParameterPolicy.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeSafetyAndParameterPolicy~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeSafetyAndParameterPolicy.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeSafetyAndParameterPolicy.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/HomeWorkerSessionAnalyzing.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeWorkerSessionAnalyzing.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeWorkerSessionAnalyzing.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeWorkerSessionAnalyzing~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeWorkerSessionAnalyzing.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/HomeWorkerSessionAnalyzing.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationCore/HomeAutomation/MockHomeDeviceRegistry.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/MockHomeDeviceRegistry.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/MockHomeDeviceRegistry.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/MockHomeDeviceRegistry~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/MockHomeDeviceRegistry.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/MockHomeDeviceRegistry.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/DerivedSources/resource_bundle_accessor.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/resource_bundle_accessor.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/resource_bundle_accessor.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/resource_bundle_accessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/resource_bundle_accessor.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCore.build/resource_bundle_accessor.dia"
+  }
+}

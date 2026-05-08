@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.build/master.swiftdeps"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.derived/runner.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.build/runner.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationCorePackageTests.build/runner.dia"
+  }
+}

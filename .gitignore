@@ -1,0 +1,69 @@
+# Xcode
+#
+# gitignore contributors: code601, tyrre, btmartin, dmacvicar
+
+## Build results
+build/
+DerivedData/
+
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+
+## Other
+*.tmp
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+## Obj-C/Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+#
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+# .build/
+
+# Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+# Carthage/Checkouts/
+
+Carthage/Build/
+
+# AccuRev Static Packages
+*.vclp
+
+# fastlane
+#
+# It is recommended to not store the screenshots in the repo since they can become very large
+# and many apps generate screens for multiple languages that are not required for development.
+# fastlane/screenshots
+
+# Bundle artifact
+*.app
+*.framework
+*.xctest
+
+# CocoaPods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# if you'd like to do so, uncomment the line below.
+# Pods/
+
+# Gcov-based coverage reporting
+*.gcno

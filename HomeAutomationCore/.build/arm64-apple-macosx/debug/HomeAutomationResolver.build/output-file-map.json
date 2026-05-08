@@ -1,0 +1,117 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/master.swiftdeps"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyAdapterSupport.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyAdapterSupport.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyAdapterSupport.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyAdapterSupport~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyAdapterSupport.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyAdapterSupport.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyBixbyFallbackMapper.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyBixbyFallbackMapper.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyBixbyFallbackMapper.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyBixbyFallbackMapper~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyBixbyFallbackMapper.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyBixbyFallbackMapper.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyCandidateContextStore.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateContextStore.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateContextStore.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateContextStore~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateContextStore.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateContextStore.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyCandidateResolver.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateResolver.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateResolver.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateResolver~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateResolver.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCandidateResolver.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyCommandValidator.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCommandValidator.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCommandValidator.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCommandValidator~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCommandValidator.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyCommandValidator.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyDeviceRegistry.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDeviceRegistry.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDeviceRegistry.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDeviceRegistry~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDeviceRegistry.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDeviceRegistry.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyDraftResolver.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDraftResolver.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDraftResolver.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDraftResolver~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDraftResolver.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyDraftResolver.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyHomeCommandResolver.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyHomeCommandResolver.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyHomeCommandResolver.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyHomeCommandResolver~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyHomeCommandResolver.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyHomeCommandResolver.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyInstructionSetFactory.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyInstructionSetFactory.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyInstructionSetFactory.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyInstructionSetFactory~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyInstructionSetFactory.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyInstructionSetFactory.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyMetrics.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyMetrics.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyMetrics.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyMetrics~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyMetrics.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyMetrics.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyPartialSafeWorkerSessionLayer.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPartialSafeWorkerSessionLayer.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPartialSafeWorkerSessionLayer.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPartialSafeWorkerSessionLayer~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPartialSafeWorkerSessionLayer.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPartialSafeWorkerSessionLayer.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyPipelineEvents.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPipelineEvents.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPipelineEvents.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPipelineEvents~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPipelineEvents.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyPipelineEvents.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyRuleBasedResolver.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyRuleBasedResolver.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyRuleBasedResolver.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyRuleBasedResolver~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyRuleBasedResolver.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyRuleBasedResolver.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyTextParsing.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTextParsing.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTextParsing.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTextParsing~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTextParsing.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTextParsing.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyTimeout.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTimeout.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTimeout.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTimeout~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTimeout.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTimeout.dia"
+  },
+  "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/Sources/HomeAutomationResolver/LegacyTools.swift": {
+    "dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTools.d",
+    "object": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTools.swift.o",
+    "swiftmodule": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTools~partial.swiftmodule",
+    "swift-dependencies": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTools.swiftdeps",
+    "diagnostics": "/Users/samin/Downloads/untitled folder/HomeAutomation/HomeAutomationCore/.build/arm64-apple-macosx/debug/HomeAutomationResolver.build/LegacyTools.dia"
+  }
+}
