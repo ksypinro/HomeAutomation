@@ -1,73 +1,8 @@
 import Foundation
 import FoundationModels
 import HomeAutomationCore
-import HomeAutomationRAG
 
-public struct CandidateRetrievalInput: Sendable {
-    public let text: String
-    public let state: HomeResolutionState
-    public let limit: Int
-    public let memoryHints: [MemoryHint]
-
-    public init(
-        text: String,
-        state: HomeResolutionState,
-        limit: Int = 80,
-        memoryHints: [MemoryHint] = []
-    ) {
-        self.text = text
-        self.state = state
-        self.limit = limit
-        self.memoryHints = memoryHints
-    }
-}
-
-public struct CandidateRankingInput: Sendable {
-    public let text: String
-    public let state: HomeResolutionState
-    public let candidates: [HomeCompactCandidateView]
-    public let memoryHints: [MemoryHint]
-
-    public init(
-        text: String,
-        state: HomeResolutionState,
-        candidates: [HomeCompactCandidateView],
-        memoryHints: [MemoryHint] = []
-    ) {
-        self.text = text
-        self.state = state
-        self.candidates = candidates
-        self.memoryHints = memoryHints
-    }
-}
-
-public struct CandidateShardInput: Sendable {
-    public let text: String
-    public let state: HomeResolutionState
-    public let shard: [HomeCompactCandidateView]
-    public let memoryHints: [MemoryHint]
-
-    public init(
-        text: String,
-        state: HomeResolutionState,
-        shard: [HomeCompactCandidateView],
-        memoryHints: [MemoryHint] = []
-    ) {
-        self.text = text
-        self.state = state
-        self.shard = shard
-        self.memoryHints = memoryHints
-    }
-}
-
-public struct CandidateHydrationInput: Sendable, Hashable {
-    public let candidateIDs: [String]
-
-    public init(candidateIDs: [String]) {
-        self.candidateIDs = candidateIDs
-    }
-}
-
+/// Metrics actor for tracking candidate resolution diagnostics.
 public actor HomeCandidateResolverMetrics {
     public private(set) var lastStrategy = "none"
     public private(set) var lastCandidateCount = 0
@@ -92,6 +27,14 @@ public actor HomeCandidateResolverMetrics {
     }
 }
 
+/// Candidate scoring, ranking, sharding, and aggregation support.
+///
+/// `HomeCandidateResolverSupport` encapsulates the core ranking logic used by
+/// `CandidateRankingAgent` and `CandidateShardAgent`. It supports two strategies:
+/// - **Direct**: For ≤ `shardSize` candidates, scores deterministically with optional
+///   Foundation Models refinement
+/// - **Parallel-sharded**: For large candidate sets, partitions into shards, resolves
+///   each in parallel, then aggregates shard winners
 public struct HomeCandidateResolverSupport: Sendable {
     private let shardSize: Int
     private let metrics: HomeCandidateResolverMetrics?
@@ -500,146 +443,4 @@ public struct HomeCandidateResolverSupport: Sendable {
 private struct IndexedShardSelection: Sendable {
     let index: Int
     let selection: HomeCandidateShardSelection
-}
-
-public struct CandidateRetrievalAgent: HomeAgent {
-    public typealias Input = CandidateRetrievalInput
-    public typealias Output = [HomeCandidateRecord]
-
-    public let id = AgentID.candidateRetrieval
-    public let capabilities: Set<AgentCapability> = [.candidateRetrieval]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
-    private let retrieve: @Sendable (CandidateRetrievalInput) async throws -> [HomeCandidateRecord]
-
-    public init(retrieve: @escaping @Sendable (CandidateRetrievalInput) async throws -> [HomeCandidateRecord]) {
-        self.retrieve = retrieve
-    }
-
-    public init(
-        registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
-        contextRetriever: ContextRetriever? = nil
-    ) {
-        self.retrieve = { input in
-            let existing = await registry.retrieveCandidates(text: input.text, hints: input.state, limit: input.limit)
-            let allDevices = await registry.allDevices()
-            let memoryDeviceIDs = Set(input.memoryHints.compactMap(\.deviceID))
-            let memoryCandidates = allDevices.filter { memoryDeviceIDs.contains($0.id) }
-            guard let contextRetriever else {
-                return AgentRAGSupport.stableUnique(existing + memoryCandidates) { $0.id }
-            }
-
-            let semanticQuery = Self.semanticQuery(from: input)
-            let deviceChunks = await contextRetriever.retrieve(
-                query: semanticQuery,
-                topK: 12,
-                filter: MetadataFilter(source: .device)
-            )
-            let ragDeviceIDs = Set(deviceChunks.compactMap { $0.chunk.metadata["deviceId"] })
-            guard !ragDeviceIDs.isEmpty else {
-                return AgentRAGSupport.stableUnique(existing + memoryCandidates) { $0.id }
-            }
-
-            let ragOnlyCandidates = allDevices.filter { ragDeviceIDs.contains($0.id) }
-            return AgentRAGSupport.stableUnique(existing + ragOnlyCandidates + memoryCandidates) { $0.id }
-        }
-    }
-
-    public func run(_ input: CandidateRetrievalInput, context: ResolutionContext) async throws -> [HomeCandidateRecord] {
-        try await retrieve(input)
-    }
-
-    private static func semanticQuery(from input: CandidateRetrievalInput) -> String {
-        var parts: [String] = [input.text]
-        parts.append(contentsOf: input.state.slots.rooms)
-        parts.append(contentsOf: input.state.slots.deviceNicknames)
-        parts.append(contentsOf: input.state.deviceType.deviceTypes)
-        parts.append(contentsOf: input.state.intent.topFamilies.map { String(describing: $0) })
-        parts.append(contentsOf: input.memoryHints.compactMap(\.deviceID))
-        parts.append(contentsOf: input.memoryHints.compactMap(\.capability))
-        return parts.joined(separator: " ")
-    }
-}
-
-public struct CandidateRankingAgent: HomeAgent {
-    public typealias Input = CandidateRankingInput
-    public typealias Output = HomeCandidateAggregationResult
-
-    public let id = AgentID.candidateRanking
-    public let capabilities: Set<AgentCapability> = [.candidateRanking]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
-    private let rank: @Sendable (CandidateRankingInput) async throws -> HomeCandidateAggregationResult
-
-    public init(rank: @escaping @Sendable (CandidateRankingInput) async throws -> HomeCandidateAggregationResult) {
-        self.rank = rank
-    }
-
-    public init(resolver: HomeCandidateResolverSupport = HomeCandidateResolverSupport()) {
-        self.rank = { input in
-            try await resolver.resolveCandidates(
-                userText: input.text,
-                resolutionState: input.state,
-                candidates: input.candidates,
-                memoryHints: input.memoryHints
-            )
-        }
-    }
-
-    public func run(_ input: CandidateRankingInput, context: ResolutionContext) async throws -> HomeCandidateAggregationResult {
-        try await rank(input)
-    }
-}
-
-public struct CandidateShardAgent: HomeAgent {
-    public typealias Input = CandidateShardInput
-    public typealias Output = HomeCandidateShardSelection
-
-    public let id = AgentID.candidateShard
-    public let capabilities: Set<AgentCapability> = [.candidateSharding]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
-    private let shard: @Sendable (CandidateShardInput) async throws -> HomeCandidateShardSelection
-
-    public init(shard: @escaping @Sendable (CandidateShardInput) async throws -> HomeCandidateShardSelection) {
-        self.shard = shard
-    }
-
-    public init(resolver: HomeCandidateResolverSupport = HomeCandidateResolverSupport()) {
-        self.shard = { input in
-            try await resolver.resolveShard(
-                userText: input.text,
-                resolutionState: input.state,
-                shard: input.shard,
-                memoryHints: input.memoryHints
-            )
-        }
-    }
-
-    public func run(_ input: CandidateShardInput, context: ResolutionContext) async throws -> HomeCandidateShardSelection {
-        try await shard(input)
-    }
-}
-
-public struct CandidateHydrationAgent: HomeAgent {
-    public typealias Input = CandidateHydrationInput
-    public typealias Output = [HomeCandidateRecord]
-
-    public let id = AgentID.candidateHydration
-    public let capabilities: Set<AgentCapability> = [.candidateHydration]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
-    private let hydrate: @Sendable (CandidateHydrationInput) async throws -> [HomeCandidateRecord]
-
-    public init(hydrate: @escaping @Sendable (CandidateHydrationInput) async throws -> [HomeCandidateRecord]) {
-        self.hydrate = hydrate
-    }
-
-    public init(registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry()) {
-        self.hydrate = { input in
-            let devices = await registry.allDevices()
-            let idSet = Set(input.candidateIDs)
-            return devices.filter { idSet.contains($0.id) }
-        }
-    }
-
-    public func run(_ input: CandidateHydrationInput, context: ResolutionContext) async throws -> [HomeCandidateRecord] {
-        try await hydrate(input)
-    }
 }
