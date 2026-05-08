@@ -104,6 +104,25 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding {
         "scene": ["routine"],
         "movie": ["routine", "scene"]
     ]
+
+    // MARK: - Persistence
+
+    /// Returns a snapshot of the current vocabulary state for disk serialisation.
+    public func vocabularySnapshot() -> TFIDFVocabularySnapshot {
+        TFIDFVocabularySnapshot(
+            vocabulary: vocabulary,
+            documentFrequency: documentFrequency,
+            documentCount: documentCount
+        )
+    }
+
+    /// Restores vocabulary state from a previously persisted snapshot, allowing the
+    /// provider to embed new queries without rebuilding the corpus from scratch.
+    public func restoreVocabulary(from snapshot: TFIDFVocabularySnapshot) {
+        vocabulary = snapshot.vocabulary
+        documentFrequency = snapshot.documentFrequency
+        documentCount = snapshot.documentCount
+    }
 }
 
 public struct SemanticEmbeddingProvider: CorpusAwareEmbeddingProviding {

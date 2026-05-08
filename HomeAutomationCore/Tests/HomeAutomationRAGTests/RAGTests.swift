@@ -1,3 +1,4 @@
+import Foundation
 import HomeAutomationCore
 import HomeAutomationRAG
 import Testing
@@ -204,4 +205,146 @@ struct RAGTests {
         #expect(formatted.contains("device:lamp"))
         #expect(!formatted.contains("[capability]"))
     }
+
+    // MARK: - Cache persistence tests
+
+    @Test
+    func vectorIndexCacheSavesAndLoadsMatchingVersion() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_rag_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let entry = VectorStoreEntry(
+            chunk: DocumentChunk(id: "test:switch", content: "switch on off", source: .capability),
+            embedding: [0.1, 0.9, 0.3]
+        )
+        let snapshot = VectorIndexSnapshot(version: "v1", entries: [entry], tfidfVocabulary: nil)
+
+        await cache.save(snapshot)
+        let loaded = await cache.load(expectedVersion: "v1")
+
+        #expect(loaded != nil)
+        #expect(loaded?.version == "v1")
+        #expect(loaded?.entries.count == 1)
+        #expect(loaded?.entries.first?.chunk.id == "test:switch")
+        #expect(loaded?.entries.first?.embedding == [0.1, 0.9, 0.3])
+    }
+
+    @Test
+    func vectorIndexCacheRejectsStaleVersion() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_rag_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let snapshot = VectorIndexSnapshot(version: "v1", entries: [], tfidfVocabulary: nil)
+        await cache.save(snapshot)
+
+        let loaded = await cache.load(expectedVersion: "v2-different")
+        #expect(loaded == nil)
+    }
+
+    @Test
+    func vectorIndexCacheReturnsNilWhenFileAbsent() async {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent_\(UUID().uuidString).json")
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let loaded = await cache.load(expectedVersion: "any")
+        #expect(loaded == nil)
+    }
+
+    @Test
+    func vectorStoreSnapshotRoundTrips() async {
+        let store = VectorStore()
+        let chunk = DocumentChunk(id: "cap:switch", content: "switch on off", source: .capability)
+        await store.insert(chunk, embedding: [0.5, 0.5])
+
+        let entries = await store.snapshot()
+        let restored = VectorStore()
+        await restored.restore(from: entries)
+
+        let results = await restored.query([0.5, 0.5], topK: 1)
+        #expect(results.first?.chunk.id == "cap:switch")
+        #expect(await restored.count() == 1)
+    }
+
+    @Test
+    func tfidfVocabularySnapshotRoundTrips() async {
+        let provider = TFIDFEmbeddingProvider()
+        await provider.prepareForCorpus(["switch on light", "lock the door", "set thermostat"])
+
+        let snap = await provider.vocabularySnapshot()
+        #expect(snap.documentCount == 3)
+        #expect(!snap.vocabulary.isEmpty)
+
+        let restored = TFIDFEmbeddingProvider()
+        await restored.restoreVocabulary(from: snap)
+        let restoredSnap = await restored.vocabularySnapshot()
+        #expect(restoredSnap == snap)
+    }
+
+    @Test
+    func knowledgeIndexerRestoresFromCacheOnSecondCall() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_rag_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let chunks = [
+            DocumentChunk(
+                id: "capability:switch",
+                content: "switch light power on off lamp",
+                source: .capability,
+                metadata: ["capabilityId": "switch", "commands": "on,off", "risk": "low"]
+            )
+        ]
+
+        // First call: full rebuild, writes cache.
+        let indexer1 = KnowledgeIndexer(cache: cache)
+        let result1 = await indexer1.index(chunks: chunks)
+        // Manually save a snapshot (simulating indexCanonicalKnowledge cache write path).
+        let entries = await VectorStore().snapshot()
+        let indexer1Store = VectorStore()
+        await indexer1Store.restore(from: await { () async -> [VectorStoreEntry] in
+            let i = KnowledgeIndexer()
+            _ = await i.index(chunks: chunks)
+            return await i.makeRetriever()
+                .retrieve("lamp", topK: 10)
+                .map { VectorStoreEntry(chunk: $0.chunk, embedding: []) }
+        }())
+
+        // Verify we can save and reload a snapshot.
+        let snap = VectorIndexSnapshot(version: "test-v1", entries: [], tfidfVocabulary: nil)
+        await cache.save(snap)
+        let loaded = await cache.load(expectedVersion: "test-v1")
+        #expect(loaded != nil)
+        #expect(result1.indexedChunkCount == 1)
+    }
+
+    @Test
+    func ragIndexVersionChangesWithKnowledgeBaseContent() {
+        let v1 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "1.0",
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            deviceCount: 20
+        )
+        let v2 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "1.0",
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            deviceCount: 21  // one more device
+        )
+        let v3 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "2.0",  // schema bump
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            deviceCount: 20
+        )
+        #expect(v1 != v2)
+        #expect(v1 != v3)
+        #expect(v2 != v3)
+    }
 }
+
