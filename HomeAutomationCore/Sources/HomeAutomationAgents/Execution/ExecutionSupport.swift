@@ -1,6 +1,7 @@
 import Foundation
 import HomeAutomationCore
 
+/// Input for `ExecutionPlanningAgent` containing the validated draft and selected device.
 public struct ExecutionPlanningInput: Sendable {
     public let draft: HomeCommandDraft
     public let device: HomeCandidateRecord
@@ -11,6 +12,13 @@ public struct ExecutionPlanningInput: Sendable {
     }
 }
 
+/// Converts validated drafts into multi-step execution plans.
+///
+/// `AgentExecutionPlanner` handles:
+/// - **Direct commands**: Single-step plans for power, lock, status queries
+/// - **Relative changes**: Two-step plans (read current value → compute → set) for
+///   brightness, temperature, volume adjustments
+/// - **Routines**: Multi-step plans that expand routine definitions into individual device commands
 public enum AgentExecutionPlanner {
     public static func isRelativeChange(_ draft: HomeCommandDraft) -> Bool {
         draft.intent == .increaseValue ||
@@ -194,6 +202,7 @@ public enum AgentExecutionPlanner {
     }
 }
 
+/// Executes allowed command steps through the mock registry.
 public struct AgentPlanExecutor: Sendable {
     private let registry: MockHomeDeviceRegistry
 
@@ -220,52 +229,5 @@ public struct AgentPlanExecutor: Sendable {
         }
 
         throw FoundationLabCoreError.invalidRequest("Plan contains no executable command steps")
-    }
-}
-
-public struct ExecutionPlanningAgent: HomeAgent {
-    public typealias Input = ExecutionPlanningInput
-    public typealias Output = HomeAutomationExecutionPlan
-
-    public let id = AgentID.executionPlanning
-    public let capabilities: Set<AgentCapability> = [.executionPlanning]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
-    private let plan: @Sendable (ExecutionPlanningInput) async throws -> HomeAutomationExecutionPlan
-
-    public init(plan: @escaping @Sendable (ExecutionPlanningInput) async throws -> HomeAutomationExecutionPlan) {
-        self.plan = plan
-    }
-
-    public init() {
-        self.plan = { input in
-            AgentExecutionPlanner.plan(from: input.draft, device: input.device)
-        }
-    }
-
-    public func run(_ input: ExecutionPlanningInput, context: ResolutionContext) async throws -> HomeAutomationExecutionPlan {
-        try await plan(input)
-    }
-}
-
-public struct MockExecutionAgent: HomeAgent {
-    public typealias Input = HomeAutomationExecutionPlan
-    public typealias Output = HomeCandidateRecord
-
-    public let id = AgentID.mockExecution
-    public let capabilities: Set<AgentCapability> = [.execution]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
-    private let execute: @Sendable (HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord
-
-    public init(execute: @escaping @Sendable (HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord) {
-        self.execute = execute
-    }
-
-    public init(registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry()) {
-        let executor = AgentPlanExecutor(registry: registry)
-        self.execute = executor.executeLowRiskPlan
-    }
-
-    public func run(_ input: HomeAutomationExecutionPlan, context: ResolutionContext) async throws -> HomeCandidateRecord {
-        try await execute(input)
     }
 }

@@ -1,0 +1,29 @@
+import Foundation
+import HomeAutomationCore
+
+/// Produces the instruction package for Foundation Models draft generation.
+public struct InstructionComposerAgent: HomeAgent {
+    public typealias Input = HomeFinalResolutionInput
+    public typealias Output = HomeModelInstructionPackage
+
+    public let id = AgentID.instructionComposer
+    public let capabilities: Set<AgentCapability> = [.instructionComposition]
+    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    private let compose: @Sendable (HomeFinalResolutionInput) async throws -> HomeModelInstructionPackage
+
+    public init(compose: @escaping @Sendable (HomeFinalResolutionInput) async throws -> HomeModelInstructionPackage) {
+        self.compose = compose
+    }
+
+    public init(factory: AgentInstructionSetFactory) {
+        self.compose = { input in await factory.makePackageWithRAG(from: input) }
+    }
+
+    public init(registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry()) {
+        self.init(factory: AgentInstructionSetFactory(toolProvider: AgentToolProvider(registry: registry)))
+    }
+
+    public func run(_ input: HomeFinalResolutionInput, context: ResolutionContext) async throws -> HomeModelInstructionPackage {
+        try await compose(input)
+    }
+}

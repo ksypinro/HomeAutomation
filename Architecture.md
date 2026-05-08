@@ -473,18 +473,38 @@ HomeAutomation/
 |   |   |   |   |-- BixbyKnowledgeAgent.swift
 |   |   |   |   `-- CommandExampleAgent.swift
 |   |   |   |-- Candidates/
-|   |   |   |   `-- CandidateAgents.swift
+|   |   |   |   |-- CandidateInputs.swift
+|   |   |   |   |-- CandidateResolverSupport.swift
+|   |   |   |   |-- CandidateRetrievalAgent.swift
+|   |   |   |   |-- CandidateRankingAgent.swift
+|   |   |   |   |-- CandidateShardAgent.swift
+|   |   |   |   `-- CandidateHydrationAgent.swift
 |   |   |   |-- Draft/
 |   |   |   |   |-- AgentTools.swift
-|   |   |   |   `-- DraftAgents.swift
+|   |   |   |   |-- DraftTypes.swift
+|   |   |   |   |-- AgentInstructionSetFactory.swift
+|   |   |   |   |-- AgentDraftResolver.swift
+|   |   |   |   |-- InstructionComposerAgent.swift
+|   |   |   |   |-- DraftGenerationAgent.swift
+|   |   |   |   `-- DraftRepairAgent.swift
 |   |   |   |-- Safety/
-|   |   |   |   `-- SafetyAgents.swift
+|   |   |   |   |-- SafetyInputs.swift
+|   |   |   |   |-- AgentCommandValidator.swift
+|   |   |   |   |-- SafetyValidationAgent.swift
+|   |   |   |   |-- ParameterValidationAgent.swift
+|   |   |   |   `-- ConfirmationPolicyAgent.swift
 |   |   |   |-- Execution/
-|   |   |   |   `-- ExecutionAgents.swift
+|   |   |   |   |-- ExecutionSupport.swift
+|   |   |   |   |-- ExecutionPlanningAgent.swift
+|   |   |   |   `-- MockExecutionAgent.swift
 |   |   |   |-- Fallback/
 |   |   |   |   |-- AgentTextParser.swift
 |   |   |   |   |-- BixbyFallbackAgent.swift
-|   |   |   |   `-- FallbackAgents.swift
+|   |   |   |   |-- FallbackInputs.swift
+|   |   |   |   |-- FallbackRuleTypes.swift
+|   |   |   |   |-- AgentRuleBasedResolver.swift
+|   |   |   |   |-- RuleFallbackAgent.swift
+|   |   |   |   `-- UnsupportedCommandAgent.swift
 |   |   |   |-- Response/
 |   |   |   |   |-- ClarificationAgent.swift
 |   |   |   |   `-- ResultSummaryAgent.swift
