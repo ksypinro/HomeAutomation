@@ -34,15 +34,49 @@ flowchart TB
         Memory["ConversationMemory"]
     end
 
-    subgraph Agents["HomeAutomationAgents"]
-        NLU["NLU Agents"]
-        Knowledge["Knowledge Agents"]
-        Candidates["Candidate Agents"]
-        Draft["Draft Agents"]
-        Safety["Safety Agents"]
-        Execution["Execution Agents"]
-        Fallback["Fallback Agents"]
-        Response["Response Agents"]
+    subgraph Agents["HomeAutomationAgents — 26 Specialist Agents"]
+        subgraph NLU["NLU Agents"]
+            LanguageAgent["LanguageAgent"]
+            DomainAgent["DomainAgent"]
+            IntentFamilyAgent["IntentFamilyAgent"]
+            DeviceTypeAgent["DeviceTypeAgent"]
+            SlotExtractionAgent["SlotExtractionAgent"]
+            RiskClassificationAgent["RiskClassificationAgent"]
+        end
+        subgraph Knowledge["Knowledge Agents"]
+            CapabilityKnowledgeAgent["CapabilityKnowledgeAgent"]
+            BixbyKnowledgeAgent["BixbyKnowledgeAgent"]
+            CommandExampleAgent["CommandExampleAgent"]
+        end
+        subgraph Candidates["Candidate Agents"]
+            CandidateRetrievalAgent["CandidateRetrievalAgent"]
+            CandidateRankingAgent["CandidateRankingAgent"]
+            CandidateShardAgent["CandidateShardAgent"]
+            CandidateHydrationAgent["CandidateHydrationAgent"]
+        end
+        subgraph Draft["Draft Agents"]
+            InstructionComposerAgent["InstructionComposerAgent"]
+            DraftGenerationAgent["DraftGenerationAgent"]
+            DraftRepairAgent["DraftRepairAgent"]
+        end
+        subgraph Safety["Safety Agents"]
+            SafetyValidationAgent["SafetyValidationAgent"]
+            ParameterValidationAgent["ParameterValidationAgent"]
+            ConfirmationPolicyAgent["ConfirmationPolicyAgent"]
+        end
+        subgraph Execution["Execution Agents"]
+            ExecutionPlanningAgent["ExecutionPlanningAgent"]
+            MockExecutionAgent["MockExecutionAgent"]
+        end
+        subgraph Fallback["Fallback Agents"]
+            RuleFallbackAgent["RuleFallbackAgent"]
+            BixbyFallbackAgent["BixbyFallbackAgent"]
+            UnsupportedCommandAgent["UnsupportedCommandAgent"]
+        end
+        subgraph Response["Response Agents"]
+            ClarificationAgent["ClarificationAgent"]
+            ResultSummaryAgent["ResultSummaryAgent"]
+        end
     end
 
     subgraph RAG["HomeAutomationRAG"]
@@ -71,11 +105,17 @@ flowchart TB
     Orchestrator --> Circuit
     Orchestrator --> Memory
     Scheduler --> Registry --> Agents
-    Agents --> RAG
+    CapabilityKnowledgeAgent --> RAG
+    BixbyKnowledgeAgent --> RAG
+    CommandExampleAgent --> RAG
+    CandidateRetrievalAgent --> RAG
     RAG --> Core
     Agents --> Core
-    Execution --> DeviceRegistry
-    Safety --> Policies
+    MockExecutionAgent --> DeviceRegistry
+    ExecutionPlanningAgent --> DeviceRegistry
+    SafetyValidationAgent --> Policies
+    ParameterValidationAgent --> Policies
+    ConfirmationPolicyAgent --> Policies
 ```
 
 ## Command Flow
@@ -213,24 +253,82 @@ flowchart LR
 | `ConversationMemory` | Stores recent resolved turns and contributes low-priority memory hints for follow-up commands. |
 | `OrchestratorMetricsCollector` | Stores and serializes the latest orchestrator metrics. |
 
-### Agent Layer
+### Agent Inventory (26 Specialist Agents)
 
-| Group | Agents |
-| --- | --- |
-| NLU | `LanguageAgent`, `DomainAgent`, `IntentFamilyAgent`, `DeviceTypeAgent`, `SlotExtractionAgent`, `RiskClassificationAgent` |
-| Knowledge | `CapabilityKnowledgeAgent`, `BixbyKnowledgeAgent`, `CommandExampleAgent` |
-| Candidates | `CandidateRetrievalAgent`, `CandidateRankingAgent`, `CandidateShardAgent`, `CandidateHydrationAgent` |
-| Draft | `InstructionComposerAgent`, `DraftGenerationAgent`, `DraftRepairAgent` |
-| Safety | `SafetyValidationAgent`, `ParameterValidationAgent`, `ConfirmationPolicyAgent` |
-| Execution | `ExecutionPlanningAgent`, `MockExecutionAgent` |
-| Fallback | `RuleFallbackAgent`, `BixbyFallbackAgent`, `UnsupportedCommandAgent` |
-| Response | `ClarificationAgent`, `ResultSummaryAgent` |
+#### NLU Agents (6) — Parallel Signal Extraction
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `LanguageAgent` | `String` | `HomeLanguageDetectionResult` | Detects BCP-47 language code, mixed-language flag, and confidence. Uses Foundation Models when available, falls back to `AgentTextParser` keyword detection. |
+| `DomainAgent` | `String` | `HomeDomainClassificationResult` | Classifies whether the command is `.homeAutomation` or `.unsupported`. Enables early pipeline exit for non-home commands. |
+| `IntentFamilyAgent` | `String` | `HomeIntentFamilyResult` | Identifies broad intent families (`.power`, `.temperature`, `.brightness`, `.lockUnlock`, `.routine`, `.statusQuery`, etc.) that drive tool selection and safety routing. |
+| `DeviceTypeAgent` | `String` | `HomeDeviceTypeResult` | Extracts normalized device type hints (`light`, `thermostat`, `lock`, etc.) to narrow candidate search space. |
+| `SlotExtractionAgent` | `String` | `HomeSlotExtractionResult` | Extracts rooms, device nicknames, numeric values, units, and modes from the command text. |
+| `RiskClassificationAgent` | `String` | `HomeRiskClassificationResult` | Produces initial risk estimate (`.low`/`.medium`/`.high`/`.critical`) as advisory signal for downstream safety gates. |
+
+All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline. Each supports optional RAG few-shot enrichment via `ContextRetriever`.
+
+#### Knowledge Agents (3) — Context Hydration
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `CapabilityKnowledgeAgent` | `[String]` | `[KnowledgeSnippet]` | Retrieves relevant capability context via RAG, then hydrates canonical definitions from `HomeCapabilityRegistry`. |
+| `BixbyKnowledgeAgent` | `BixbyKnowledgeInput` | `[KnowledgeSnippet]` | Finds relevant Bixby voice commands via RAG + `HomeBixbyCommandCatalog` matching. |
+| `CommandExampleAgent` | `CommandExampleInput` | `[KnowledgeSnippet]` | Retrieves similar generated command examples for few-shot context during draft generation. |
+
+#### Candidate Agents (4) — Device Resolution
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `CandidateRetrievalAgent` | `CandidateRetrievalInput` | `[HomeCandidateRecord]` | Retrieves candidate devices from `MockHomeDeviceRegistry`, optionally merging semantic RAG device matches. |
+| `CandidateRankingAgent` | `CandidateRankingInput` | `HomeCandidateAggregationResult` | Scores and ranks candidates, selects final IDs, or triggers clarification when ambiguous. |
+| `CandidateShardAgent` | `CandidateShardInput` | `[String]` | Selects candidates within a single shard for large candidate lists (>12 devices). |
+| `CandidateHydrationAgent` | `CandidateHydrationInput` | `[HomeCandidateRecord]` | Converts selected candidate IDs into fully hydrated `HomeCandidateRecord` values. |
+
+#### Draft Agents (3) — Command Draft Generation
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `InstructionComposerAgent` | `HomeFinalResolutionInput` | `HomeModelInstructionPackage` | Builds the prompt, system instructions, and tool configuration for Foundation Models draft generation. Uses RAG-selected context. |
+| `DraftGenerationAgent` | `HomeModelInstructionPackage` | `HomeCommandDraft` | Produces the primary `HomeCommandDraft` via Foundation Models with retry across 4 strategy variants (base/adapter × full/simplified). |
+| `DraftRepairAgent` | `HomeModelInstructionPackage` | `AgentDraftResolutionOutput` | Attempts draft repair when initial generation fails or produces low-confidence results. |
+
+#### Safety Agents (3) — Mandatory Fail-Closed Gates
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `SafetyValidationAgent` | `SafetyValidationInput` | `HomeCommandResolution` | Validates target device, capability, command support, and risk. Produces `.readyToExecute`, `.needsClarification`, `.unsupported`, or `.requiresConfirmation`. |
+| `ParameterValidationAgent` | `ParameterValidationInput` | `Bool` | Validates parameter ranges, enum values, and numeric constraints against `HomeCapabilityRegistry` definitions. |
+| `ConfirmationPolicyAgent` | `ConfirmationPolicyInput` | `Bool` | Enforces confirmation requirements for high-risk commands, memory-derived targets, and sensitive device types. |
+
+> **Safety invariant**: All three safety agents are **mandatory fail-closed gates**. If any safety agent fails or times out, the command is rejected — never executed.
+
+#### Execution Agents (2) — Plan and Execute
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `ExecutionPlanningAgent` | `ExecutionPlanningInput` | `HomeAutomationExecutionPlan` | Converts validated drafts into multi-step execution plans, handling relative changes (read → compute → set). |
+| `MockExecutionAgent` | `HomeAutomationExecutionPlan` | `HomeCandidateRecord` | Executes low-risk command steps against `MockHomeDeviceRegistry`. Only agent permitted to mutate device state. |
+
+#### Fallback Agents (3) — Model-Free Resolution
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `RuleFallbackAgent` | `RuleFallbackInput` | `HomeAutomationResolverResult` | Deterministic rule-based resolver using `AgentTextParser` keyword matching + `AgentBixbyFallbackMapper`. Used when Foundation Models are unavailable. |
+| `BixbyFallbackAgent` | `BixbyFallbackInput` | `[AgentBixbyDraftMatch]` | Maps user text against Bixby voice command catalog to produce draft candidates without model inference. |
+| `UnsupportedCommandAgent` | `String` | `HomeCommandResolution` | Produces a safe `.unsupported` resolution when no agent can resolve the command. |
+
+#### Response Agents (2) — User-Facing Output
+
+| Agent | Input | Output | Description |
+| --- | --- | --- | --- |
+| `ClarificationAgent` | `String` | `HomeCommandResolution` | Converts ambiguity questions into `.needsClarification` resolutions. |
+| `ResultSummaryAgent` | `HomeCommandResolution` | `String` | Formats final resolution into human-readable summary text for the UI. |
 
 ### Core and Data Layer
 
 | Component | Role |
 | --- | --- |
-| `HomeAutomationModels.swift` | Domain enums, worker outputs, candidate records, command drafts, execution plans, and final command resolutions. |
 | `MockHomeDeviceRegistry` | Actor-backed mock home graph with candidate retrieval and low-risk state mutation. |
 | `HomeCapabilityRegistry` | Source-of-truth capability definitions and risk/command lookup helpers. |
 | `HomeAutomationKnowledgeBase` | Loads generated capability catalog and natural-language dataset resources. |

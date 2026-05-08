@@ -1,0 +1,96 @@
+import Foundation
+import HomeAutomationCore
+import HomeAutomationRAG
+
+/// Retrieves generated command examples similar to the user's command for few-shot context.
+///
+/// The `CommandExampleAgent` combines RAG-based semantic retrieval with deterministic
+/// token-overlap scoring to find the most relevant examples from the generated
+/// natural-language command dataset. These examples provide few-shot context that improves
+/// the accuracy of downstream draft generation.
+///
+/// The agent uses structural scoring that considers device type, capability, command,
+/// and room matches in addition to raw token overlap, ensuring that semantically relevant
+/// examples are prioritized even when surface-level text similarity is low.
+public struct CommandExampleAgent: HomeAgent {
+    public typealias Input = CommandExampleInput
+    public typealias Output = [KnowledgeSnippet]
+
+    public let id = AgentID.commandExample
+    public let capabilities: Set<AgentCapability> = [.knowledgeRetrieval]
+    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    private let contextRetriever: ContextRetriever?
+
+    public init(contextRetriever: ContextRetriever? = nil) {
+        self.contextRetriever = contextRetriever
+    }
+
+    public func run(_ input: CommandExampleInput, context: ResolutionContext) async throws -> [KnowledgeSnippet] {
+        let examples = HomeAutomationKnowledgeBase.generatedDatasetCommands()
+        let examplesByID = Dictionary(uniqueKeysWithValues: examples.map { ($0.id, $0) })
+        var ranked: [(example: HomeGeneratedCommandExample, score: Double?)] = []
+
+        if let contextRetriever {
+            let chunks = await contextRetriever.retrieve(
+                query: input.text,
+                topK: input.limit,
+                filter: MetadataFilter(source: .nlDataset)
+            )
+            ranked.append(contentsOf: chunks.compactMap { scored in
+                guard let id = scored.chunk.metadata["exampleId"],
+                      let example = examplesByID[id] else {
+                    return nil
+                }
+                return (example, Double(scored.score))
+            })
+        }
+
+        ranked.append(contentsOf: Self.staticRankedExamples(input: input, examples: examples))
+
+        return AgentRAGSupport.stableUnique(ranked) { $0.example.id }
+            .prefix(max(1, input.limit))
+            .map { example, score in
+                KnowledgeSnippet(
+                    sourceID: example.id,
+                    content: "Example: \(example.text); capability: \(example.capability); command: \(example.command); risk: \(example.riskLevel)",
+                    score: score,
+                    metadata: [
+                        "source": "canonicalCommandDataset",
+                        "language": example.language,
+                        "deviceType": example.deviceType,
+                        "capability": example.capability,
+                        "command": example.command
+                    ]
+                )
+            }
+    }
+
+    private static func staticRankedExamples(
+        input: CommandExampleInput,
+        examples: [HomeGeneratedCommandExample]
+    ) -> [(example: HomeGeneratedCommandExample, score: Double?)] {
+        let queryTokens = input.text.agentTokenSet
+        return examples
+            .map { example -> (HomeGeneratedCommandExample, Int) in
+                let tokens = example.text.agentTokenSet
+                let structuralScore = [
+                    example.deviceType,
+                    example.capability,
+                    example.command,
+                    example.room
+                ]
+                    .map(\.agentNormalizedHomeTokenString)
+                    .filter { input.text.agentNormalizedHomeTokenString.contains($0) }
+                    .count * 3
+                return (example, queryTokens.intersection(tokens).count + structuralScore)
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 == rhs.1 {
+                    return lhs.0.id < rhs.0.id
+                }
+                return lhs.1 > rhs.1
+            }
+            .prefix(max(1, input.limit))
+            .map { ($0.0, Double($0.1)) }
+    }
+}

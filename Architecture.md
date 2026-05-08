@@ -48,15 +48,49 @@ flowchart TB
         Memory["ConversationMemory"]
     end
 
-    subgraph AgentLayer["HomeAutomationAgents (26 specialist agents)"]
-        NLU["NLU Group (6)"]
-        Knowledge["Knowledge Group (3)"]
-        Candidates["Candidate Group (4)"]
-        Draft["Draft Group (3)"]
-        Safety["Safety Group (3)"]
-        Execution["Execution Group (2)"]
-        Fallback["Fallback Group (3)"]
-        Response["Response Group (2)"]
+    subgraph AgentLayer["HomeAutomationAgents — 26 Specialist Agents"]
+        subgraph NLU["NLU Agents"]
+            LanguageAgent["LanguageAgent"]
+            DomainAgent["DomainAgent"]
+            IntentFamilyAgent["IntentFamilyAgent"]
+            DeviceTypeAgent["DeviceTypeAgent"]
+            SlotExtractionAgent["SlotExtractionAgent"]
+            RiskClassificationAgent["RiskClassificationAgent"]
+        end
+        subgraph Knowledge["Knowledge Agents"]
+            CapabilityKnowledgeAgent["CapabilityKnowledgeAgent"]
+            BixbyKnowledgeAgent["BixbyKnowledgeAgent"]
+            CommandExampleAgent["CommandExampleAgent"]
+        end
+        subgraph Candidates["Candidate Agents"]
+            CandidateRetrievalAgent["CandidateRetrievalAgent"]
+            CandidateRankingAgent["CandidateRankingAgent"]
+            CandidateShardAgent["CandidateShardAgent"]
+            CandidateHydrationAgent["CandidateHydrationAgent"]
+        end
+        subgraph Draft["Draft Agents"]
+            InstructionComposerAgent["InstructionComposerAgent"]
+            DraftGenerationAgent["DraftGenerationAgent"]
+            DraftRepairAgent["DraftRepairAgent"]
+        end
+        subgraph Safety["Safety Agents"]
+            SafetyValidationAgent["SafetyValidationAgent"]
+            ParameterValidationAgent["ParameterValidationAgent"]
+            ConfirmationPolicyAgent["ConfirmationPolicyAgent"]
+        end
+        subgraph Execution["Execution Agents"]
+            ExecutionPlanningAgent["ExecutionPlanningAgent"]
+            MockExecutionAgent["MockExecutionAgent"]
+        end
+        subgraph Fallback["Fallback Agents"]
+            RuleFallbackAgent["RuleFallbackAgent"]
+            BixbyFallbackAgent["BixbyFallbackAgent"]
+            UnsupportedCommandAgent["UnsupportedCommandAgent"]
+        end
+        subgraph Response["Response Agents"]
+            ClarificationAgent["ClarificationAgent"]
+            ResultSummaryAgent["ResultSummaryAgent"]
+        end
     end
 
     subgraph RAGLayer["HomeAutomationRAG"]
@@ -88,13 +122,20 @@ flowchart TB
     Orchestrator --> Memory
     Scheduler --> Registry
     Registry --> AgentLayer
-    AgentLayer --> RAGLayer
+    CapabilityKnowledgeAgent --> RAGLayer
+    BixbyKnowledgeAgent --> RAGLayer
+    CommandExampleAgent --> RAGLayer
+    CandidateRetrievalAgent --> RAGLayer
+    NLU --> RAGLayer
     AgentLayer --> CoreLayer
     Indexer --> Chunker --> Embedder --> Store
     Retriever --> Store
     CoreLayer --> Indexer
-    Safety --> SafetyPolicy
-    Execution --> DeviceRegistry
+    SafetyValidationAgent --> SafetyPolicy
+    ParameterValidationAgent --> SafetyPolicy
+    ConfirmationPolicyAgent --> SafetyPolicy
+    ExecutionPlanningAgent --> DeviceRegistry
+    MockExecutionAgent --> DeviceRegistry
 ```
 
 ## 4. Package and Dependency Architecture
@@ -397,12 +438,7 @@ Memory rules:
 ```text
 HomeAutomation/
 |-- README.md
-|-- ARCHITECTURE.md
-|-- UNIFIED_ARCHITECTURE.md
-|-- UNIFIED_IMPLEMENTATION_PLAN.md
-|-- MULTI_AGENT_ARCHITECTURE.md
-|-- MULTI_AGENT_ORCHESTRATOR_REDESIGN.md
-|-- foundation_model_home_automation_strategy_multisession.md
+|-- Architecture.md
 |-- HomeAutomation.xcodeproj/
 |-- HomeAutomationApp/
 |   |-- HomeAutomationApp.swift
@@ -418,15 +454,42 @@ HomeAutomation/
 |   |   |-- HomeAutomationRAG/
 |   |   |-- HomeAutomationAgents/
 |   |   |   |-- Protocols/
+|   |   |   |   |-- AgentCapability.swift
+|   |   |   |   |-- AgentError.swift
+|   |   |   |   |-- AgentOutput.swift
+|   |   |   |   |-- HomeAgent.swift
+|   |   |   |   `-- ResolutionContext.swift
 |   |   |   |-- NLU/
+|   |   |   |   |-- LanguageAgent.swift
+|   |   |   |   |-- DomainAgent.swift
+|   |   |   |   |-- IntentFamilyAgent.swift
+|   |   |   |   |-- DeviceTypeAgent.swift
+|   |   |   |   |-- SlotExtractionAgent.swift
+|   |   |   |   |-- RiskClassificationAgent.swift
+|   |   |   |   `-- WorkerSessionSupport.swift
 |   |   |   |-- Knowledge/
+|   |   |   |   |-- KnowledgeInputs.swift
+|   |   |   |   |-- CapabilityKnowledgeAgent.swift
+|   |   |   |   |-- BixbyKnowledgeAgent.swift
+|   |   |   |   `-- CommandExampleAgent.swift
 |   |   |   |-- Candidates/
+|   |   |   |   `-- CandidateAgents.swift
 |   |   |   |-- Draft/
+|   |   |   |   |-- AgentTools.swift
+|   |   |   |   `-- DraftAgents.swift
 |   |   |   |-- Safety/
+|   |   |   |   `-- SafetyAgents.swift
 |   |   |   |-- Execution/
+|   |   |   |   `-- ExecutionAgents.swift
 |   |   |   |-- Fallback/
+|   |   |   |   |-- AgentTextParser.swift
+|   |   |   |   |-- BixbyFallbackAgent.swift
+|   |   |   |   `-- FallbackAgents.swift
 |   |   |   |-- Response/
+|   |   |   |   |-- ClarificationAgent.swift
+|   |   |   |   `-- ResultSummaryAgent.swift
 |   |   |   `-- RAG/
+|   |   |       `-- AgentRAGSupport.swift
 |   |   |-- HomeAutomationOrchestrator/
 |   |   `-- HomeAutomationResolver/
 |   `-- Tests/
@@ -434,8 +497,6 @@ HomeAutomation/
 |       |-- HomeAutomationAgentTests/
 |       |-- HomeAutomationOrchestratorTests/
 |       `-- HomeAutomationResolverTests/
-|-- implementation/
-`-- unified_impl/
 ```
 
 ## 15. Low-Level Component Description: App Layer

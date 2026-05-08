@@ -67,3 +67,4 @@ Carthage/Build/
 
 # Gcov-based coverage reporting
 *.gcno
+.build/
