@@ -204,6 +204,205 @@ struct Phase2AgentTests {
     }
 
     @Test
+    func instructionComposerCompactsLargeContext() async throws {
+        let base = try await Self.device(id: "bedroom_lamp")
+        let candidates = (0..<80).map { index in
+            HomeCandidateRecord(
+                id: "candidate_\(index)",
+                displayName: "Bedroom Lamp Candidate \(index)",
+                deviceType: base.deviceType,
+                room: base.room,
+                capabilities: base.capabilities + ["switchLevel", "colorControl", "thermostatCoolingSetpoint"],
+                supportedCommands: base.supportedCommands,
+                supportedModes: base.supportedModes,
+                currentState: base.currentState,
+                metadata: ["note": String(repeating: "large-context ", count: 20)],
+                riskLevel: base.riskLevel
+            )
+        }
+        let state = Self.state("Set bedroom lamp to 40 percent")
+        let input = HomeFinalResolutionInput(
+            rawText: "Set bedroom lamp to 40 percent",
+            resolutionState: state,
+            hydratedCandidates: candidates,
+            aggregation: HomeCandidateAggregationResult(
+                finalCandidateIDs: candidates.prefix(5).map(\.id),
+                needsClarification: false,
+                confidence: 1
+            )
+        )
+        let agent = InstructionComposerAgent()
+
+        let package = try await agent.run(input, context: Self.context())
+        let report = try #require(package.contextBudgetReport)
+
+        #expect(report.candidateCount == 80)
+        #expect(report.selectedCompactionLevel != "full")
+        #expect(report.estimatedInputTokenCount <= 3_200)
+    }
+
+    @Test
+    func contextBudgeterUsesConservativeTokenEstimatorForStructuredText() {
+        let budgeter = FoundationModelContextBudgeter()
+        let jsonLikeText = String(
+            repeating: #"{"id":"bedroom_lamp","capabilities":["switch","switchLevel"],"state":{"level":"40"}}"#,
+            count: 20
+        )
+
+        let conservativeEstimate = budgeter.estimateTokenCount(jsonLikeText)
+        let oldCharacterHeuristic = Int(ceil(Double(jsonLikeText.count) / 4.0))
+        let report = budgeter.report(
+            instructionText: "Resolve smart-home command.",
+            prompt: jsonLikeText,
+            tools: [],
+            candidateCount: 1,
+            ragCapabilitySectionCount: 0,
+            ragExampleSectionCount: 0,
+            ragBixbySectionCount: 0,
+            selectedCompactionLevel: "test"
+        )
+
+        #expect(conservativeEstimate > oldCharacterHeuristic)
+        #expect(report.tokenEstimatorSource == .conservativeHeuristic)
+    }
+
+    @Test
+    func candidatePromptBuilderCompactsLargeCandidatePrompts() {
+        let base = HomeCompactCandidateView(
+            id: "candidate_0",
+            label: "Bedroom Lamp Candidate 0",
+            room: "bedroom",
+            deviceType: "light",
+            shortCapabilities: Array(repeating: "veryLongCapabilityNameForBudgetTesting", count: 24)
+        )
+        let candidates = (0..<80).map { index in
+            HomeCompactCandidateView(
+                id: "candidate_\(index)",
+                label: "Bedroom Lamp Candidate \(index)",
+                room: base.room,
+                deviceType: base.deviceType,
+                shortCapabilities: base.shortCapabilities
+            )
+        }
+        let builder = CandidateResolutionPromptBuilder()
+        let instructionText = "Select the best candidate IDs for the user's smart-home command."
+
+        let package = builder.makeDirectPrompt(
+            userText: "Turn on the bedroom lamp",
+            resolutionState: Self.state("Turn on the bedroom lamp"),
+            candidates: candidates,
+            memoryHints: [],
+            instructionText: instructionText
+        )
+
+        #expect(package.contextBudgetReport.candidateCount == 80)
+        #expect(package.contextBudgetReport.selectedCompactionLevel != "full")
+        #expect(package.contextBudgetReport.estimatedInputTokenCount <= 3_200)
+    }
+
+    @Test
+    func defaultToolProviderUsesConsolidatedInspectionTool() async throws {
+        let device = try await Self.device(id: "bedroom_lamp")
+        let input = Self.finalInput(text: "Set bedroom lamp to 40 percent", device: device)
+        let tools = AgentToolProvider(registry: Self.registry()).tools(for: input)
+        let names = tools.map(\.name)
+
+        #expect(names.contains("inspectCandidateCommand"))
+        #expect(!names.contains("getDeviceCapabilities"))
+        #expect(!names.contains("validateCommand"))
+        #expect(!names.contains("getSupportedModes"))
+    }
+
+    @Test
+    func inspectCandidateCommandToolReturnsCappedCanonicalHints() async throws {
+        let tool = AgentInspectCandidateCommandTool(registry: Self.registry())
+
+        let output = try await tool.call(
+            arguments: .init(
+                deviceID: "bedroom_lamp",
+                capability: "switchLevel",
+                command: "setLevel"
+            )
+        )
+
+        #expect(output.contains(#""supported":"true""#))
+        #expect(output.contains("numericRange"))
+        #expect(output.count <= 4_000)
+    }
+
+    @Test
+    func toolProviderUsesObservedOutputSizeForFutureBudgeting() async throws {
+        let store = AgentToolOutputSizeStore()
+        let registry = Self.registry()
+        let tool = AgentFindDevicesTool(registry: registry, outputSizeStore: store)
+
+        let output = try await tool.call(
+            arguments: .init(
+                query: "",
+                room: nil,
+                deviceType: nil,
+                limit: 25
+            )
+        )
+        let device = try await Self.device(id: "bedroom_lamp")
+        let provider = AgentToolProvider(registry: registry, outputSizeStore: store)
+        let tools = provider.tools(for: Self.finalInput(text: "Turn on the bedroom lamp", device: device))
+
+        let estimate = provider.estimatedOutputCharacters(for: tools, candidateCount: 1)
+
+        #expect(estimate >= output.count)
+    }
+
+    @Test
+    func adapterTrainingExporterBuildsDeterministicJSONLAndEvaluatesHoldout() throws {
+        let jsonl = try HomeAdapterTrainingExporter.makeJSONL(limit: 5)
+        let examples = HomeAdapterTrainingExporter.makeTrainingExamples(limit: 5)
+        let holdout = examples.map {
+            HomeAdapterEvaluationCase(
+                id: $0.id,
+                input: $0.input,
+                expectedDraft: $0.expectedDraft,
+                tags: [$0.source]
+            )
+        }
+        let result = HomeAdapterTrainingExporter.evaluateHoldout(holdout)
+
+        #expect(jsonl.split(separator: "\n").count == 5)
+        #expect(result.isPassing)
+        #expect(result.holdoutCoverageTags.contains("generatedDataset"))
+    }
+
+    @Test
+    func adapterTrainingExporterIncludesNLUTaskRecords() throws {
+        let examples = try HomeAdapterTrainingExporter.makeTaskTrainingExamples(
+            limit: 12,
+            includeDrafts: false,
+            includeNLU: true
+        )
+        let jsonl = try HomeAdapterTrainingExporter.makeTaskJSONL(
+            limit: 12,
+            includeDrafts: false,
+            includeNLU: true
+        )
+        let tasks = Set(examples.map(\.task))
+
+        #expect(jsonl.split(separator: "\n").count == examples.count)
+        #expect(tasks.contains(.languageDetection))
+        #expect(tasks.contains(.intentFamilyClassification))
+        #expect(tasks.contains(.riskClassification))
+    }
+
+    @Test
+    func nluWorkerSkipsModelForHighConfidenceDeterministicCommand() async throws {
+        let worker = LanguageAgentWorkerSession(foundationModelAvailability: { true })
+
+        let result = try await worker.detectLanguage("Turn on the bedroom lamp")
+
+        #expect(result.languageCode == "en")
+        #expect(result.confidence >= 0.90)
+    }
+
+    @Test
     func draftGenerationAgentReturnsDraftFromInjectedResolver() async throws {
         let expected = Self.draft(deviceID: "bedroom_lamp", capability: "switch", command: "on")
         let agent = DraftGenerationAgent { _ in expected }
@@ -211,6 +410,56 @@ struct Phase2AgentTests {
         let draft = try await agent.run(Self.package(), context: Self.context())
 
         #expect(draft == expected)
+    }
+
+    @Test
+    func generationModeMapsToGenerationOptions() {
+        let greedy = FoundationHomeCommandDraftResolver.generationOptions(for: .greedy)
+        let defaultSampling = FoundationHomeCommandDraftResolver.generationOptions(for: .defaultSampling)
+
+        #expect(greedy.sampling == .greedy)
+        #expect(defaultSampling.sampling == nil)
+    }
+
+    @Test
+    func draftResolverReportsFoundationModelFailureKind() async throws {
+        let metrics = AgentDraftResolverMetrics()
+        let resolver = AgentDraftResolver(
+            adapterProvider: HomeAdapterModelProvider(
+                adapterSource: HomeStaticAdapterModelSource(configuration: nil)
+            ),
+            metrics: metrics,
+            resolver: ThrowingDraftResolver()
+        )
+
+        await #expect(throws: Error.self) {
+            _ = try await resolver.resolveDraft(from: Self.package())
+        }
+        let report = try #require(await metrics.lastReport())
+
+        #expect(report.attempts.count == 2)
+        #expect(report.attempts.allSatisfy { $0.errorKind == .contextWindowExceeded })
+    }
+
+    @Test
+    func draftResolverSkipsRemainingAdapterAttemptsAfterAdapterFailure() async throws {
+        let metrics = AgentDraftResolverMetrics()
+        let resolver = AgentDraftResolver(
+            adapterProvider: HomeAdapterModelProvider(
+                adapterSource: HomeStaticAdapterModelSource.named("missing-test-adapter")
+            ),
+            metrics: metrics,
+            resolver: AdapterFailingDraftResolver()
+        )
+
+        await #expect(throws: Error.self) {
+            _ = try await resolver.resolveDraft(from: Self.package())
+        }
+        let report = try #require(await metrics.lastReport())
+
+        #expect(report.attempts.map(\.name) == ["base/full", "adapter/full", "base/simplified"])
+        #expect(report.attempts.first { $0.name == "adapter/full" }?.errorKind == .adapterUnavailable)
+        #expect(!report.attempts.contains { $0.name == "adapter/simplified" })
     }
 
     @Test
@@ -438,10 +687,42 @@ struct Phase2AgentTests {
     private static func package() -> HomeModelInstructionPackage {
         HomeModelInstructionPackage(
             instructions: Instructions("Resolve a test command."),
+            instructionText: "Resolve a test command.",
             prompt: "Test command",
             tools: [],
             useAdapter: false,
             generationMode: .greedy
         )
+    }
+}
+
+private struct ThrowingDraftResolver: HomeCommandDraftResolving {
+    func resolveDraft(from package: HomeModelInstructionPackage) async throws -> HomeCommandDraft {
+        throw ContextWindowTestError()
+    }
+}
+
+private struct AdapterFailingDraftResolver: HomeCommandDraftResolving {
+    func resolveDraft(from package: HomeModelInstructionPackage) async throws -> HomeCommandDraft {
+        if package.useAdapter {
+            throw HomeAdapterUnavailableError(
+                diagnostic: HomeAdapterModelDiagnostic(
+                    attempted: true,
+                    succeeded: false,
+                    errorDescription: "adapter asset missing",
+                    errorKind: .adapterUnavailable,
+                    adapterSource: "name",
+                    adapterIdentifier: "missing-test-adapter",
+                    compatibilityVersion: HomeAdapterCompatibilityManifest.current.runtimeVersion
+                )
+            )
+        }
+        throw ContextWindowTestError()
+    }
+}
+
+private struct ContextWindowTestError: LocalizedError {
+    var errorDescription: String? {
+        "exceeded context window size"
     }
 }

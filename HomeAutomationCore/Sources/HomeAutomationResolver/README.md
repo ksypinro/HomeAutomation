@@ -4,6 +4,8 @@
 
 This module answers the question: "How did the original single-pipeline resolver solve the same command-resolution problem?"
 
+For a type-by-type mapping from this legacy resolver to the current orchestrator and agent architecture, see [Legacy Resolver to Current Architecture Comparison](LEGACY_TO_CURRENT_COMPARISON.md).
+
 ## Architecture Role
 
 ```mermaid

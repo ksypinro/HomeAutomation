@@ -108,66 +108,72 @@ public struct AgentInstructionSetFactory: Sendable {
         extraRules: String,
         selectedKnowledgeContext: String?
     ) -> HomeModelInstructionPackage {
-        let knowledgeBlock = selectedKnowledgeContext ?? """
-        \(HomeAutomationKnowledgeBase.instructionSummary)
+        let tools = toolProvider.tools(for: input)
+        let budgeter = FoundationModelContextBudgeter()
+        let variants = Self.instructionVariants(
+            selectedKnowledgeContext: selectedKnowledgeContext,
+            hydratedCandidates: input.hydratedCandidates
+        )
 
-        \(HomeBixbyCommandCatalog.instructionSummary)
-        """
-        let selectedKnowledgePrompt = selectedKnowledgeContext.map {
-            """
+        var fallback: HomeModelInstructionPackage?
+        for variant in variants {
+            let instructionText = Self.instructionText(
+                focus: focus,
+                input: input,
+                extraRules: extraRules,
+                knowledgeBlock: variant.knowledgeBlock
+            )
+            let prompt = Self.promptText(
+                input: input,
+                candidateDescription: variant.candidateDescription,
+                selectedKnowledgePrompt: variant.selectedKnowledgePrompt
+            )
+            let report = budgeter.report(
+                instructionText: instructionText,
+                prompt: prompt,
+                tools: tools,
+                candidateCount: input.hydratedCandidates.count,
+                ragCapabilitySectionCount: variant.ragCapabilitySectionCount,
+                ragExampleSectionCount: variant.ragExampleSectionCount,
+                ragBixbySectionCount: variant.ragBixbySectionCount,
+                selectedCompactionLevel: variant.compactionLevel,
+                estimatedToolOutputCharacterCount: toolProvider.estimatedOutputCharacters(
+                    for: tools,
+                    candidateCount: input.hydratedCandidates.count
+                )
+            )
+            let package = HomeModelInstructionPackage(
+                instructions: Instructions(instructionText),
+                instructionText: instructionText,
+                prompt: prompt,
+                tools: tools,
+                useAdapter: false,
+                generationMode: .greedy,
+                contextBudgetReport: report
+            )
+            fallback = package
+            if budgeter.isWithinBudget(report) {
+                return package
+            }
+        }
 
-            Selected RAG context:
-            \($0)
-            """
-        } ?? ""
-
-        let instructions = Instructions("""
-        \(focus)
-
-        Choose only from the hydrated candidate records.
-        Do not invent devices, capabilities, commands, modes, or IDs.
-        Use the provided tools when state, mode values, capability support, or hydration details are needed.
-        If more than one device is plausible, set needsClarification to true.
-        Keep internal schema values in English even when the user command is multilingual.
-        \(Self.languageRules(for: input))
-        Return one structured HomeCommandDraft.
-        For status or measurement questions, set intent getStatus and command getStatus.
-        For relative numeric changes, either compute an absolute setter value from current state or use increaseValue/decreaseValue with a numeric delta.
-
-        \(extraRules)
-
-        \(knowledgeBlock)
-        """)
-
-        let prompt = """
-        User command: \(input.rawText)
-
-        Worker session outputs:
-        - Language: \(input.resolutionState.language.languageCode)
-        - Intent families: \(input.resolutionState.intent.topFamilies)
-        - Device types: \(input.resolutionState.deviceType.deviceTypes)
-        - Rooms: \(input.resolutionState.slots.rooms)
-        - Device nicknames: \(input.resolutionState.slots.deviceNicknames)
-        - Values: \(input.resolutionState.slots.values)
-        - Modes: \(input.resolutionState.slots.modes)
-        - Risk: \(input.resolutionState.risk.riskLevel), confirmation hint: \(input.resolutionState.risk.requiresConfirmation)
-
-        Candidate aggregation:
-        - Final candidate IDs: \(input.aggregation.finalCandidateIDs)
-        - Needs clarification: \(input.aggregation.needsClarification)
-        - Clarification question: \(input.aggregation.clarificationQuestion ?? "none")
-
-        Hydrated candidate records:
-        \(Self.describe(input.hydratedCandidates))
-        \(selectedKnowledgePrompt)
-        """
-
-        return HomeModelInstructionPackage(
-            instructions: instructions,
-            prompt: prompt,
-            tools: toolProvider.tools(for: input),
+        return fallback ?? HomeModelInstructionPackage(
+            instructions: Instructions(focus),
+            instructionText: focus,
+            prompt: input.rawText,
+            tools: tools,
             useAdapter: false,
-            generationMode: .greedy
+            generationMode: .greedy,
+            contextBudgetReport: budgeter.report(
+                instructionText: focus,
+                prompt: input.rawText,
+                tools: tools,
+                candidateCount: input.hydratedCandidates.count,
+                ragCapabilitySectionCount: 0,
+                ragExampleSectionCount: 0,
+                ragBixbySectionCount: 0,
+                selectedCompactionLevel: "minimal"
+            )
         )
     }
 
@@ -288,4 +294,149 @@ public struct AgentInstructionSetFactory: Sendable {
         }
         .joined(separator: "\n---\n")
     }
+
+    private static func compactDescribe(_ candidates: [HomeCandidateRecord], limit: Int = 25) -> String {
+        let described = candidates.prefix(limit).map { candidate in
+            [
+                "id=\(candidate.id)",
+                "name=\(candidate.displayName)",
+                "type=\(candidate.deviceType)",
+                "room=\(candidate.room ?? "none")",
+                "caps=\(candidate.capabilities.prefix(4).joined(separator: ","))",
+                "risk=\(candidate.riskLevel)"
+            ].joined(separator: " ")
+        }
+        .joined(separator: "\n")
+        guard candidates.count > limit else { return described }
+        return described + "\nomitted=\(candidates.count - limit)"
+    }
+
+    private static func instructionText(
+        focus: String,
+        input: HomeFinalResolutionInput,
+        extraRules: String,
+        knowledgeBlock: String
+    ) -> String {
+        """
+        \(focus)
+
+        Choose only from the hydrated candidate records.
+        Do not invent devices, capabilities, commands, modes, or IDs.
+        Use the provided tools when state, mode values, capability support, or hydration details are needed.
+        If more than one device is plausible, set needsClarification to true.
+        Keep internal schema values in English even when the user command is multilingual.
+        \(Self.languageRules(for: input))
+        Return one structured HomeCommandDraft.
+        For status or measurement questions, set intent getStatus and command getStatus.
+        For relative numeric changes, either compute an absolute setter value from current state or use increaseValue/decreaseValue with a numeric delta.
+
+        \(extraRules)
+
+        \(knowledgeBlock)
+        """
+    }
+
+    private static func promptText(
+        input: HomeFinalResolutionInput,
+        candidateDescription: String,
+        selectedKnowledgePrompt: String
+    ) -> String {
+        """
+        User command: \(input.rawText)
+
+        Worker session outputs:
+        - Language: \(input.resolutionState.language.languageCode)
+        - Intent families: \(input.resolutionState.intent.topFamilies)
+        - Device types: \(input.resolutionState.deviceType.deviceTypes)
+        - Rooms: \(input.resolutionState.slots.rooms)
+        - Device nicknames: \(input.resolutionState.slots.deviceNicknames)
+        - Values: \(input.resolutionState.slots.values)
+        - Modes: \(input.resolutionState.slots.modes)
+        - Risk: \(input.resolutionState.risk.riskLevel), confirmation hint: \(input.resolutionState.risk.requiresConfirmation)
+
+        Candidate aggregation:
+        - Final candidate IDs: \(input.aggregation.finalCandidateIDs)
+        - Needs clarification: \(input.aggregation.needsClarification)
+        - Clarification question: \(input.aggregation.clarificationQuestion ?? "none")
+
+        Hydrated candidate records:
+        \(candidateDescription)
+        \(selectedKnowledgePrompt)
+        """
+    }
+
+    private static func instructionVariants(
+        selectedKnowledgeContext: String?,
+        hydratedCandidates: [HomeCandidateRecord]
+    ) -> [InstructionVariant] {
+        let fullKnowledge = selectedKnowledgeContext ?? """
+        \(HomeAutomationKnowledgeBase.instructionSummary)
+
+        \(HomeBixbyCommandCatalog.instructionSummary)
+        """
+        let fullCandidates = describe(hydratedCandidates)
+        let compactCandidates = compactDescribe(hydratedCandidates)
+        let minimalCandidates = compactDescribe(hydratedCandidates, limit: 8)
+
+        return [
+            makeVariant("full", knowledge: fullKnowledge, selectedKnowledgeContext: selectedKnowledgeContext, candidateDescription: fullCandidates),
+            makeVariant("dropExamples", knowledge: compactKnowledge(selectedKnowledgeContext, includeCapabilities: true, includeExamples: false, includeBixby: true) ?? fullKnowledge, selectedKnowledgeContext: compactKnowledge(selectedKnowledgeContext, includeCapabilities: true, includeExamples: false, includeBixby: true), candidateDescription: fullCandidates),
+            makeVariant("dropBixby", knowledge: compactKnowledge(selectedKnowledgeContext, includeCapabilities: true, includeExamples: false, includeBixby: false) ?? HomeAutomationKnowledgeBase.instructionSummary, selectedKnowledgeContext: compactKnowledge(selectedKnowledgeContext, includeCapabilities: true, includeExamples: false, includeBixby: false), candidateDescription: fullCandidates),
+            makeVariant("dropCapabilities", knowledge: compactKnowledge(selectedKnowledgeContext, includeCapabilities: false, includeExamples: false, includeBixby: false) ?? HomeAutomationKnowledgeBase.instructionSummary, selectedKnowledgeContext: compactKnowledge(selectedKnowledgeContext, includeCapabilities: false, includeExamples: false, includeBixby: false), candidateDescription: fullCandidates),
+            makeVariant("compactCandidates", knowledge: compactKnowledge(selectedKnowledgeContext, includeCapabilities: true, includeExamples: false, includeBixby: false) ?? HomeAutomationKnowledgeBase.instructionSummary, selectedKnowledgeContext: compactKnowledge(selectedKnowledgeContext, includeCapabilities: true, includeExamples: false, includeBixby: false), candidateDescription: compactCandidates),
+            makeVariant("minimal", knowledge: "Use only the provided candidate IDs, tools, and canonical schema values.", selectedKnowledgeContext: nil, candidateDescription: minimalCandidates)
+        ]
+    }
+
+    private static func makeVariant(
+        _ level: String,
+        knowledge: String,
+        selectedKnowledgeContext: String?,
+        candidateDescription: String
+    ) -> InstructionVariant {
+        let selectedKnowledgePrompt = selectedKnowledgeContext.map {
+            """
+
+            Selected RAG context:
+            \($0)
+            """
+        } ?? ""
+        return InstructionVariant(
+            compactionLevel: level,
+            knowledgeBlock: knowledge,
+            selectedKnowledgePrompt: selectedKnowledgePrompt,
+            candidateDescription: candidateDescription,
+            ragCapabilitySectionCount: selectedKnowledgeContext?.contains("Relevant canonical capabilities:") == true ? 1 : 0,
+            ragExampleSectionCount: selectedKnowledgeContext?.contains("Similar canonical command examples:") == true ? 1 : 0,
+            ragBixbySectionCount: selectedKnowledgeContext?.contains("Relevant canonical Bixby commands:") == true ? 1 : 0
+        )
+    }
+
+    private static func compactKnowledge(
+        _ context: String?,
+        includeCapabilities: Bool,
+        includeExamples: Bool,
+        includeBixby: Bool
+    ) -> String? {
+        guard let context else { return nil }
+        let sections = context.components(separatedBy: "\n\n").filter { section in
+            if section.contains("Relevant canonical capabilities:") { return includeCapabilities }
+            if section.contains("Similar canonical command examples:") { return includeExamples }
+            if section.contains("Relevant canonical Bixby commands:") { return includeBixby }
+            return true
+        }
+        guard !sections.isEmpty else { return nil }
+        return sections.joined(separator: "\n\n")
+    }
+
+}
+
+private struct InstructionVariant {
+    let compactionLevel: String
+    let knowledgeBlock: String
+    let selectedKnowledgePrompt: String
+    let candidateDescription: String
+    let ragCapabilitySectionCount: Int
+    let ragExampleSectionCount: Int
+    let ragBixbySectionCount: Int
 }

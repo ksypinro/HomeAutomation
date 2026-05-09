@@ -9,6 +9,7 @@ public actor HomeCandidateResolverMetrics {
     public private(set) var lastShardCount = 0
     public private(set) var lastParallelTaskCount = 0
     public private(set) var lastShardWinnerCount = 0
+    public private(set) var lastContextBudgetReport: HomeModelContextBudgetReport?
 
     public init() {}
 
@@ -17,13 +18,214 @@ public actor HomeCandidateResolverMetrics {
         candidateCount: Int,
         shardCount: Int = 0,
         parallelTaskCount: Int = 0,
-        shardWinnerCount: Int = 0
+        shardWinnerCount: Int = 0,
+        contextBudgetReport: HomeModelContextBudgetReport? = nil
     ) {
         lastStrategy = strategy
         lastCandidateCount = candidateCount
         lastShardCount = shardCount
         lastParallelTaskCount = parallelTaskCount
         lastShardWinnerCount = shardWinnerCount
+        if let contextBudgetReport {
+            lastContextBudgetReport = contextBudgetReport
+        }
+    }
+
+    public func recordContextBudget(_ report: HomeModelContextBudgetReport) {
+        lastContextBudgetReport = report
+    }
+}
+
+public struct CandidateResolutionPromptPackage: Sendable, Equatable {
+    public let prompt: String
+    public let contextBudgetReport: HomeModelContextBudgetReport
+
+    public init(prompt: String, contextBudgetReport: HomeModelContextBudgetReport) {
+        self.prompt = prompt
+        self.contextBudgetReport = contextBudgetReport
+    }
+}
+
+public struct CandidateResolutionPromptBuilder: Sendable {
+    private let budgeter: FoundationModelContextBudgeter
+
+    public init(budgeter: FoundationModelContextBudgeter = FoundationModelContextBudgeter()) {
+        self.budgeter = budgeter
+    }
+
+    public func makeDirectPrompt(
+        userText: String,
+        resolutionState: HomeResolutionState,
+        candidates: [HomeCompactCandidateView],
+        memoryHints: [MemoryHint],
+        instructionText: String
+    ) -> CandidateResolutionPromptPackage {
+        makePrompt(
+            userText: userText,
+            resolutionState: resolutionState,
+            candidates: candidates,
+            memoryHints: memoryHints,
+            instructionText: instructionText,
+            candidateLabel: "Candidates"
+        )
+    }
+
+    public func makeShardPrompt(
+        userText: String,
+        resolutionState: HomeResolutionState,
+        shard: [HomeCompactCandidateView],
+        memoryHints: [MemoryHint],
+        instructionText: String
+    ) -> CandidateResolutionPromptPackage {
+        makePrompt(
+            userText: userText,
+            resolutionState: resolutionState,
+            candidates: shard,
+            memoryHints: memoryHints,
+            instructionText: instructionText,
+            candidateLabel: "Candidate shard"
+        )
+    }
+
+    private func makePrompt(
+        userText: String,
+        resolutionState: HomeResolutionState,
+        candidates: [HomeCompactCandidateView],
+        memoryHints: [MemoryHint],
+        instructionText: String,
+        candidateLabel: String
+    ) -> CandidateResolutionPromptPackage {
+        let variants = [
+            promptVariant(
+                level: "full",
+                userText: userText,
+                resolutionState: resolutionState,
+                candidates: candidates,
+                memoryHints: memoryHints,
+                candidateLabel: candidateLabel,
+                candidateLines: fullCandidateLines(candidates),
+                includeFullHints: true
+            ),
+            promptVariant(
+                level: "compactCandidates",
+                userText: userText,
+                resolutionState: resolutionState,
+                candidates: candidates,
+                memoryHints: memoryHints,
+                candidateLabel: candidateLabel,
+                candidateLines: compactCandidateLines(candidates),
+                includeFullHints: false
+            ),
+            promptVariant(
+                level: "minimal",
+                userText: userText,
+                resolutionState: resolutionState,
+                candidates: candidates,
+                memoryHints: [],
+                candidateLabel: candidateLabel,
+                candidateLines: minimalCandidateLines(candidates),
+                includeFullHints: false
+            )
+        ]
+
+        var fallback: CandidateResolutionPromptPackage?
+        for variant in variants {
+            let report = budgeter.report(
+                instructionText: instructionText,
+                prompt: variant.prompt,
+                tools: [],
+                candidateCount: candidates.count,
+                ragCapabilitySectionCount: 0,
+                ragExampleSectionCount: 0,
+                ragBixbySectionCount: 0,
+                selectedCompactionLevel: variant.level,
+                estimatedToolOutputCharacterCount: 0
+            )
+            let package = CandidateResolutionPromptPackage(prompt: variant.prompt, contextBudgetReport: report)
+            fallback = package
+            if budgeter.isWithinBudget(report) {
+                return package
+            }
+        }
+
+        return fallback ?? CandidateResolutionPromptPackage(
+            prompt: "\(userText)\n\(candidateLabel):\n\(minimalCandidateLines(candidates))",
+            contextBudgetReport: budgeter.report(
+                instructionText: instructionText,
+                prompt: userText,
+                tools: [],
+                candidateCount: candidates.count,
+                ragCapabilitySectionCount: 0,
+                ragExampleSectionCount: 0,
+                ragBixbySectionCount: 0,
+                selectedCompactionLevel: "minimal",
+                estimatedToolOutputCharacterCount: 0
+            )
+        )
+    }
+
+    private func promptVariant(
+        level: String,
+        userText: String,
+        resolutionState: HomeResolutionState,
+        candidates: [HomeCompactCandidateView],
+        memoryHints: [MemoryHint],
+        candidateLabel: String,
+        candidateLines: String,
+        includeFullHints: Bool
+    ) -> (level: String, prompt: String) {
+        let hintBlock: String
+        if includeFullHints {
+            hintBlock = """
+            Resolution hints:
+            - Intent families: \(resolutionState.intent.topFamilies)
+            - Device types: \(resolutionState.deviceType.deviceTypes)
+            - Rooms: \(resolutionState.slots.rooms)
+            - Device nicknames: \(resolutionState.slots.deviceNicknames)
+            - Values: \(resolutionState.slots.values)
+            - Memory hints: \(memoryHints)
+            """
+        } else {
+            hintBlock = """
+            Resolution hints:
+            - Intent families: \(resolutionState.intent.topFamilies.prefix(3))
+            - Device types: \(resolutionState.deviceType.deviceTypes.prefix(5))
+            - Rooms: \(resolutionState.slots.rooms.prefix(5))
+            - Values: \(resolutionState.slots.values.prefix(3))
+            - Memory device IDs: \(memoryHints.compactMap(\.deviceID).prefix(5))
+            """
+        }
+
+        return (
+            level,
+            """
+            User command: \(userText)
+
+            \(hintBlock)
+
+            \(candidateLabel):
+            \(candidateLines)
+            """
+        )
+    }
+
+    private func fullCandidateLines(_ candidates: [HomeCompactCandidateView]) -> String {
+        candidates.map(\.description).joined(separator: "\n")
+    }
+
+    private func compactCandidateLines(_ candidates: [HomeCompactCandidateView]) -> String {
+        candidates.map { candidate in
+            let caps = candidate.shortCapabilities.prefix(5).joined(separator: ",")
+            return "id=\(candidate.id) label=\(candidate.label) type=\(candidate.deviceType) room=\(candidate.room ?? "") caps=\(caps)"
+        }
+        .joined(separator: "\n")
+    }
+
+    private func minimalCandidateLines(_ candidates: [HomeCompactCandidateView]) -> String {
+        candidates.map { candidate in
+            "id=\(candidate.id) label=\(candidate.label) type=\(candidate.deviceType) room=\(candidate.room ?? "")"
+        }
+        .joined(separator: "\n")
     }
 }
 
@@ -39,16 +241,19 @@ public struct HomeCandidateResolverSupport: Sendable {
     private let shardSize: Int
     private let metrics: HomeCandidateResolverMetrics?
     private let foundationModelAvailability: @Sendable () -> Bool
+    private let promptBuilder: CandidateResolutionPromptBuilder
 
     public init(
         shardSize: Int = 20,
         metrics: HomeCandidateResolverMetrics? = nil,
+        promptBuilder: CandidateResolutionPromptBuilder = CandidateResolutionPromptBuilder(),
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         }
     ) {
         self.shardSize = shardSize
         self.metrics = metrics
+        self.promptBuilder = promptBuilder
         self.foundationModelAvailability = foundationModelAvailability
     }
 
@@ -124,34 +329,29 @@ public struct HomeCandidateResolverSupport: Sendable {
         }
 
         do {
-            let session = LanguageModelSession(instructions: Instructions("""
+            let instructionText = """
             Select the best candidate IDs for the user's smart-home command.
             Use only the provided candidate IDs.
             If no candidate matches, return an empty finalCandidateIDs list and ask a clarification question.
             If multiple candidates are equally plausible, set needsClarification true.
-            """))
-
-            let prompt = """
-            User command: \(userText)
-
-            Resolution hints:
-            - Intent families: \(resolutionState.intent.topFamilies)
-            - Device types: \(resolutionState.deviceType.deviceTypes)
-            - Rooms: \(resolutionState.slots.rooms)
-            - Device nicknames: \(resolutionState.slots.deviceNicknames)
-            - Values: \(resolutionState.slots.values)
-            - Memory hints: \(memoryHints)
-
-            Candidates:
-            \(candidates.map(\.description).joined(separator: "\n"))
             """
+            let session = LanguageModelSession(instructions: Instructions(instructionText))
+            let promptPackage = promptBuilder.makeDirectPrompt(
+                userText: userText,
+                resolutionState: resolutionState,
+                candidates: candidates,
+                memoryHints: memoryHints,
+                instructionText: instructionText
+            )
+            await metrics?.recordContextBudget(promptPackage.contextBudgetReport)
 
-            let response = try await session.respond(
-                to: Prompt(prompt),
-                generating: HomeCandidateAggregationResult.self
+            let response = try await respondForAggregation(
+                session: session,
+                prompt: promptPackage.prompt,
+                allowedIDs: candidates.map(\.id)
             )
             return Self.constrainAggregation(
-                response.content,
+                response,
                 allowedIDs: candidates.map(\.id),
                 fallback: deterministic
             )
@@ -215,34 +415,29 @@ public struct HomeCandidateResolverSupport: Sendable {
         }
 
         do {
-            let session = LanguageModelSession(instructions: Instructions("""
+            let instructionText = """
             Rank only the candidates in this shard for the user's smart-home command.
             Return candidate IDs only.
             Do not invent IDs.
             If no candidate matches, return an empty selectedCandidateIDs list.
-            """))
-
-            let prompt = """
-            User command: \(userText)
-
-            Resolution hints:
-            - Intent families: \(resolutionState.intent.topFamilies)
-            - Device types: \(resolutionState.deviceType.deviceTypes)
-            - Rooms: \(resolutionState.slots.rooms)
-            - Device nicknames: \(resolutionState.slots.deviceNicknames)
-            - Values: \(resolutionState.slots.values)
-            - Memory hints: \(memoryHints)
-
-            Candidate shard:
-            \(shard.map(\.description).joined(separator: "\n"))
             """
+            let session = LanguageModelSession(instructions: Instructions(instructionText))
+            let promptPackage = promptBuilder.makeShardPrompt(
+                userText: userText,
+                resolutionState: resolutionState,
+                shard: shard,
+                memoryHints: memoryHints,
+                instructionText: instructionText
+            )
+            await metrics?.recordContextBudget(promptPackage.contextBudgetReport)
 
-            let response = try await session.respond(
-                to: Prompt(prompt),
-                generating: HomeCandidateShardSelection.self
+            let response = try await respondForShardSelection(
+                session: session,
+                prompt: promptPackage.prompt,
+                allowedIDs: shard.map(\.id)
             )
             return Self.constrainShardSelection(
-                response.content,
+                response,
                 allowedIDs: shard.map(\.id),
                 fallback: deterministic
             )
@@ -271,6 +466,10 @@ public struct HomeCandidateResolverSupport: Sendable {
             clarificationQuestion: selectedIDs.count == 1 ? nil : "Which device do you mean?",
             confidence: selectedIDs.count == 1 ? 0.65 : 0.55
         )
+
+        if let clearWinner = Self.clearShardWinner(from: shardSelections) {
+            return clearWinner
+        }
 
         guard foundationModelAvailability(), selectedIDs.count > 1 else {
             return deterministic
@@ -302,6 +501,113 @@ public struct HomeCandidateResolverSupport: Sendable {
         } catch {
             return deterministic
         }
+    }
+
+    private func respondForAggregation(
+        session: LanguageModelSession,
+        prompt: String,
+        allowedIDs: [String]
+    ) async throws -> HomeCandidateAggregationResult {
+        if let schema = try? Self.aggregationSchema(allowedIDs: allowedIDs) {
+            let response = try await session.respond(to: Prompt(prompt), schema: schema)
+            return try Self.aggregationResult(from: response.content)
+        }
+
+        let response = try await session.respond(
+            to: Prompt(prompt),
+            generating: HomeCandidateAggregationResult.self
+        )
+        return response.content
+    }
+
+    private func respondForShardSelection(
+        session: LanguageModelSession,
+        prompt: String,
+        allowedIDs: [String]
+    ) async throws -> HomeCandidateShardSelection {
+        if let schema = try? Self.shardSelectionSchema(allowedIDs: allowedIDs) {
+            let response = try await session.respond(to: Prompt(prompt), schema: schema)
+            return try Self.shardSelection(from: response.content)
+        }
+
+        let response = try await session.respond(
+            to: Prompt(prompt),
+            generating: HomeCandidateShardSelection.self
+        )
+        return response.content
+    }
+
+    private static func aggregationSchema(allowedIDs: [String]) throws -> GenerationSchema {
+        guard !allowedIDs.isEmpty else {
+            throw FoundationLabCoreError.invalidRequest("Candidate ID schema requires IDs")
+        }
+        let idSchema = DynamicGenerationSchema(name: "CandidateID", anyOf: allowedIDs)
+        let root = DynamicGenerationSchema(
+            name: "HomeCandidateAggregationResult",
+            properties: [
+                .init(
+                    name: "finalCandidateIDs",
+                    description: "Final candidate IDs selected from provided candidates only.",
+                    schema: DynamicGenerationSchema(arrayOf: idSchema, maximumElements: 5)
+                ),
+                .init(name: "needsClarification", schema: DynamicGenerationSchema(type: Bool.self)),
+                .init(
+                    name: "clarificationQuestion",
+                    description: "One concise user-facing question when clarification is needed.",
+                    schema: DynamicGenerationSchema(type: String.self),
+                    isOptional: true
+                ),
+                .init(name: "confidence", schema: DynamicGenerationSchema(type: Double.self))
+            ]
+        )
+        return try GenerationSchema(root: root, dependencies: [])
+    }
+
+    private static func shardSelectionSchema(allowedIDs: [String]) throws -> GenerationSchema {
+        guard !allowedIDs.isEmpty else {
+            throw FoundationLabCoreError.invalidRequest("Candidate ID schema requires IDs")
+        }
+        let idSchema = DynamicGenerationSchema(name: "ShardCandidateID", anyOf: allowedIDs)
+        let root = DynamicGenerationSchema(
+            name: "HomeCandidateShardSelection",
+            properties: [
+                .init(
+                    name: "selectedCandidateIDs",
+                    description: "Candidate IDs selected from this shard only.",
+                    schema: DynamicGenerationSchema(arrayOf: idSchema, maximumElements: 3)
+                ),
+                .init(
+                    name: "rejectedCandidateIDs",
+                    description: "Candidate IDs rejected from this shard only.",
+                    schema: DynamicGenerationSchema(arrayOf: idSchema, maximumElements: 20)
+                ),
+                .init(name: "confidence", schema: DynamicGenerationSchema(type: Double.self)),
+                .init(
+                    name: "reason",
+                    description: "One concise sentence explaining the shard choice.",
+                    schema: DynamicGenerationSchema(type: String.self)
+                )
+            ]
+        )
+        return try GenerationSchema(root: root, dependencies: [])
+    }
+
+    private static func aggregationResult(from content: GeneratedContent) throws -> HomeCandidateAggregationResult {
+        HomeCandidateAggregationResult(
+            finalCandidateIDs: try content.value([String].self, forProperty: "finalCandidateIDs"),
+            needsClarification: try content.value(Bool.self, forProperty: "needsClarification"),
+            clarificationQuestion: try? content.value(String.self, forProperty: "clarificationQuestion"),
+            confidence: try content.value(Double.self, forProperty: "confidence")
+        )
+    }
+
+    private static func shardSelection(from content: GeneratedContent) throws -> HomeCandidateShardSelection {
+        HomeCandidateShardSelection(
+            selectedCandidateIDs: try content.value([String].self, forProperty: "selectedCandidateIDs"),
+            rejectedCandidateIDs: try content.value([String].self, forProperty: "rejectedCandidateIDs"),
+            confidence: try content.value(Double.self, forProperty: "confidence"),
+            reason: try content.value(String.self, forProperty: "reason")
+        )
     }
 
     private func deterministicAggregation(
@@ -436,6 +742,29 @@ public struct HomeCandidateResolverSupport: Sendable {
             needsClarification: aggregation.needsClarification || selected.count != 1,
             clarificationQuestion: selected.count == 1 ? aggregation.clarificationQuestion : aggregation.clarificationQuestion ?? "Which device do you mean?",
             confidence: aggregation.confidence
+        )
+    }
+
+    private static func clearShardWinner(from shardSelections: [HomeCandidateShardSelection]) -> HomeCandidateAggregationResult? {
+        let nonEmpty = shardSelections.filter { !$0.selectedCandidateIDs.isEmpty }
+        guard nonEmpty.count > 1 else { return nil }
+        let ranked = nonEmpty.sorted { lhs, rhs in
+            if lhs.confidence == rhs.confidence {
+                return lhs.selectedCandidateIDs.lexicographicallyPrecedes(rhs.selectedCandidateIDs)
+            }
+            return lhs.confidence > rhs.confidence
+        }
+        guard let best = ranked.first,
+              let second = ranked.dropFirst().first,
+              best.selectedCandidateIDs.count == 1,
+              best.confidence >= 0.78,
+              best.confidence - second.confidence >= 0.20 else {
+            return nil
+        }
+        return HomeCandidateAggregationResult(
+            finalCandidateIDs: [best.selectedCandidateIDs[0]],
+            needsClarification: false,
+            confidence: best.confidence
         )
     }
 }

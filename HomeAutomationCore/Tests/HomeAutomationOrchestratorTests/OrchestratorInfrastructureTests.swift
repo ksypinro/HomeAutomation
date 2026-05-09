@@ -188,10 +188,14 @@ struct OrchestratorInfrastructureTests {
         #expect(metricsJSON.contains("contextMetrics"))
         #expect(metricsJSON.contains("safetyMetrics"))
         #expect(metricsJSON.contains("candidateMetrics"))
+        #expect(metricsJSON.contains("foundationModelUsage"))
         #expect(metrics.candidateMetrics.selectedCandidateIDs == ["bedroom_lamp"])
         #expect(metrics.contextMetrics.hasDraft)
         #expect(metrics.safetyMetrics.readyOrExecuted)
         #expect(metrics.agentStatuses[AgentID.ruleFallback.rawValue] == "success")
+        #expect(metrics.foundationModelUsage.modelAvailabilityStatus == "unavailable")
+        #expect(metrics.foundationModelUsage.modelCallCount == 0)
+        #expect(metrics.foundationModelUsage.skippedModelCallCount > 0)
     }
 
     @Test

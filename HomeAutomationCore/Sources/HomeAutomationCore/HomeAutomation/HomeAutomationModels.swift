@@ -54,8 +54,10 @@ public enum HomeAutomationIntent: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeLanguageDetectionResult: Sendable, Hashable, Codable {
+    @Guide(description: "BCP-47-style language code such as en, es, fr, ja, bn, or mixed_bn_en.")
     public let languageCode: String
     public let isMixedLanguage: Bool
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
     public let unsupportedLanguageLikely: Bool
 
@@ -75,6 +77,7 @@ public struct HomeLanguageDetectionResult: Sendable, Hashable, Codable {
 @Generable
 public struct HomeDomainClassificationResult: Sendable, Hashable, Codable {
     public let domain: HomeAutomationCommandDomain
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(domain: HomeAutomationCommandDomain, confidence: Double) {
@@ -85,7 +88,9 @@ public struct HomeDomainClassificationResult: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeIntentFamilyResult: Sendable, Hashable, Codable {
+    @Guide(description: "Most likely smart-home intent families, ordered by likelihood.", .maximumCount(3))
     public let topFamilies: [HomeAutomationIntentFamily]
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(topFamilies: [HomeAutomationIntentFamily], confidence: Double) {
@@ -96,7 +101,9 @@ public struct HomeIntentFamilyResult: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeDeviceTypeResult: Sendable, Hashable, Codable {
+    @Guide(description: "Likely device types in internal English schema names.", .maximumCount(5))
     public let deviceTypes: [String]
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(deviceTypes: [String], confidence: Double) {
@@ -107,10 +114,14 @@ public struct HomeDeviceTypeResult: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeExtractedSlot: Sendable, Hashable, Codable {
+    @Guide(description: "Canonical slot name such as value, duration, temperature, mode, room, or device.")
     public let name: String
+    @Guide(description: "Exact text or normalized phrase from the user command.")
     public let rawValue: String
     public let numericValue: Double?
+    @Guide(description: "Short unit such as percent, degree, minute, hour, celsius, or fahrenheit.")
     public let unit: String?
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(
@@ -130,10 +141,15 @@ public struct HomeExtractedSlot: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeSlotExtractionResult: Sendable, Hashable, Codable {
+    @Guide(description: "Room or location names mentioned by the user.", .maximumCount(5))
     public let rooms: [String]
+    @Guide(description: "Device nicknames or labels mentioned by the user.", .maximumCount(5))
     public let deviceNicknames: [String]
+    @Guide(description: "Numeric, duration, temperature, color, or other value slots.", .maximumCount(6))
     public let values: [HomeExtractedSlot]
+    @Guide(description: "Mode names mentioned by the user.", .maximumCount(5))
     public let modes: [String]
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(
@@ -155,7 +171,9 @@ public struct HomeSlotExtractionResult: Sendable, Hashable, Codable {
 public struct HomeRiskClassificationResult: Sendable, Hashable, Codable {
     public let riskLevel: HomeAutomationRiskLevel
     public let requiresConfirmation: Bool
+    @Guide(description: "One concise sentence explaining the risk classification.")
     public let reason: String
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(
@@ -284,9 +302,13 @@ public struct HomeCompactCandidateView: Sendable, Hashable, Codable, CustomStrin
 
 @Generable
 public struct HomeCandidateShardSelection: Sendable, Hashable, Codable {
+    @Guide(description: "Candidate IDs selected from this shard only.", .maximumCount(3))
     public let selectedCandidateIDs: [String]
+    @Guide(description: "Candidate IDs rejected from this shard only.", .maximumCount(20))
     public let rejectedCandidateIDs: [String]
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
+    @Guide(description: "One concise sentence explaining the shard choice.")
     public let reason: String
 
     public init(
@@ -304,9 +326,12 @@ public struct HomeCandidateShardSelection: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeCandidateAggregationResult: Sendable, Hashable, Codable {
+    @Guide(description: "Final candidate IDs selected from provided candidates only.", .maximumCount(5))
     public let finalCandidateIDs: [String]
     public let needsClarification: Bool
+    @Guide(description: "One concise user-facing question when clarification is needed.")
     public let clarificationQuestion: String?
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(
@@ -324,10 +349,14 @@ public struct HomeCandidateAggregationResult: Sendable, Hashable, Codable {
 
 @Generable
 public struct HomeResolvedParameter: Sendable, Hashable, Codable {
+    @Guide(description: "Canonical parameter name such as value, mode, duration, color, attribute, or delta.")
     public let name: String
+    @Guide(description: "String parameter value when not numeric.")
     public let value: String?
     public let numericValue: Double?
+    @Guide(description: "Short unit such as percent, degree, minute, hour, celsius, or fahrenheit.")
     public let unit: String?
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(
@@ -355,12 +384,17 @@ public struct HomeCommandDraft: Sendable, Hashable, Codable {
     @Guide(description: "Selected group or room ID if the command targets a group.")
     public let targetGroupID: String?
 
+    @Guide(description: "Capability name from hydrated candidates or canonical registry context only.")
     public let capability: String?
+    @Guide(description: "Command name valid for the selected capability only.")
     public let command: String?
+    @Guide(description: "Resolved parameters required by the selected command.", .maximumCount(6))
     public let parameters: [HomeResolvedParameter]
     public let needsClarification: Bool
+    @Guide(description: "One concise user-facing question when clarification is needed.")
     public let clarificationQuestion: String?
     public let requiresConfirmation: Bool
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
     public let confidence: Double
 
     public init(

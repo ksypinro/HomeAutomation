@@ -289,8 +289,8 @@ All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline
 
 | Agent | Input | Output | Description |
 | --- | --- | --- | --- |
-| `InstructionComposerAgent` | `HomeFinalResolutionInput` | `HomeModelInstructionPackage` | Builds the prompt, system instructions, and tool configuration for Foundation Models draft generation. Uses RAG-selected context. |
-| `DraftGenerationAgent` | `HomeModelInstructionPackage` | `HomeCommandDraft` | Produces the primary `HomeCommandDraft` via Foundation Models with retry across 4 strategy variants (base/adapter × full/simplified). |
+| `InstructionComposerAgent` | `HomeFinalResolutionInput` | `HomeModelInstructionPackage` | Builds prompt, instructions, compact default tools, RAG-selected context, and context-budget reports for Foundation Models draft generation. |
+| `DraftGenerationAgent` | `HomeModelInstructionPackage` | `HomeCommandDraft` | Produces the primary `HomeCommandDraft` via Foundation Models with guided schema constraints and retry across 4 strategy variants (base/adapter × full/simplified). |
 | `DraftRepairAgent` | `HomeModelInstructionPackage` | `AgentDraftResolutionOutput` | Attempts draft repair when initial generation fails or produces low-confidence results. |
 
 #### Safety Agents (3) — Mandatory Fail-Closed Gates
@@ -334,7 +334,7 @@ All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline
 | `HomeAutomationKnowledgeBase` | Loads generated capability catalog and natural-language dataset resources. |
 | `HomeBixbyCommandCatalog` and `HomeBixbyCommandMapper` | Bixby command source data and utterance-to-draft mapping support. |
 | `HomeRiskPolicy` and `HomeParameterValidator` | Deterministic safety and parameter validation rules. |
-| `HomeModelInstructionPackage` and `HomeAdapterModelProvider` | Foundation Models prompt/tool/session support. |
+| `HomeModelInstructionPackage`, `FoundationModelContextBudgeter`, and `HomeAdapterModelProvider` | Foundation Models prompt/tool/session support, context budgeting, and adapter diagnostics. |
 
 ## Safety Rules
 
@@ -343,6 +343,7 @@ All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline
 - Memory-derived targets are hints only. Candidate retrieval, hydration, safety validation, and confirmation policy run again.
 - High-risk actions such as lock/unlock, open/close, camera, valve, oven, and security-sensitive operations require explicit confirmation.
 - RAG ranks and selects relevant context, but canonical registries remain the source of truth.
+- Foundation Models prompts are budgeted and compacted before draft generation; tool outputs are capped and safety still depends on deterministic validators.
 
 ## RAG Sources
 

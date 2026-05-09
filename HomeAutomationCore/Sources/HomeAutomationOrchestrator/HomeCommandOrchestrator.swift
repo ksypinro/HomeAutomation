@@ -39,11 +39,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
+        foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
     ) {
-        let policy = OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+        let policy = OrchestratorPolicyEngine(
+            isModelAvailable: foundationModelAvailability,
+            modelAvailabilityStatus: foundationModelAvailabilityStatus
+        )
         self.init(
             registry: DefaultAgentRegistryFactory.make(
                 registry: deviceRegistry,
@@ -63,6 +67,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
+        foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         indexCache: VectorIndexCache = VectorIndexCache()
     ) async -> HomeCommandOrchestrator {
@@ -75,6 +80,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             deviceRegistry: deviceRegistry,
             contextRetriever: retriever,
             foundationModelAvailability: foundationModelAvailability,
+            foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
             circuitBreakers: circuitBreakers
@@ -131,6 +137,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 let plan = planner.plan(for: trimmedText, context: await contextStore.snapshot())
+                metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
                 let scheduler = AgentScheduler(
                     registry: registry,
                     contextStore: contextStore,

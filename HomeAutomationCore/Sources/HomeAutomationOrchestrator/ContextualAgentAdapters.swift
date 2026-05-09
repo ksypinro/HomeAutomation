@@ -57,9 +57,6 @@ public enum DefaultAgentRegistryFactory {
             SystemLanguageModel.default.isAvailable
         }
     ) -> AgentRegistry {
-        let worker = HomeAgentWorkerSessionSupport(
-            foundationModelAvailability: foundationModelAvailability
-        )
         let candidateResolver = HomeCandidateResolverSupport(
             foundationModelAvailability: foundationModelAvailability
         )
@@ -80,32 +77,50 @@ public enum DefaultAgentRegistryFactory {
 
         let agents: [any AnyHomeAgent] = [
             ContextualHomeAgent(
-                agent: LanguageAgent(worker: worker, contextRetriever: contextRetriever),
+                agent: LanguageAgent(
+                    worker: LanguageAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                    contextRetriever: contextRetriever
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.language, [ResolutionContextPatchKey.language: output]) }
             ),
             ContextualHomeAgent(
-                agent: DomainAgent(worker: worker, contextRetriever: contextRetriever),
+                agent: DomainAgent(
+                    worker: DomainAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                    contextRetriever: contextRetriever
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.domain, [ResolutionContextPatchKey.domain: output]) }
             ),
             ContextualHomeAgent(
-                agent: IntentFamilyAgent(worker: worker, contextRetriever: contextRetriever),
+                agent: IntentFamilyAgent(
+                    worker: IntentFamilyAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                    contextRetriever: contextRetriever
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.intentFamily, [ResolutionContextPatchKey.intent: output]) }
             ),
             ContextualHomeAgent(
-                agent: DeviceTypeAgent(worker: worker, contextRetriever: contextRetriever),
+                agent: DeviceTypeAgent(
+                    worker: DeviceTypeAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                    contextRetriever: contextRetriever
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.deviceType, [ResolutionContextPatchKey.deviceType: output]) }
             ),
             ContextualHomeAgent(
-                agent: SlotExtractionAgent(worker: worker, contextRetriever: contextRetriever),
+                agent: SlotExtractionAgent(
+                    worker: SlotExtractionAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                    contextRetriever: contextRetriever
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.slotExtraction, [ResolutionContextPatchKey.slots: output]) }
             ),
             ContextualHomeAgent(
-                agent: RiskClassificationAgent(worker: worker, contextRetriever: contextRetriever),
+                agent: RiskClassificationAgent(
+                    worker: RiskClassificationAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                    contextRetriever: contextRetriever
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk: output]) }
             ),

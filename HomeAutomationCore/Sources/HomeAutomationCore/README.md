@@ -134,8 +134,11 @@ flowchart TD
 | `HomeCommandDraftResolving` | Draft-generation abstraction used by Foundation Models and test doubles. |
 | `HomeCandidateResolving` | Candidate-selection abstraction used by both agent and legacy candidate resolvers. |
 | `HomeWorkerSessionAnalyzing` | Worker-analysis abstraction for creating `HomeResolutionState`. |
-| `HomeGenerationMode` | Prompt generation mode, currently default or greedy. |
-| `HomeModelInstructionPackage` | Foundation Models prompt package containing instructions, prompt text, tools, adapter flag, and generation mode. |
+| `HomeGenerationMode` | Prompt generation mode, currently default or greedy. Greedy mode is passed through to Foundation Models generation options. |
+| `HomeModelInstructionPackage` | Foundation Models prompt package containing instructions, raw instruction text, prompt text, tools, adapter flag, generation mode, and context-budget report. |
+| `HomeModelContextBudgetReport` | Estimated input tokens, max context size, tool/candidate/RAG counts, selected tools, output estimate, and compaction level. |
+| `FoundationModelContextBudgeter` | Estimates prompt/tool/context size and supports prompt compaction before draft generation. |
+| `FoundationModelFailureKind` | Structured context-window, guardrail, adapter, tool, generation, or unknown model failure category. |
 | `HomeCapabilityDefinition` | Canonical in-memory capability definition with commands, attributes, numeric ranges, enum values, and risk. |
 | `HomeCapabilityRegistry` | Source-of-truth capability lookup. Agents and validators hydrate final facts from here instead of trusting retrieved text. |
 | `HomeAutomationKnowledgeBase` | Loads generated resources and builds catalog summaries and catalog-derived mock devices. |
@@ -155,9 +158,14 @@ flowchart TD
 | `HomeCandidateContextStore` | Thread-safe candidate cache for save/hydrate/clear operations. |
 | `shardHomeCandidates` | Utility for breaking large candidate sets into deterministic shards. |
 | `FoundationHomeCommandDraftResolver` | Concrete Foundation Models draft resolver that asks a `LanguageModelSession` for `HomeCommandDraft`. |
-| `HomeAdapterModelDiagnostic` | Captures adapter-load attempts and outcomes. |
+| `HomeAdapterModelDiagnostic` | Captures adapter-load attempts, source, identifier, compatibility version, load outcome, and failure kind. |
 | `HomeAdapterModelDiagnosticsStore` | Thread-safe last-diagnostic store. |
 | `HomeAdapterModelProvider` | Creates Foundation Models sessions, optionally using an adapter configured by environment. |
+| `HomeAdapterTrainingExample` | JSONL-friendly adapter training example with input, expected draft, source, and metadata. |
+| `HomeAdapterEvaluationCase` | Holdout case used to validate adapter dataset coverage without requiring a real adapter artifact. |
+| `HomeAdapterEvaluationResult` | Summary of adapter holdout validation. |
+| `HomeAdapterCompatibilityManifest` | Runtime/schema compatibility metadata for adapter assets. |
+| `HomeAdapterTrainingExporter` | Deterministic generated-dataset, Bixby, and failure-case JSONL exporter. |
 
 ## Source-of-Truth Rules
 
@@ -166,3 +174,5 @@ flowchart TD
 - Device state and candidate records come from `MockHomeDeviceRegistry`.
 - Safety decisions come from `HomeRiskPolicy` and `HomeParameterValidator`.
 - RAG may select and rank relevant context, but this module owns the final canonical facts.
+- Foundation Models output schemas use guided generation constraints; deterministic validators still own safety and execution eligibility.
+- Adapter training/export support is offline metadata only. Runtime safety still depends on RAG, tools, validation, and confirmation policy.

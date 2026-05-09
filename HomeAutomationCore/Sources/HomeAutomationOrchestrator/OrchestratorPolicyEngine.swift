@@ -4,13 +4,22 @@ import HomeAutomationCore
 
 public struct OrchestratorPolicyEngine: Sendable {
     private let isModelAvailable: @Sendable () -> Bool
+    private let modelAvailabilityStatusProvider: @Sendable () -> String?
 
-    public init(isModelAvailable: @escaping @Sendable () -> Bool) {
+    public init(
+        isModelAvailable: @escaping @Sendable () -> Bool,
+        modelAvailabilityStatus: @escaping @Sendable () -> String? = { nil }
+    ) {
         self.isModelAvailable = isModelAvailable
+        self.modelAvailabilityStatusProvider = modelAvailabilityStatus
     }
 
     public func shouldUseModels() -> Bool {
         isModelAvailable()
+    }
+
+    public func modelAvailabilityStatus() -> String {
+        modelAvailabilityStatusProvider() ?? (isModelAvailable() ? "available" : "unavailable")
     }
 
     public func shouldRetry(failure: AgentFailure, attemptCount: Int) -> Bool {

@@ -3,16 +3,17 @@ import HomeAutomationCore
 
 /// Retry wrapper around draft generation packages.
 ///
-/// `AgentDraftResolver` tries 4 strategy variants in order:
+/// `AgentDraftResolver` tries strategy variants in order:
 /// 1. `base/full` — Base model, full prompt
-/// 2. `adapter/full` — Adapter model, full prompt
+/// 2. `adapter/full` — Adapter model, full prompt, only when configured
 /// 3. `base/simplified` — Base model, simplified prompt
-/// 4. `adapter/simplified` — Adapter model, simplified prompt
+/// 4. `adapter/simplified` — Adapter model, simplified prompt, only when configured
 ///
 /// The first attempt exceeding the confidence threshold is returned immediately.
 /// If no attempt exceeds the threshold, the highest-confidence result is selected.
 public struct AgentDraftResolver: HomeCommandDraftResolving {
     private let resolver: any HomeCommandDraftResolving
+    private let adapterProvider: HomeAdapterModelProvider
     private let confidenceThreshold: Double
     private let metrics: AgentDraftResolverMetrics?
 
@@ -22,6 +23,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         metrics: AgentDraftResolverMetrics? = nil,
         resolver: (any HomeCommandDraftResolving)? = nil
     ) {
+        self.adapterProvider = adapterProvider
         self.resolver = resolver ?? FoundationHomeCommandDraftResolver(adapterProvider: adapterProvider)
         self.confidenceThreshold = confidenceThreshold
         self.metrics = metrics
@@ -38,8 +40,16 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         var bestDraft: HomeCommandDraft?
         var bestAttemptIndex: Int?
         var attempts: [AgentDraftAttemptReport] = []
+        var adapterAttemptsDisabled = !adapterProvider.hasConfiguredAdapter
 
-        for candidate in retryPackages(for: package) {
+        for descriptor in retryDescriptors {
+            guard !descriptor.useAdapter || !adapterAttemptsDisabled else { continue }
+            let candidate = makeAttempt(
+                from: package,
+                name: descriptor.name,
+                useAdapter: descriptor.useAdapter,
+                simplifyPrompt: descriptor.simplifiedPrompt
+            )
             do {
                 let draft = try await resolver.resolveDraft(from: candidate.package)
                 if draft.confidence >= confidenceThreshold {
@@ -76,6 +86,10 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
                 )
             } catch {
                 lastError = error
+                let errorKind = FoundationModelDiagnostics.failureKind(for: error)
+                if candidate.useAdapter, errorKind == .adapterUnavailable {
+                    adapterAttemptsDisabled = true
+                }
                 attempts.append(
                     AgentDraftAttemptReport(
                         name: candidate.name,
@@ -84,7 +98,8 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
                         outcome: "error",
                         confidence: nil,
                         selected: false,
-                        errorDescription: error.localizedDescription
+                        errorDescription: error.localizedDescription,
+                        errorKind: errorKind
                     )
                 )
             }
@@ -106,12 +121,12 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         throw lastError ?? FoundationLabCoreError.invalidRequest("Agent draft resolver failed")
     }
 
-    private func retryPackages(for package: HomeModelInstructionPackage) -> [AgentDraftPackageAttempt] {
+    private var retryDescriptors: [AgentDraftAttemptDescriptor] {
         [
-            makeAttempt(from: package, name: "base/full", useAdapter: false, simplifyPrompt: false),
-            makeAttempt(from: package, name: "adapter/full", useAdapter: true, simplifyPrompt: false),
-            makeAttempt(from: package, name: "base/simplified", useAdapter: false, simplifyPrompt: true),
-            makeAttempt(from: package, name: "adapter/simplified", useAdapter: true, simplifyPrompt: true)
+            AgentDraftAttemptDescriptor(name: "base/full", useAdapter: false, simplifiedPrompt: false),
+            AgentDraftAttemptDescriptor(name: "adapter/full", useAdapter: true, simplifiedPrompt: false),
+            AgentDraftAttemptDescriptor(name: "base/simplified", useAdapter: false, simplifiedPrompt: true),
+            AgentDraftAttemptDescriptor(name: "adapter/simplified", useAdapter: true, simplifiedPrompt: true)
         ]
     }
 
@@ -127,10 +142,12 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             simplifiedPrompt: simplifyPrompt,
             package: HomeModelInstructionPackage(
                 instructions: package.instructions,
+                instructionText: package.instructionText,
                 prompt: simplifyPrompt ? simplifiedPrompt(from: package.prompt) : package.prompt,
                 tools: package.tools,
                 useAdapter: useAdapter,
-                generationMode: package.generationMode
+                generationMode: package.generationMode,
+                contextBudgetReport: package.contextBudgetReport
             )
         )
     }
@@ -150,4 +167,10 @@ private struct AgentDraftPackageAttempt {
     let useAdapter: Bool
     let simplifiedPrompt: Bool
     let package: HomeModelInstructionPackage
+}
+
+private struct AgentDraftAttemptDescriptor {
+    let name: String
+    let useAdapter: Bool
+    let simplifiedPrompt: Bool
 }

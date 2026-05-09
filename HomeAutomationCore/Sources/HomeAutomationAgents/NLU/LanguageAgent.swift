@@ -8,7 +8,7 @@ import HomeAutomationRAG
 /// of the orchestrator pipeline. It produces a `HomeLanguageDetectionResult` containing
 /// the detected BCP-47 language code, mixed-language flag, and confidence score.
 ///
-/// When Foundation Models are available, the agent delegates to `HomeAgentWorkerSessionSupport`
+/// When Foundation Models are available, the agent delegates to `LanguageAgentWorkerSession`
 /// which uses a `LanguageModelSession` for detection. When models are unavailable, it falls back
 /// to the deterministic `AgentTextParser` which uses keyword-based multilingual detection.
 ///
@@ -21,27 +21,29 @@ public struct LanguageAgent: HomeAgent {
     public let id = AgentID.language
     public let capabilities: Set<AgentCapability> = [.languageDetection]
     public let timeoutNanoseconds: UInt64 = 10_000_000_000
-    private let detect: @Sendable (String) async throws -> HomeLanguageDetectionResult
+    private let worker: LanguageAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 
     public init(
         contextRetriever: ContextRetriever? = nil,
         detect: @escaping @Sendable (String) async throws -> HomeLanguageDetectionResult
     ) {
-        self.detect = detect
-        self.contextRetriever = contextRetriever
+        self.init(
+            worker: LanguageAgentWorkerSession(detect: detect),
+            contextRetriever: contextRetriever
+        )
     }
 
     public init(
-        worker: HomeAgentWorkerSessionSupport = HomeAgentWorkerSessionSupport(),
+        worker: LanguageAgentWorkerSession = LanguageAgentWorkerSession(),
         contextRetriever: ContextRetriever? = nil
     ) {
-        self.detect = worker.detectLanguage
+        self.worker = worker
         self.contextRetriever = contextRetriever
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeLanguageDetectionResult {
         let enrichedInput = await AgentRAGSupport.nluInput(input, task: "language detection", contextRetriever: contextRetriever)
-        return try await detect(enrichedInput)
+        return try await worker.detectLanguage(enrichedInput)
     }
 }
