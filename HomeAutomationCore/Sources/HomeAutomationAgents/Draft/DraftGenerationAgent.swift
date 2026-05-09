@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationCore
+import os
 
 /// Produces the primary `HomeCommandDraft` via Foundation Models.
 public struct DraftGenerationAgent: HomeAgent {
@@ -10,6 +11,7 @@ public struct DraftGenerationAgent: HomeAgent {
     public let capabilities: Set<AgentCapability> = [.draftGeneration]
     public let timeoutNanoseconds: UInt64 = 20_000_000_000
     private let generate: @Sendable (HomeModelInstructionPackage) async throws -> HomeCommandDraft
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.DraftGeneration")
 
     public init(generate: @escaping @Sendable (HomeModelInstructionPackage) async throws -> HomeCommandDraft) {
         self.generate = generate
@@ -20,6 +22,7 @@ public struct DraftGenerationAgent: HomeAgent {
     }
 
     public func run(_ input: HomeModelInstructionPackage, context: ResolutionContext) async throws -> HomeCommandDraft {
-        try await generate(input)
+        logger.debug("[run] Executing DraftGenerationAgent")
+        return try await generate(input)
     }
 }

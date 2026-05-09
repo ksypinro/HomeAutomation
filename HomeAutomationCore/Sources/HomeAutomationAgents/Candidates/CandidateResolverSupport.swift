@@ -1,6 +1,7 @@
 import Foundation
 import FoundationModels
 import HomeAutomationCore
+import os
 
 /// Metrics actor for tracking candidate resolution diagnostics.
 public actor HomeCandidateResolverMetrics {
@@ -242,6 +243,7 @@ public struct HomeCandidateResolverSupport: Sendable {
     private let metrics: HomeCandidateResolverMetrics?
     private let foundationModelAvailability: @Sendable () -> Bool
     private let promptBuilder: CandidateResolutionPromptBuilder
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Candidates.ResolverSupport")
 
     public init(
         shardSize: Int = 20,
@@ -345,11 +347,17 @@ public struct HomeCandidateResolverSupport: Sendable {
             )
             await metrics?.recordContextBudget(promptPackage.contextBudgetReport)
 
+            logger.debug("[resolveDirectly] FoundationModelInput System Instructions: \(instructionText, privacy: .public)")
+            logger.debug("[resolveDirectly] FoundationModelInput Prompt: \(promptPackage.prompt, privacy: .public)")
+
             let response = try await respondForAggregation(
                 session: session,
                 prompt: promptPackage.prompt,
                 allowedIDs: candidates.map(\.id)
             )
+            
+            logger.debug("[resolveDirectly] FoundationModelOutput: \(String(describing: response), privacy: .public)")
+
             return Self.constrainAggregation(
                 response,
                 allowedIDs: candidates.map(\.id),
@@ -431,11 +439,15 @@ public struct HomeCandidateResolverSupport: Sendable {
             )
             await metrics?.recordContextBudget(promptPackage.contextBudgetReport)
 
+            logger.debug("[resolveShard] FoundationModelInput System Instructions: \(instructionText, privacy: .public)")
+            logger.debug("[resolveShard] FoundationModelInput Prompt: \(promptPackage.prompt, privacy: .public)")
+
             let response = try await respondForShardSelection(
                 session: session,
                 prompt: promptPackage.prompt,
                 allowedIDs: shard.map(\.id)
             )
+            logger.debug("[resolveShard] FoundationModelOutput: \(String(describing: response), privacy: .public)")
             return Self.constrainShardSelection(
                 response,
                 allowedIDs: shard.map(\.id),
@@ -476,12 +488,13 @@ public struct HomeCandidateResolverSupport: Sendable {
         }
 
         do {
-            let session = LanguageModelSession(instructions: Instructions("""
+            let instructionText = """
             Merge candidate IDs selected by shard resolver sessions.
             Choose the most likely final candidates for the user's smart-home command.
             If multiple candidates remain equally plausible, mark needsClarification true.
             Return IDs only and never invent an ID.
-            """))
+            """
+            let session = LanguageModelSession(instructions: Instructions(instructionText))
 
             let prompt = """
             User command: \(userText)
@@ -489,10 +502,15 @@ public struct HomeCandidateResolverSupport: Sendable {
             \(shardSelections)
             """
 
+            logger.debug("[aggregate] FoundationModelInput System Instructions: \(instructionText, privacy: .public)")
+            logger.debug("[aggregate] FoundationModelInput Prompt: \(prompt, privacy: .public)")
+
             let response = try await session.respond(
                 to: Prompt(prompt),
                 generating: HomeCandidateAggregationResult.self
             )
+            
+            logger.debug("[aggregate] FoundationModelOutput: \(String(describing: response.content), privacy: .public)")
             return Self.constrainAggregation(
                 response.content,
                 allowedIDs: selectedIDs,

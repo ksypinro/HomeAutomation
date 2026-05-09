@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import os
 
 public protocol HomeCommandResolving: Sendable {
     func resolve(_ text: String, executeLowRiskCommands: Bool) async throws -> HomeAutomationResolverResult
@@ -123,6 +124,7 @@ public struct HomeAutomationResolverResult: Sendable, Hashable, Codable {
 
 public struct FoundationHomeCommandDraftResolver: HomeCommandDraftResolving {
     private let adapterProvider: HomeAdapterModelProvider
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Draft.FoundationResolver")
 
     public init(adapterProvider: HomeAdapterModelProvider = HomeAdapterModelProvider()) {
         self.adapterProvider = adapterProvider
@@ -166,21 +168,33 @@ public struct FoundationHomeCommandDraftResolver: HomeCommandDraftResolving {
     }
 
     public func resolveDraft(from package: HomeModelInstructionPackage) async throws -> HomeCommandDraft {
+        logger.debug("[resolveDraft] Input Package details - GenerationMode: \(String(describing: package.generationMode), privacy: .public), Adapter: \(package.useAdapter)")
+        logger.debug("[resolveDraft] FoundationModelInput System Instructions: \(String(describing: package.instructions), privacy: .public)")
+        logger.debug("[resolveDraft] FoundationModelInput Prompt: \(package.prompt, privacy: .public)")
+
         let session = try adapterProvider.makeSmartHomeSession(
             instructions: package.instructions,
             tools: package.tools,
             useAdapter: package.useAdapter
         )
 
-        switch package.generationMode {
-        case .greedy:
-            return try await session.respond(
-                to: Prompt(package.prompt),
-                generating: HomeCommandDraft.self,
-                options: Self.generationOptions(for: package.generationMode)
-            ).content
-        case .defaultSampling:
-            return try await session.respond(to: Prompt(package.prompt), generating: HomeCommandDraft.self).content
+        do {
+            let draft: HomeCommandDraft
+            switch package.generationMode {
+            case .greedy:
+                draft = try await session.respond(
+                    to: Prompt(package.prompt),
+                    generating: HomeCommandDraft.self,
+                    options: Self.generationOptions(for: package.generationMode)
+                ).content
+            case .defaultSampling:
+                draft = try await session.respond(to: Prompt(package.prompt), generating: HomeCommandDraft.self).content
+            }
+            logger.debug("[resolveDraft] FoundationModelOutput: \(String(describing: draft), privacy: .public)")
+            return draft
+        } catch {
+            logger.error("[resolveDraft] FoundationModelError: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
 }

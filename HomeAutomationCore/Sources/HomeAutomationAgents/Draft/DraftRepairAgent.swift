@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationCore
+import os
 
 /// Attempts draft repair or lower-confidence draft selection.
 public struct DraftRepairAgent: HomeAgent {
@@ -10,6 +11,7 @@ public struct DraftRepairAgent: HomeAgent {
     public let capabilities: Set<AgentCapability> = [.draftRepair]
     public let timeoutNanoseconds: UInt64 = 25_000_000_000
     private let repair: @Sendable (HomeModelInstructionPackage) async throws -> AgentDraftResolutionOutput
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.DraftRepair")
 
     public init(repair: @escaping @Sendable (HomeModelInstructionPackage) async throws -> AgentDraftResolutionOutput) {
         self.repair = repair
@@ -20,6 +22,7 @@ public struct DraftRepairAgent: HomeAgent {
     }
 
     public func run(_ input: HomeModelInstructionPackage, context: ResolutionContext) async throws -> AgentDraftResolutionOutput {
-        try await repair(input)
+        logger.debug("[run] Executing DraftRepairAgent")
+        return try await repair(input)
     }
 }

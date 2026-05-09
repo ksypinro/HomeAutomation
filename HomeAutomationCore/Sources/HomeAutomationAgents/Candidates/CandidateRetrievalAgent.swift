@@ -1,6 +1,7 @@
 import Foundation
 import HomeAutomationCore
 import HomeAutomationRAG
+import os
 
 /// Retrieves candidate devices from the mock registry, merging semantic RAG matches
 /// and conversation-memory-hinted devices.
@@ -12,6 +13,7 @@ public struct CandidateRetrievalAgent: HomeAgent {
     public let capabilities: Set<AgentCapability> = [.candidateRetrieval]
     public let timeoutNanoseconds: UInt64 = 5_000_000_000
     private let retrieve: @Sendable (CandidateRetrievalInput) async throws -> [HomeCandidateRecord]
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateRetrieval")
 
     public init(retrieve: @escaping @Sendable (CandidateRetrievalInput) async throws -> [HomeCandidateRecord]) {
         self.retrieve = retrieve
@@ -47,7 +49,8 @@ public struct CandidateRetrievalAgent: HomeAgent {
     }
 
     public func run(_ input: CandidateRetrievalInput, context: ResolutionContext) async throws -> [HomeCandidateRecord] {
-        try await retrieve(input)
+        logger.debug("[run] Executing CandidateRetrievalAgent with input limit \(input.limit)")
+        return try await retrieve(input)
     }
 
     private static func semanticQuery(from input: CandidateRetrievalInput) -> String {
