@@ -19,27 +19,29 @@ public struct IntentFamilyAgent: HomeAgent {
     public let id = AgentID.intentFamily
     public let capabilities: Set<AgentCapability> = [.intentClassification]
     public let timeoutNanoseconds: UInt64 = 10_000_000_000
-    private let classify: @Sendable (String) async throws -> HomeIntentFamilyResult
+    private let worker: IntentFamilyAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 
     public init(
         contextRetriever: ContextRetriever? = nil,
         classify: @escaping @Sendable (String) async throws -> HomeIntentFamilyResult
     ) {
-        self.classify = classify
-        self.contextRetriever = contextRetriever
+        self.init(
+            worker: IntentFamilyAgentWorkerSession(classify: classify),
+            contextRetriever: contextRetriever
+        )
     }
 
     public init(
-        worker: HomeAgentWorkerSessionSupport = HomeAgentWorkerSessionSupport(),
+        worker: IntentFamilyAgentWorkerSession = IntentFamilyAgentWorkerSession(),
         contextRetriever: ContextRetriever? = nil
     ) {
-        self.classify = worker.classifyIntentFamily
+        self.worker = worker
         self.contextRetriever = contextRetriever
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeIntentFamilyResult {
         let enrichedInput = await AgentRAGSupport.nluInput(input, task: "intent family classification", contextRetriever: contextRetriever)
-        return try await classify(enrichedInput)
+        return try await worker.classifyIntentFamily(enrichedInput)
     }
 }

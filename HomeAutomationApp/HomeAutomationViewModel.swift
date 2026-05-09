@@ -76,6 +76,9 @@ final class HomeAutomationViewModel {
         Task {
             await initializeRAG()
         }
+        Task.detached {
+            HomeFoundationModelPrewarmer.prewarmDefaultSession()
+        }
     }
 
     func initializeRAG() async {

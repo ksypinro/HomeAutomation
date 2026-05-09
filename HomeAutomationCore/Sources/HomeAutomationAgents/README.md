@@ -108,8 +108,13 @@ flowchart TD
 
 | Component | Role |
 | --- | --- |
-| `HomeAgentWorkerOverrides` | Test and injection container for replacing individual worker functions. |
-| `HomeAgentWorkerSessionSupport` | Foundation Models worker support. It runs worker tasks when available and uses deterministic fallback when models are unavailable. |
+| `LanguageAgentWorkerSession` | Foundation Models worker session owned by `LanguageAgent`, with deterministic parser fallback. |
+| `DomainAgentWorkerSession` | Foundation Models worker session owned by `DomainAgent`, with deterministic parser fallback. |
+| `IntentFamilyAgentWorkerSession` | Foundation Models worker session owned by `IntentFamilyAgent`, with deterministic parser fallback. |
+| `DeviceTypeAgentWorkerSession` | Foundation Models worker session owned by `DeviceTypeAgent`, with deterministic parser fallback. |
+| `SlotExtractionAgentWorkerSession` | Foundation Models worker session owned by `SlotExtractionAgent`, with deterministic parser fallback. |
+| `RiskClassificationAgentWorkerSession` | Foundation Models worker session owned by `RiskClassificationAgent`, with deterministic parser fallback. |
+| `NLUModelCallPolicy` | Deterministic-first threshold policy for skipping low-value NLU model calls. |
 | `LanguageAgent` | Produces `HomeLanguageDetectionResult`. |
 | `DomainAgent` | Produces `HomeDomainClassificationResult`. |
 | `IntentFamilyAgent` | Produces `HomeIntentFamilyResult`. |
@@ -117,7 +122,7 @@ flowchart TD
 | `SlotExtractionAgent` | Produces `HomeSlotExtractionResult`. |
 | `RiskClassificationAgent` | Produces `HomeRiskClassificationResult`. |
 
-NLU agents may use RAG few-shot examples, but their output is still treated as an advisory signal until deterministic validation.
+NLU agents may use RAG few-shot examples, but their output is still treated as an advisory signal until deterministic validation. Worker sessions now run deterministic parsing first and call Foundation Models only when the relevant NLU confidence is below the task threshold. Intent and device-type sessions use compact task-specific catalog hints instead of full Bixby or capability summaries.
 
 ## Knowledge Components
 
@@ -145,19 +150,23 @@ Knowledge agents reduce prompt size and improve focus, but they do not own sourc
 | `CandidateShardAgent` | Selects candidates inside one shard for large candidate lists. |
 | `CandidateHydrationAgent` | Converts selected IDs into full `HomeCandidateRecord` values. |
 
+Candidate model prompts are budgeted with `CandidateResolutionPromptBuilder`, compact candidate descriptions when needed, and use runtime `DynamicGenerationSchema` ID choices before the existing post-generation ID filter.
+
 ## Draft Components
 
 | Component | Role |
 | --- | --- |
-| `AgentToolProvider` | Chooses the Foundation Models tools available to draft generation. |
+| `AgentToolProvider` | Chooses the compact default Foundation Models tools available to draft generation and estimates tool output budgets. |
+| `AgentToolOutputSizeStore` | Tracks observed tool output sizes so later prompt budgets can use adaptive estimates. |
 | `AgentFindDevicesTool` | Tool for searching devices by query, room, type, and limit. |
-| `AgentGetCapabilitiesTool` | Tool for capability, command, enum, range, and risk lookup. |
+| `AgentInspectCandidateCommandTool` | Consolidated capability, command, mode, range, validation, and risk lookup tool. |
+| `AgentGetCapabilitiesTool` | Compatibility tool for capability, command, enum, range, and risk lookup. |
 | `AgentGetDeviceStateTool` | Tool for current device state. |
-| `AgentGetSupportedModesTool` | Tool for supported enum and mode values. |
-| `AgentValidateCommandTool` | Tool for pre-validating capability/command support and risk. |
+| `AgentGetSupportedModesTool` | Compatibility tool for supported enum and mode values. |
+| `AgentValidateCommandTool` | Compatibility tool for pre-validating capability/command support and risk. |
 | `AgentHydrateCandidatesTool` | Tool for hydrating candidate IDs. |
-| `AgentInstructionSetFactory` | Builds `HomeModelInstructionPackage` from final input, tools, RAG context, and canonical registries. |
-| `AgentDraftAttemptReport` | One draft attempt diagnostic. |
+| `AgentInstructionSetFactory` | Builds `HomeModelInstructionPackage` from final input, tools, RAG context, canonical registries, and context-budget compaction. |
+| `AgentDraftAttemptReport` | One draft attempt diagnostic, including structured Foundation Models error kind. |
 | `AgentDraftResolutionReport` | Aggregate report across draft attempts. |
 | `AgentDraftResolutionOutput` | Draft plus report. |
 | `AgentDraftResolverMetrics` | Stores the latest draft-resolution report. |
@@ -165,6 +174,8 @@ Knowledge agents reduce prompt size and improve focus, but they do not own sourc
 | `InstructionComposerAgent` | Produces the instruction package. |
 | `DraftGenerationAgent` | Produces the primary draft. |
 | `DraftRepairAgent` | Attempts draft repair or lower-confidence draft selection. |
+
+Draft generation now uses a consolidated inspection tool by default, caps tool outputs, and carries `HomeModelContextBudgetReport` inside the instruction package. Large prompts are compacted in ordered stages before being sent to Foundation Models. Adapter retry variants are skipped when no adapter is configured, and later adapter attempts are skipped after an adapter-unavailable failure.
 
 ## Safety and Execution Components
 

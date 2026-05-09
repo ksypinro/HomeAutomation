@@ -93,6 +93,49 @@ public struct OrchestratorCandidateMetrics: Sendable, Codable, Equatable {
     }
 }
 
+public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
+    public var modelAvailabilityStatus: String
+    public var modelCallCount: Int
+    public var skippedModelCallCount: Int
+    public var contextWindowFailures: Int
+    public var guardrailFailures: Int
+    public var selectedDraftAttempt: String?
+    public var adapterAttemptOutcome: String?
+    public var perStageModelUsage: [String: String]
+    public var selectedToolNames: [String]
+    public var toolCount: Int
+    public var estimatedToolOutputCharacterCount: Int
+    public var contextBudgetReport: HomeModelContextBudgetReport?
+
+    public init(
+        modelAvailabilityStatus: String = "unknown",
+        modelCallCount: Int = 0,
+        skippedModelCallCount: Int = 0,
+        contextWindowFailures: Int = 0,
+        guardrailFailures: Int = 0,
+        selectedDraftAttempt: String? = nil,
+        adapterAttemptOutcome: String? = nil,
+        perStageModelUsage: [String: String] = [:],
+        selectedToolNames: [String] = [],
+        toolCount: Int = 0,
+        estimatedToolOutputCharacterCount: Int = 0,
+        contextBudgetReport: HomeModelContextBudgetReport? = nil
+    ) {
+        self.modelAvailabilityStatus = modelAvailabilityStatus
+        self.modelCallCount = modelCallCount
+        self.skippedModelCallCount = skippedModelCallCount
+        self.contextWindowFailures = contextWindowFailures
+        self.guardrailFailures = guardrailFailures
+        self.selectedDraftAttempt = selectedDraftAttempt
+        self.adapterAttemptOutcome = adapterAttemptOutcome
+        self.perStageModelUsage = perStageModelUsage
+        self.selectedToolNames = selectedToolNames
+        self.toolCount = toolCount
+        self.estimatedToolOutputCharacterCount = estimatedToolOutputCharacterCount
+        self.contextBudgetReport = contextBudgetReport
+    }
+}
+
 public struct OrchestratorMetrics: Sendable, Codable {
     public var command: String
     public var startedAt: Date
@@ -108,6 +151,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var contextMetrics: OrchestratorContextMetrics
     public var safetyMetrics: OrchestratorSafetyMetrics
     public var candidateMetrics: OrchestratorCandidateMetrics
+    public var foundationModelUsage: FoundationModelUsageMetrics
 
     public init(command: String) {
         self.command = command
@@ -122,6 +166,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.contextMetrics = OrchestratorContextMetrics()
         self.safetyMetrics = OrchestratorSafetyMetrics()
         self.candidateMetrics = OrchestratorCandidateMetrics()
+        self.foundationModelUsage = FoundationModelUsageMetrics()
     }
 
     public mutating func captureEvaluationFields(
@@ -176,6 +221,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
                 context.memoryHints.contains { $0.deviceID == targetID }
             } ?? false
         )
+        captureFoundationModelFields(context: context)
     }
 
     private static func confidenceByAgent(context: ResolutionContext) -> [String: Double] {
@@ -205,6 +251,62 @@ public struct OrchestratorMetrics: Sendable, Codable {
             values[AgentID.draftGeneration.rawValue] = draft.confidence
         }
         return values
+    }
+
+    private mutating func captureFoundationModelFields(context: ResolutionContext) {
+        let modelStages: [AgentID] = [
+            .language,
+            .domain,
+            .intentFamily,
+            .deviceType,
+            .slotExtraction,
+            .riskClassification,
+            .candidateRanking,
+            .candidateShard,
+            .draftGeneration,
+            .draftRepair
+        ]
+        let statuses = Set(agentStatuses.keys)
+        let executedModelStages = modelStages.filter { statuses.contains($0.rawValue) }
+        var stageUsage = foundationModelUsage.perStageModelUsage
+        for stage in modelStages {
+            if fallbackUsed {
+                stageUsage[stage.rawValue] = "skippedUnavailable"
+            } else if statuses.contains(stage.rawValue) {
+                stageUsage[stage.rawValue] = "eligible"
+            }
+        }
+
+        let errorKinds = context.errors.map { FoundationModelDiagnostics.failureKind(forDescription: $0.reason) }
+        let budgetReport = context.instructionPackage?.contextBudgetReport
+        let selectedToolNames = budgetReport?.selectedToolNames ?? context.instructionPackage?.tools.map(\.name) ?? []
+
+        foundationModelUsage.perStageModelUsage = stageUsage
+        foundationModelUsage.modelCallCount = fallbackUsed ? 0 : executedModelStages.count
+        foundationModelUsage.skippedModelCallCount = fallbackUsed
+            ? modelStages.count
+            : Self.estimatedSkippedNLUCount(context: context)
+        foundationModelUsage.contextWindowFailures = errorKinds.filter { $0 == .contextWindowExceeded }.count
+        foundationModelUsage.guardrailFailures = errorKinds.filter { $0 == .guardrailRefusal }.count
+        foundationModelUsage.selectedToolNames = selectedToolNames
+        foundationModelUsage.toolCount = selectedToolNames.count
+        foundationModelUsage.estimatedToolOutputCharacterCount = budgetReport?.estimatedToolOutputCharacterCount ?? 0
+        foundationModelUsage.contextBudgetReport = budgetReport
+    }
+
+    private static func estimatedSkippedNLUCount(context: ResolutionContext) -> Int {
+        let confidence = confidenceByAgent(context: context)
+        let thresholds: [String: Double] = [
+            AgentID.language.rawValue: 0.90,
+            AgentID.domain.rawValue: 0.80,
+            AgentID.intentFamily.rawValue: 0.78,
+            AgentID.deviceType.rawValue: 0.78,
+            AgentID.slotExtraction.rawValue: 0.78,
+            AgentID.riskClassification.rawValue: 0.85
+        ]
+        return thresholds.filter { agentID, threshold in
+            confidence[agentID].map { $0 >= threshold } ?? false
+        }.count
     }
 }
 

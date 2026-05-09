@@ -69,6 +69,46 @@ public enum AgentTextParser {
         )
     }
 
+    public static func deterministicState(
+        for text: String,
+        riskReason: String = "Agent deterministic fallback"
+    ) -> HomeResolutionState {
+        deterministicState(
+            for: text,
+            confidence: deterministicConfidence(for: text),
+            riskReason: riskReason
+        )
+    }
+
+    public static func deterministicConfidence(for text: String) -> Double {
+        let normalized = text.agentNormalizedHomeTokenString
+        var score = 0.35
+
+        if intentFamily(for: normalized) != .unsupported {
+            score += 0.20
+        }
+        if !deviceTypes(for: normalized).isEmpty {
+            score += 0.16
+        }
+        if knownRooms.contains(where: { normalized.contains($0) }) {
+            score += 0.10
+        }
+        if !extractedNumbers(from: normalized).isEmpty {
+            score += 0.07
+        }
+        if !modeCandidates(in: normalized).isEmpty {
+            score += 0.06
+        }
+        if riskLevel(for: normalized) != .low {
+            score += 0.06
+        }
+        if containsAny(normalized, ["turn on", "turn off", "set", "increase", "decrease", "open", "close", "lock", "unlock", "start", "stop", "status", "check"]) {
+            score += 0.06
+        }
+
+        return min(0.98, score)
+    }
+
     public static func intentFamily(for normalized: String) -> HomeAutomationIntentFamily {
         if containsAny(normalized, ["unlock", "lock the", "secure"]) {
             return .lockUnlock

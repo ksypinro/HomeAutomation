@@ -466,7 +466,12 @@ HomeAutomation/
 |   |   |   |   |-- DeviceTypeAgent.swift
 |   |   |   |   |-- SlotExtractionAgent.swift
 |   |   |   |   |-- RiskClassificationAgent.swift
-|   |   |   |   `-- WorkerSessionSupport.swift
+|   |   |   |   |-- LanguageAgentWorkerSession.swift
+|   |   |   |   |-- DomainAgentWorkerSession.swift
+|   |   |   |   |-- IntentFamilyAgentWorkerSession.swift
+|   |   |   |   |-- DeviceTypeAgentWorkerSession.swift
+|   |   |   |   |-- SlotExtractionAgentWorkerSession.swift
+|   |   |   |   `-- RiskClassificationAgentWorkerSession.swift
 |   |   |   |-- Knowledge/
 |   |   |   |   |-- KnowledgeInputs.swift
 |   |   |   |   |-- CapabilityKnowledgeAgent.swift
@@ -568,7 +573,10 @@ HomeAutomation/
 | `HomeFinalResolutionInput` | Compound input for draft resolution and validation. |
 | `HomeAutomationResolverResult` | Top-level resolver output. |
 | `HomeGenerationMode` | Foundation Models generation mode. |
-| `HomeModelInstructionPackage` | Prompt, instructions, tools, adapter flag, and generation mode. |
+| `HomeModelInstructionPackage` | Prompt, raw instruction text, tools, adapter flag, generation mode, and optional context-budget report. |
+| `HomeModelContextBudgetReport` | Token-budget estimate for instructions, prompt, tools, candidates, RAG sections, and selected compaction level. |
+| `FoundationModelContextBudgeter` | Estimates Foundation Models input size and selects compact prompt variants before draft generation. |
+| `FoundationModelFailureKind` | Structured Foundation Models failure category for context-window, guardrail, adapter, tool, and generation errors. |
 
 ## 17. Low-Level Component Description: Core Catalogs, Policies, Registry
 
@@ -596,9 +604,11 @@ HomeAutomation/
 | `HomeBixbyLinkedVoiceIntentPair` | Link between local capability and Bixby source intent. |
 | `HomeBixbyCommandMapper` | Converts Bixby voice intents into `HomeCommandDraft` values. |
 | `FoundationHomeCommandDraftResolver` | Concrete Foundation Models draft resolver. |
-| `HomeAdapterModelDiagnostic` | Adapter load diagnostic record. |
+| `HomeAdapterModelDiagnostic` | Adapter load diagnostic record with source, identifier, compatibility version, outcome, and failure kind. |
 | `HomeAdapterModelDiagnosticsStore` | Thread-safe last-diagnostic store. |
 | `HomeAdapterModelProvider` | Creates Foundation Models sessions with optional adapter configuration. |
+| `HomeAdapterTrainingExample`, `HomeAdapterEvaluationCase`, `HomeAdapterEvaluationResult`, `HomeAdapterCompatibilityManifest` | Adapter dataset, holdout evaluation, and compatibility metadata. |
+| `HomeAdapterTrainingExporter` | Deterministic JSONL/export and holdout validation support for future adapter training. |
 
 ## 18. Low-Level Component Description: Agent Protocols
 
@@ -622,8 +632,8 @@ HomeAutomation/
 
 | Component | Role |
 | --- | --- |
-| `HomeAgentWorkerOverrides` | Injection container for replacing worker functions in tests. |
-| `HomeAgentWorkerSessionSupport` | Foundation Models worker support with deterministic fallback. |
+| `LanguageAgentWorkerSession`, `DomainAgentWorkerSession`, `IntentFamilyAgentWorkerSession`, `DeviceTypeAgentWorkerSession`, `SlotExtractionAgentWorkerSession`, `RiskClassificationAgentWorkerSession` | Per-agent Foundation Models worker sessions with deterministic fallback and deterministic-first model-call policy. |
+| `NLUModelCallPolicy` | Threshold policy that skips low-value NLU model calls when deterministic parsing is already high-confidence. |
 | `AgentRAGSupport` | Internal helper for retrieving RAG context for agents. |
 | `CapabilityKnowledgeAgent` | Retrieves and hydrates capability knowledge. |
 | `BixbyKnowledgeAgent` | Retrieves and hydrates Bixby command knowledge. |
@@ -638,15 +648,16 @@ HomeAutomation/
 | `CandidateRankingAgent` | Selects final candidates or clarification. |
 | `CandidateShardAgent` | Selects candidates from one shard. |
 | `CandidateHydrationAgent` | Hydrates final candidate IDs. |
-| `AgentToolProvider` | Builds Foundation Models tools for draft generation. |
+| `AgentToolProvider` | Builds the compact default Foundation Models tool set for draft generation. |
 | `AgentFindDevicesTool` | Tool for device search. |
+| `AgentInspectCandidateCommandTool` | Consolidated tool for capability lookup, supported commands, modes, numeric ranges, validation, and risk. |
 | `AgentGetCapabilitiesTool` | Tool for capability lookup. |
 | `AgentGetDeviceStateTool` | Tool for reading device state. |
 | `AgentGetSupportedModesTool` | Tool for enum/mode lookup. |
 | `AgentValidateCommandTool` | Tool for command support and risk validation. |
 | `AgentHydrateCandidatesTool` | Tool for full candidate hydration. |
-| `AgentInstructionSetFactory` | Builds prompt/instruction packages with canonical data and RAG-selected context. |
-| `AgentDraftAttemptReport` | One draft attempt report. |
+| `AgentInstructionSetFactory` | Builds prompt/instruction packages with canonical data, RAG-selected context, context-budgeting, and prompt compaction. |
+| `AgentDraftAttemptReport` | One draft attempt report with structured Foundation Models error kind. |
 | `AgentDraftResolutionReport` | Aggregated draft attempt report. |
 | `AgentDraftResolutionOutput` | Draft plus report output. |
 | `AgentDraftResolverMetrics` | Stores latest draft report. |
@@ -706,6 +717,7 @@ HomeAutomation/
 | `OrchestratorContextMetrics` | Metrics about context and RAG usage. |
 | `OrchestratorSafetyMetrics` | Safety-specific metrics. |
 | `OrchestratorCandidateMetrics` | Candidate and shard metrics. |
+| `FoundationModelUsageMetrics` | Foundation Models availability, model-call, skipped-call, tool, budget, and failure metrics. |
 | `OrchestratorMetrics` | Full metrics payload. |
 | `OrchestratorMetricsCollector` | Stores and serializes latest metrics. |
 

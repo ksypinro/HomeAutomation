@@ -21,27 +21,29 @@ public struct DeviceTypeAgent: HomeAgent {
     public let id = AgentID.deviceType
     public let capabilities: Set<AgentCapability> = [.deviceTypeExtraction]
     public let timeoutNanoseconds: UInt64 = 10_000_000_000
-    private let classify: @Sendable (String) async throws -> HomeDeviceTypeResult
+    private let worker: DeviceTypeAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 
     public init(
         contextRetriever: ContextRetriever? = nil,
         classify: @escaping @Sendable (String) async throws -> HomeDeviceTypeResult
     ) {
-        self.classify = classify
-        self.contextRetriever = contextRetriever
+        self.init(
+            worker: DeviceTypeAgentWorkerSession(classify: classify),
+            contextRetriever: contextRetriever
+        )
     }
 
     public init(
-        worker: HomeAgentWorkerSessionSupport = HomeAgentWorkerSessionSupport(),
+        worker: DeviceTypeAgentWorkerSession = DeviceTypeAgentWorkerSession(),
         contextRetriever: ContextRetriever? = nil
     ) {
-        self.classify = worker.classifyDeviceType
+        self.worker = worker
         self.contextRetriever = contextRetriever
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeDeviceTypeResult {
         let enrichedInput = await AgentRAGSupport.nluInput(input, task: "device type extraction", contextRetriever: contextRetriever)
-        return try await classify(enrichedInput)
+        return try await worker.classifyDeviceType(enrichedInput)
     }
 }

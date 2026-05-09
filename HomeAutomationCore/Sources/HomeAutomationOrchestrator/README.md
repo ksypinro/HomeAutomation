@@ -113,7 +113,8 @@ Parallel NLU agents
 | `OrchestratorContextMetrics` | Context and retrieval-related metrics. |
 | `OrchestratorSafetyMetrics` | Safety, confirmation, and execution-safety metrics. |
 | `OrchestratorCandidateMetrics` | Candidate count, shard, and ranking metrics. |
-| `OrchestratorMetrics` | Full run metrics payload, including traces, fallback usage, circuit states, evaluation fields, and final outcome. |
+| `FoundationModelUsageMetrics` | Foundation Models availability, model-call, skipped-call, failure, tool, and context-budget metrics. |
+| `OrchestratorMetrics` | Full run metrics payload, including traces, fallback usage, Foundation Models usage, circuit states, evaluation fields, and final outcome. |
 | `OrchestratorMetricsCollector` | Actor storing latest metrics and serializing them as JSON for the UI. |
 
 ## Scheduling Behavior
@@ -144,3 +145,4 @@ flowchart TD
 - `MockExecutionAgent` fail-closed behavior returns a ready plan instead of mutating the registry.
 - Conversation memory can add hints only before planning; it cannot bypass validation.
 - Every attempted agent should appear in traces, metrics, and pipeline events.
+- Foundation Models availability, prompt budget, selected tools, skipped calls, and model failure categories are surfaced through metrics.

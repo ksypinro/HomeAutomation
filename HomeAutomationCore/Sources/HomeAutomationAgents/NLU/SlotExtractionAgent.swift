@@ -24,27 +24,29 @@ public struct SlotExtractionAgent: HomeAgent {
     public let id = AgentID.slotExtraction
     public let capabilities: Set<AgentCapability> = [.slotExtraction]
     public let timeoutNanoseconds: UInt64 = 10_000_000_000
-    private let extract: @Sendable (String) async throws -> HomeSlotExtractionResult
+    private let worker: SlotExtractionAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 
     public init(
         contextRetriever: ContextRetriever? = nil,
         extract: @escaping @Sendable (String) async throws -> HomeSlotExtractionResult
     ) {
-        self.extract = extract
-        self.contextRetriever = contextRetriever
+        self.init(
+            worker: SlotExtractionAgentWorkerSession(extract: extract),
+            contextRetriever: contextRetriever
+        )
     }
 
     public init(
-        worker: HomeAgentWorkerSessionSupport = HomeAgentWorkerSessionSupport(),
+        worker: SlotExtractionAgentWorkerSession = SlotExtractionAgentWorkerSession(),
         contextRetriever: ContextRetriever? = nil
     ) {
-        self.extract = worker.extractSlots
+        self.worker = worker
         self.contextRetriever = contextRetriever
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeSlotExtractionResult {
         let enrichedInput = await AgentRAGSupport.nluInput(input, task: "slot extraction", contextRetriever: contextRetriever)
-        return try await extract(enrichedInput)
+        return try await worker.extractSlots(enrichedInput)
     }
 }

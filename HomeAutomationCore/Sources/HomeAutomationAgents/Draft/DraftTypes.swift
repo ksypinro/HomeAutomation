@@ -12,6 +12,7 @@ public struct AgentDraftAttemptReport: Sendable, Codable, Equatable {
     public let confidence: Double?
     public let selected: Bool
     public let errorDescription: String?
+    public let errorKind: FoundationModelFailureKind?
 
     public var summary: String {
         var parts = ["\(name) \(outcome)"]
@@ -24,6 +25,9 @@ public struct AgentDraftAttemptReport: Sendable, Codable, Equatable {
         if let errorDescription {
             parts.append("error=\(errorDescription)")
         }
+        if let errorKind {
+            parts.append("kind=\(errorKind.rawValue)")
+        }
         return parts.joined(separator: " ")
     }
 
@@ -34,7 +38,8 @@ public struct AgentDraftAttemptReport: Sendable, Codable, Equatable {
         outcome: String,
         confidence: Double?,
         selected: Bool,
-        errorDescription: String?
+        errorDescription: String?,
+        errorKind: FoundationModelFailureKind? = nil
     ) {
         self.name = name
         self.useAdapter = useAdapter
@@ -43,6 +48,7 @@ public struct AgentDraftAttemptReport: Sendable, Codable, Equatable {
         self.confidence = confidence
         self.selected = selected
         self.errorDescription = errorDescription
+        self.errorKind = errorKind
     }
 
     func selecting() -> AgentDraftAttemptReport {
@@ -53,7 +59,8 @@ public struct AgentDraftAttemptReport: Sendable, Codable, Equatable {
             outcome: outcome,
             confidence: confidence,
             selected: true,
-            errorDescription: errorDescription
+            errorDescription: errorDescription,
+            errorKind: errorKind
         )
     }
 }
