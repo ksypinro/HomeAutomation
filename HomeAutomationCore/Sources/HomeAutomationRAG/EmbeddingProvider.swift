@@ -9,7 +9,12 @@ public protocol CorpusAwareEmbeddingProviding: EmbeddingProviding {
     func prepareForCorpus(_ texts: [String]) async
 }
 
-public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding {
+public protocol TFIDFVocabularyPersisting: Sendable {
+    func tfidfVocabularySnapshot() async -> TFIDFVocabularySnapshot?
+    func restoreTFIDFVocabulary(from snapshot: TFIDFVocabularySnapshot) async -> Bool
+}
+
+public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabularyPersisting {
     private var vocabulary: [String: Int] = [:]
     private var documentFrequency: [String: Int] = [:]
     private var documentCount: Int = 0
@@ -104,6 +109,34 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding {
         "scene": ["routine"],
         "movie": ["routine", "scene"]
     ]
+
+    // MARK: - Persistence
+
+    /// Returns a snapshot of the current vocabulary state for disk serialisation.
+    public func vocabularySnapshot() -> TFIDFVocabularySnapshot {
+        TFIDFVocabularySnapshot(
+            vocabulary: vocabulary,
+            documentFrequency: documentFrequency,
+            documentCount: documentCount
+        )
+    }
+
+    /// Restores vocabulary state from a previously persisted snapshot, allowing the
+    /// provider to embed new queries without rebuilding the corpus from scratch.
+    public func restoreVocabulary(from snapshot: TFIDFVocabularySnapshot) {
+        vocabulary = snapshot.vocabulary
+        documentFrequency = snapshot.documentFrequency
+        documentCount = snapshot.documentCount
+    }
+
+    public func tfidfVocabularySnapshot() async -> TFIDFVocabularySnapshot? {
+        vocabularySnapshot()
+    }
+
+    public func restoreTFIDFVocabulary(from snapshot: TFIDFVocabularySnapshot) async -> Bool {
+        restoreVocabulary(from: snapshot)
+        return true
+    }
 }
 
 public struct SemanticEmbeddingProvider: CorpusAwareEmbeddingProviding {
@@ -145,7 +178,7 @@ public struct SemanticEmbeddingProvider: CorpusAwareEmbeddingProviding {
     }
 }
 
-public struct FallbackEmbeddingProvider: CorpusAwareEmbeddingProviding {
+public struct FallbackEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabularyPersisting {
     private let primary: any EmbeddingProviding
     private let fallback: any EmbeddingProviding
 
@@ -184,6 +217,32 @@ public struct FallbackEmbeddingProvider: CorpusAwareEmbeddingProviding {
             resolved[index] = fallbackEmbeddings[offset]
         }
         return resolved
+    }
+
+    public func tfidfVocabularySnapshot() async -> TFIDFVocabularySnapshot? {
+        if let snapshot = await Self.tfidfVocabularySnapshot(from: primary) {
+            return snapshot
+        }
+        return await Self.tfidfVocabularySnapshot(from: fallback)
+    }
+
+    public func restoreTFIDFVocabulary(from snapshot: TFIDFVocabularySnapshot) async -> Bool {
+        let primaryRestored = await Self.restoreTFIDFVocabulary(snapshot, into: primary)
+        let fallbackRestored = await Self.restoreTFIDFVocabulary(snapshot, into: fallback)
+        return primaryRestored || fallbackRestored
+    }
+
+    private static func tfidfVocabularySnapshot(from provider: any EmbeddingProviding) async -> TFIDFVocabularySnapshot? {
+        guard let provider = provider as? any TFIDFVocabularyPersisting else { return nil }
+        return await provider.tfidfVocabularySnapshot()
+    }
+
+    private static func restoreTFIDFVocabulary(
+        _ snapshot: TFIDFVocabularySnapshot,
+        into provider: any EmbeddingProviding
+    ) async -> Bool {
+        guard let provider = provider as? any TFIDFVocabularyPersisting else { return false }
+        return await provider.restoreTFIDFVocabulary(from: snapshot)
     }
 }
 

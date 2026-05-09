@@ -1,3 +1,4 @@
+import Foundation
 import HomeAutomationCore
 import HomeAutomationRAG
 import Testing
@@ -203,5 +204,157 @@ struct RAGTests {
         #expect(formatted.contains("[device]"))
         #expect(formatted.contains("device:lamp"))
         #expect(!formatted.contains("[capability]"))
+    }
+
+    // MARK: - Cache persistence tests
+
+    @Test
+    func vectorIndexCacheSavesAndLoadsMatchingVersion() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_rag_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let entry = VectorStoreEntry(
+            chunk: DocumentChunk(id: "test:switch", content: "switch on off", source: .capability),
+            embedding: [0.1, 0.9, 0.3]
+        )
+        let snapshot = VectorIndexSnapshot(version: "v1", entries: [entry], tfidfVocabulary: nil)
+
+        await cache.save(snapshot)
+        let loaded = await cache.load(expectedVersion: "v1")
+
+        #expect(loaded != nil)
+        #expect(loaded?.version == "v1")
+        #expect(loaded?.entries.count == 1)
+        #expect(loaded?.entries.first?.chunk.id == "test:switch")
+        #expect(loaded?.entries.first?.embedding == [0.1, 0.9, 0.3])
+    }
+
+    @Test
+    func vectorIndexCacheRejectsStaleVersion() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_rag_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let snapshot = VectorIndexSnapshot(version: "v1", entries: [], tfidfVocabulary: nil)
+        await cache.save(snapshot)
+
+        let loaded = await cache.load(expectedVersion: "v2-different")
+        #expect(loaded == nil)
+    }
+
+    @Test
+    func vectorIndexCacheReturnsNilWhenFileAbsent() async {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent_\(UUID().uuidString).json")
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let loaded = await cache.load(expectedVersion: "any")
+        #expect(loaded == nil)
+    }
+
+    @Test
+    func vectorStoreSnapshotRoundTrips() async {
+        let store = VectorStore()
+        let chunk = DocumentChunk(id: "cap:switch", content: "switch on off", source: .capability)
+        await store.insert(chunk, embedding: [0.5, 0.5])
+
+        let entries = await store.snapshot()
+        let restored = VectorStore()
+        await restored.restore(from: entries)
+
+        let results = await restored.query([0.5, 0.5], topK: 1)
+        #expect(results.first?.chunk.id == "cap:switch")
+        #expect(await restored.count() == 1)
+    }
+
+    @Test
+    func tfidfVocabularySnapshotRoundTrips() async {
+        let provider = TFIDFEmbeddingProvider()
+        await provider.prepareForCorpus(["switch on light", "lock the door", "set thermostat"])
+
+        let snap = await provider.vocabularySnapshot()
+        #expect(snap.documentCount == 3)
+        #expect(!snap.vocabulary.isEmpty)
+
+        let restored = TFIDFEmbeddingProvider()
+        await restored.restoreVocabulary(from: snap)
+        let restoredSnap = await restored.vocabularySnapshot()
+        #expect(restoredSnap == snap)
+    }
+
+    @Test
+    func fallbackEmbeddingProviderPersistsNestedTFIDFVocabulary() async throws {
+        let provider = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        await provider.prepareForCorpus(["switch on light", "lock the door", "set thermostat"])
+
+        let snapshot = try #require(await provider.tfidfVocabularySnapshot())
+        let restored = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        let restoredVocabulary = await restored.restoreTFIDFVocabulary(from: snapshot)
+        let embedding = await restored.embed("switch on lamp")
+
+        #expect(restoredVocabulary)
+        #expect(!embedding.isEmpty)
+    }
+
+    @Test
+    func knowledgeIndexerRestoresFallbackTFIDFVocabularyFromCache() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_rag_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let cache = VectorIndexCache(fileURL: tempURL)
+        let firstProvider = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        let firstIndexer = KnowledgeIndexer(embeddingProvider: firstProvider, cache: cache)
+        let firstResult = await firstIndexer.indexCanonicalKnowledge(includeCatalogDevices: false)
+        await cache.waitForPendingSave()
+
+        let secondProvider = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        let secondIndexer = KnowledgeIndexer(embeddingProvider: secondProvider, cache: cache)
+        let secondResult = await secondIndexer.indexCanonicalKnowledge(includeCatalogDevices: false)
+        let retriever = await secondIndexer.makeRetriever()
+        let results = await retriever.retrieve("bedroom lamp", topK: 1)
+
+        #expect(!firstResult.restoredFromCache)
+        #expect(secondResult.restoredFromCache)
+        #expect((results.first?.score ?? 0) > 0)
+    }
+
+    @Test
+    func ragIndexVersionChangesWithKnowledgeBaseContent() {
+        let v1 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "1.0",
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            deviceCount: 20
+        )
+        let v2 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "1.0",
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            deviceCount: 21  // one more device
+        )
+        let v3 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "2.0",  // schema bump
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            deviceCount: 20
+        )
+        #expect(v1 != v2)
+        #expect(v1 != v3)
+        #expect(v2 != v3)
     }
 }

@@ -63,11 +63,12 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
-        metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector()
+        metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
+        indexCache: VectorIndexCache = VectorIndexCache()
     ) async -> HomeCommandOrchestrator {
         let conversationMemory = ConversationMemory()
         let circuitBreakers = CircuitBreakerRegistry()
-        let indexer = KnowledgeIndexer()
+        let indexer = KnowledgeIndexer(cache: indexCache)
         await indexer.indexCanonicalKnowledge(deviceRegistry: deviceRegistry)
         let retriever = await indexer.makeRetriever()
         return HomeCommandOrchestrator(

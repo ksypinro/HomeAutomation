@@ -42,4 +42,16 @@ public actor VectorStore {
     public func clear() {
         entries.removeAll()
     }
+
+    // MARK: - Persistence
+
+    /// Returns a snapshot of all entries suitable for disk serialisation.
+    public func snapshot() -> [VectorStoreEntry] {
+        entries.map { VectorStoreEntry(chunk: $0.chunk, embedding: $0.embedding) }
+    }
+
+    /// Replaces all entries with those from a previously persisted snapshot.
+    public func restore(from entries: [VectorStoreEntry]) {
+        self.entries = entries.map { (chunk: $0.chunk, embedding: $0.embedding) }
+    }
 }
