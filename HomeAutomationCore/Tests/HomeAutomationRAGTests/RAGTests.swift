@@ -285,41 +285,52 @@ struct RAGTests {
     }
 
     @Test
-    func knowledgeIndexerRestoresFromCacheOnSecondCall() async throws {
+    func fallbackEmbeddingProviderPersistsNestedTFIDFVocabulary() async throws {
+        let provider = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        await provider.prepareForCorpus(["switch on light", "lock the door", "set thermostat"])
+
+        let snapshot = try #require(await provider.tfidfVocabularySnapshot())
+        let restored = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        let restoredVocabulary = await restored.restoreTFIDFVocabulary(from: snapshot)
+        let embedding = await restored.embed("switch on lamp")
+
+        #expect(restoredVocabulary)
+        #expect(!embedding.isEmpty)
+    }
+
+    @Test
+    func knowledgeIndexerRestoresFallbackTFIDFVocabularyFromCache() async throws {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("test_rag_\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
         let cache = VectorIndexCache(fileURL: tempURL)
-        let chunks = [
-            DocumentChunk(
-                id: "capability:switch",
-                content: "switch light power on off lamp",
-                source: .capability,
-                metadata: ["capabilityId": "switch", "commands": "on,off", "risk": "low"]
-            )
-        ]
+        let firstProvider = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        let firstIndexer = KnowledgeIndexer(embeddingProvider: firstProvider, cache: cache)
+        let firstResult = await firstIndexer.indexCanonicalKnowledge(includeCatalogDevices: false)
+        await cache.waitForPendingSave()
 
-        // First call: full rebuild, writes cache.
-        let indexer1 = KnowledgeIndexer(cache: cache)
-        let result1 = await indexer1.index(chunks: chunks)
-        // Manually save a snapshot (simulating indexCanonicalKnowledge cache write path).
-        let entries = await VectorStore().snapshot()
-        let indexer1Store = VectorStore()
-        await indexer1Store.restore(from: await { () async -> [VectorStoreEntry] in
-            let i = KnowledgeIndexer()
-            _ = await i.index(chunks: chunks)
-            return await i.makeRetriever()
-                .retrieve("lamp", topK: 10)
-                .map { VectorStoreEntry(chunk: $0.chunk, embedding: []) }
-        }())
+        let secondProvider = FallbackEmbeddingProvider(
+            primary: SemanticEmbeddingProvider { _ in [] },
+            fallback: TFIDFEmbeddingProvider()
+        )
+        let secondIndexer = KnowledgeIndexer(embeddingProvider: secondProvider, cache: cache)
+        let secondResult = await secondIndexer.indexCanonicalKnowledge(includeCatalogDevices: false)
+        let retriever = await secondIndexer.makeRetriever()
+        let results = await retriever.retrieve("bedroom lamp", topK: 1)
 
-        // Verify we can save and reload a snapshot.
-        let snap = VectorIndexSnapshot(version: "test-v1", entries: [], tfidfVocabulary: nil)
-        await cache.save(snap)
-        let loaded = await cache.load(expectedVersion: "test-v1")
-        #expect(loaded != nil)
-        #expect(result1.indexedChunkCount == 1)
+        #expect(!firstResult.restoredFromCache)
+        #expect(secondResult.restoredFromCache)
+        #expect((results.first?.score ?? 0) > 0)
     }
 
     @Test
@@ -347,4 +358,3 @@ struct RAGTests {
         #expect(v2 != v3)
     }
 }
-

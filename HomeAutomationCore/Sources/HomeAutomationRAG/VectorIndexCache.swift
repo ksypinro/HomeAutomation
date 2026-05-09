@@ -62,8 +62,7 @@ public struct VectorIndexSnapshot: Codable, Sendable, Equatable {
 /// This directory is safe for regeneratable cache data and is excluded from iCloud backup.
 public actor VectorIndexCache {
     private let fileURL: URL
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    private var pendingSave: Task<Void, Never>?
 
     public static let defaultFileName = "rag_vector_index.json"
     public static let defaultSubdirectory = "HomeAutomationRAG"
@@ -74,15 +73,11 @@ public actor VectorIndexCache {
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let directoryURL = cachesURL.appendingPathComponent(subdirectory, isDirectory: true)
         self.fileURL = directoryURL.appendingPathComponent(fileName)
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
     }
 
     /// Creates a cache pointing to a specific URL — useful for testing.
     public init(fileURL: URL) {
         self.fileURL = fileURL
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
     }
 
     // MARK: - Public API
@@ -96,7 +91,7 @@ public actor VectorIndexCache {
         }
         do {
             let data = try Data(contentsOf: fileURL)
-            let snapshot = try decoder.decode(VectorIndexSnapshot.self, from: data)
+            let snapshot = try JSONDecoder().decode(VectorIndexSnapshot.self, from: data)
             guard snapshot.version == expectedVersion else {
                 return nil
             }
@@ -109,17 +104,22 @@ public actor VectorIndexCache {
     /// Saves a snapshot to disk, creating the parent directory if needed.
     ///
     /// Silently no-ops if the write fails (index will be rebuilt on the next launch).
-    public func save(_ snapshot: VectorIndexSnapshot) {
-        do {
-            let directory = fileURL.deletingLastPathComponent()
-            if !FileManager.default.fileExists(atPath: directory.path) {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            }
-            let data = try encoder.encode(snapshot)
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            // Non-fatal: the index will be rebuilt on the next launch.
-        }
+    public func save(_ snapshot: VectorIndexSnapshot) async {
+        let task = Self.makeSaveTask(snapshot, to: fileURL, priority: .utility)
+        pendingSave = task
+        await task.value
+        pendingSave = nil
+    }
+
+    /// Starts a best-effort background save and returns immediately.
+    public func saveInBackground(_ snapshot: VectorIndexSnapshot) {
+        pendingSave = Self.makeSaveTask(snapshot, to: fileURL, priority: .background)
+    }
+
+    /// Waits for a background save kicked off by `saveInBackground`, if any.
+    public func waitForPendingSave() async {
+        await pendingSave?.value
+        pendingSave = nil
     }
 
     /// Deletes the cached snapshot. Useful when forcing a rebuild in tests or after
@@ -130,6 +130,29 @@ public actor VectorIndexCache {
 
     /// Returns the URL of the cache file — primarily useful for debugging and tests.
     public var cacheFileURL: URL { fileURL }
+
+    private nonisolated static func makeSaveTask(
+        _ snapshot: VectorIndexSnapshot,
+        to fileURL: URL,
+        priority: TaskPriority
+    ) -> Task<Void, Never> {
+        Task.detached(priority: priority) {
+            write(snapshot, to: fileURL)
+        }
+    }
+
+    private nonisolated static func write(_ snapshot: VectorIndexSnapshot, to fileURL: URL) {
+        do {
+            let directory = fileURL.deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
+            let data = try JSONEncoder().encode(snapshot)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            // Non-fatal: the index will be rebuilt on the next launch.
+        }
+    }
 }
 
 // MARK: - Version computation

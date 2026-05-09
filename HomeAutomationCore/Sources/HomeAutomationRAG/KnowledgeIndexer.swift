@@ -122,14 +122,13 @@ public actor KnowledgeIndexer {
         // Persist to cache for next launch.
         if let cache {
             let entries = await vectorStore.snapshot()
-            let tfidfSnapshot = await (embeddingProvider as? TFIDFEmbeddingProvider)?
-                .vocabularySnapshot()
+            let tfidfSnapshot = await Self.tfidfVocabularySnapshot(from: embeddingProvider)
             let indexSnapshot = VectorIndexSnapshot(
                 version: version,
                 entries: entries,
                 tfidfVocabulary: tfidfSnapshot
             )
-            await cache.save(indexSnapshot)
+            await cache.saveInBackground(indexSnapshot)
         }
 
         return result
@@ -145,11 +144,30 @@ public actor KnowledgeIndexer {
         guard !snapshot.entries.isEmpty else { return false }
         await vectorStore.clear()
         await vectorStore.restore(from: snapshot.entries)
-        if let vocabSnapshot = snapshot.tfidfVocabulary,
-           let tfidf = embeddingProvider as? TFIDFEmbeddingProvider {
-            await tfidf.restoreVocabulary(from: vocabSnapshot)
+        if let vocabSnapshot = snapshot.tfidfVocabulary {
+            let restoredVocabulary = await Self.restoreTFIDFVocabulary(
+                vocabSnapshot,
+                into: embeddingProvider
+            )
+            guard restoredVocabulary else {
+                await vectorStore.clear()
+                return false
+            }
         }
         return true
+    }
+
+    private static func tfidfVocabularySnapshot(from provider: any EmbeddingProviding) async -> TFIDFVocabularySnapshot? {
+        guard let provider = provider as? any TFIDFVocabularyPersisting else { return nil }
+        return await provider.tfidfVocabularySnapshot()
+    }
+
+    private static func restoreTFIDFVocabulary(
+        _ snapshot: TFIDFVocabularySnapshot,
+        into provider: any EmbeddingProviding
+    ) async -> Bool {
+        guard let provider = provider as? any TFIDFVocabularyPersisting else { return false }
+        return await provider.restoreTFIDFVocabulary(from: snapshot)
     }
 
     private static func deduplicatedDevices(_ devices: [HomeCandidateRecord]) -> [HomeCandidateRecord] {
