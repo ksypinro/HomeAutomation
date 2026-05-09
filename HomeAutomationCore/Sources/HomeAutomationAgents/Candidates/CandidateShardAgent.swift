@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationCore
+import os
 
 /// Selects candidates within a single shard for large candidate lists (>20 devices).
 public struct CandidateShardAgent: HomeAgent {
@@ -10,6 +11,7 @@ public struct CandidateShardAgent: HomeAgent {
     public let capabilities: Set<AgentCapability> = [.candidateSharding]
     public let timeoutNanoseconds: UInt64 = 10_000_000_000
     private let shard: @Sendable (CandidateShardInput) async throws -> HomeCandidateShardSelection
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateShard")
 
     public init(shard: @escaping @Sendable (CandidateShardInput) async throws -> HomeCandidateShardSelection) {
         self.shard = shard
@@ -27,6 +29,7 @@ public struct CandidateShardAgent: HomeAgent {
     }
 
     public func run(_ input: CandidateShardInput, context: ResolutionContext) async throws -> HomeCandidateShardSelection {
-        try await shard(input)
+        logger.debug("[run] Executing CandidateShardAgent with shard size \(input.shard.count)")
+        return try await shard(input)
     }
 }

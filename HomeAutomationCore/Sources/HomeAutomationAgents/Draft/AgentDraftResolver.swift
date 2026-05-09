@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationCore
+import os
 
 /// Retry wrapper around draft generation packages.
 ///
@@ -16,6 +17,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
     private let adapterProvider: HomeAdapterModelProvider
     private let confidenceThreshold: Double
     private let metrics: AgentDraftResolverMetrics?
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Draft.AgentResolver")
 
     public init(
         adapterProvider: HomeAdapterModelProvider = HomeAdapterModelProvider(),
@@ -50,9 +52,12 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
                 useAdapter: descriptor.useAdapter,
                 simplifyPrompt: descriptor.simplifiedPrompt
             )
+            
+            logger.debug("[resolveDraftWithReport] Attempting strategy: \(candidate.name, privacy: .public)")
             do {
                 let draft = try await resolver.resolveDraft(from: candidate.package)
                 if draft.confidence >= confidenceThreshold {
+                    logger.debug("[resolveDraftWithReport] Strategy \(candidate.name, privacy: .public) succeeded with confidence: \(draft.confidence)")
                     attempts.append(
                         AgentDraftAttemptReport(
                             name: candidate.name,
@@ -69,6 +74,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
                         report: AgentDraftResolutionReport(attempts: attempts, selectedAttemptName: candidate.name)
                     )
                 }
+                logger.debug("[resolveDraftWithReport] Strategy \(candidate.name, privacy: .public) yielded low confidence: \(draft.confidence)")
                 if bestDraft.map({ draft.confidence > $0.confidence }) ?? true {
                     bestDraft = draft
                     bestAttemptIndex = attempts.count
@@ -87,8 +93,10 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             } catch {
                 lastError = error
                 let errorKind = FoundationModelDiagnostics.failureKind(for: error)
+                logger.error("[resolveDraftWithReport] Strategy \(candidate.name, privacy: .public) failed with error: \(error.localizedDescription, privacy: .public)")
                 if candidate.useAdapter, errorKind == .adapterUnavailable {
                     adapterAttemptsDisabled = true
+                    logger.info("[resolveDraftWithReport] Disabling adapter attempts due to unavailability.")
                 }
                 attempts.append(
                     AgentDraftAttemptReport(

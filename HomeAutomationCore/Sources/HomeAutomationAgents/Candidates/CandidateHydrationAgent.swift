@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationCore
+import os
 
 /// Converts selected candidate IDs into fully hydrated `HomeCandidateRecord` values.
 public struct CandidateHydrationAgent: HomeAgent {
@@ -10,6 +11,7 @@ public struct CandidateHydrationAgent: HomeAgent {
     public let capabilities: Set<AgentCapability> = [.candidateHydration]
     public let timeoutNanoseconds: UInt64 = 5_000_000_000
     private let hydrate: @Sendable (CandidateHydrationInput) async throws -> [HomeCandidateRecord]
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateHydration")
 
     public init(hydrate: @escaping @Sendable (CandidateHydrationInput) async throws -> [HomeCandidateRecord]) {
         self.hydrate = hydrate
@@ -24,6 +26,7 @@ public struct CandidateHydrationAgent: HomeAgent {
     }
 
     public func run(_ input: CandidateHydrationInput, context: ResolutionContext) async throws -> [HomeCandidateRecord] {
-        try await hydrate(input)
+        logger.debug("[run] Executing CandidateHydrationAgent for \(input.candidateIDs.count) candidate IDs")
+        return try await hydrate(input)
     }
 }

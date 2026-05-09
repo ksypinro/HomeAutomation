@@ -4,14 +4,12 @@ import HomeAutomationRAG
 
 /// Extracts normalized device-type hints from the user's command text.
 ///
-/// The `DeviceTypeAgent` identifies device types mentioned in the command such as `light`,
-/// `airConditioner`, `thermostat`, `lock`, `tv`, `speaker`, and others. These hints are used
-/// by `CandidateRetrievalAgent` and `CandidateRankingAgent` to narrow the candidate search
-/// space and improve ranking accuracy.
+/// The redesigned `DeviceTypeAgent` uses Foundation Models with a Tool-based approach.
+/// The FM session is given access to `AvailableDeviceTypesTool`, which returns all valid
+/// device type identifiers with rich descriptions. This lets the model look up the catalog
+/// rather than relying on fragile keyword matching.
 ///
 /// Device types use stable internal English identifiers regardless of the input language.
-/// The agent uses the expanded cross-client catalog identifiers from
-/// `HomeAutomationKnowledgeBase` when Foundation Models are available.
 ///
 /// Runs in parallel with the other five NLU agents during the first orchestrator phase.
 public struct DeviceTypeAgent: HomeAgent {

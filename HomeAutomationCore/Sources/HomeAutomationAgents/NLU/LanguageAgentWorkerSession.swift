@@ -1,11 +1,13 @@
 import Foundation
 import FoundationModels
 import HomeAutomationCore
+import os
 
 public struct LanguageAgentWorkerSession: Sendable {
     private let detect: (@Sendable (String) async throws -> HomeLanguageDetectionResult)?
     private let foundationModelAvailability: @Sendable () -> Bool
     private let modelCallPolicy: NLUModelCallPolicy
+    private let logger = Logger(subsystem: "HomeAutomation", category: "NLU.LanguageAgent")
 
     public init(
         detect: (@Sendable (String) async throws -> HomeLanguageDetectionResult)? = nil,
@@ -20,19 +22,40 @@ public struct LanguageAgentWorkerSession: Sendable {
     }
 
     public func detectLanguage(_ text: String) async throws -> HomeLanguageDetectionResult {
+        logger.debug("[Input] text: \(text, privacy: .public)")
         if let detect {
-            return try await detect(text)
+            let result = try await detect(text)
+            logger.debug("[MockOutput] result: \(String(describing: result), privacy: .public)")
+            return result
         }
         let deterministicState = AgentTextParser.deterministicState(for: text)
         let fallback = deterministicState.language
-        guard foundationModelAvailability() else { return fallback }
-        guard modelCallPolicy.shouldUseModel(task: .language, deterministicState: deterministicState) else { return fallback }
+        logger.debug("[DeterministicFallback] result: \(String(describing: fallback), privacy: .public)")
+        guard foundationModelAvailability() else {
+            logger.info("[Availability] Foundation model unavailable, using fallback.")
+            return fallback
+        }
+        guard modelCallPolicy.shouldUseModel(task: .language, deterministicState: deterministicState) else {
+            logger.info("[Policy] Deterministic confidence (\(fallback.confidence, privacy: .public)) >= threshold, skipping model.")
+            return fallback
+        }
 
-        let session = LanguageModelSession(instructions: Instructions("""
+        let instructionsText = """
         Detect the language of this user command.
         Return compact structured output only.
         Use BCP-47-style language codes such as en, es, fr, ja, bn, or mixed_bn_en.
-        """))
-        return try await session.respond(to: Prompt(text), generating: HomeLanguageDetectionResult.self).content
+        """
+        logger.debug("[FoundationModelInput] System Instructions: \(instructionsText, privacy: .public)")
+        logger.debug("[FoundationModelInput] Prompt: \(text, privacy: .public)")
+        
+        let session = LanguageModelSession(instructions: Instructions(instructionsText))
+        do {
+            let result = try await session.respond(to: Prompt(text), generating: HomeLanguageDetectionResult.self).content
+            logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
+            return result
+        } catch {
+            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
     }
 }
