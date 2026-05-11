@@ -24,10 +24,6 @@ let package = Package(
         .library(
             name: "HomeAutomationOrchestrator",
             targets: ["HomeAutomationOrchestrator"]
-        ),
-        .library(
-            name: "HomeAutomationResolver",
-            targets: ["HomeAutomationResolver"]
         )
     ],
     targets: [
@@ -56,10 +52,6 @@ let package = Package(
                 "HomeAutomationAgents"
             ]
         ),
-        .target(
-            name: "HomeAutomationResolver",
-            dependencies: ["HomeAutomationCore"]
-        ),
         .testTarget(
             name: "HomeAutomationRAGTests",
             dependencies: [
@@ -80,15 +72,7 @@ let package = Package(
             dependencies: [
                 "HomeAutomationAgents",
                 "HomeAutomationCore",
-                "HomeAutomationOrchestrator",
-                "HomeAutomationResolver"
-            ]
-        ),
-        .testTarget(
-            name: "HomeAutomationResolverTests",
-            dependencies: [
-                "HomeAutomationCore",
-                "HomeAutomationResolver"
+                "HomeAutomationOrchestrator"
             ]
         )
     ]

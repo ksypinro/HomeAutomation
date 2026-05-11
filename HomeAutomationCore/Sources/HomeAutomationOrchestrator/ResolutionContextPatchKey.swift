@@ -1,5 +1,6 @@
 import Foundation
 
+/// String constants used as dictionary keys when agents patch the `ResolutionContext`.
 public enum ResolutionContextPatchKey {
     public static let resolverResult = "resolverResult"
     public static let language = "language"

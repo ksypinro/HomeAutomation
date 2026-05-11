@@ -3,6 +3,7 @@ import FoundationModels
 import HomeAutomationAgents
 import HomeAutomationCore
 import HomeAutomationRAG
+import OSLog
 
 private struct AgentContextInputError: LocalizedError, Sendable {
     let agentID: AgentID
@@ -13,7 +14,12 @@ private struct AgentContextInputError: LocalizedError, Sendable {
     }
 }
 
+/// A generic wrapper that adapts an agent's specific input/output types into the unified `ResolutionContext`.
+///
+/// This allows the orchestrator to treat all agents uniformly (`AnyHomeAgent`), while still
+/// allowing individual agents to define strict input dependencies and typed outputs.
 public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "ContextualHomeAgent")
     public let agent: Agent
     private let makeInput: @Sendable (ResolutionContext) throws -> Agent.Input
     private let makePatch: @Sendable (Agent.Output, ResolutionContext) -> ResolutionContextPatch
@@ -32,12 +38,21 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
         self.makePatch = makePatch
     }
 
+    /// Executes the underlying agent by converting the context into its required input,
+    /// and then mapping its output back to a `ResolutionContextPatch`.
     public func run(context: ResolutionContext) async -> AgentRunResult {
         do {
+            logger.debug("Generating input for agent: \(self.id.rawValue, privacy: .public)")
             let input = try makeInput(context)
+            
+            logger.debug("Running agent: \(self.id.rawValue, privacy: .public)")
             let output = try await agent.run(input, context: context)
-            return .success(makePatch(output, context))
+            
+            let patch = makePatch(output, context)
+            logger.debug("Agent \(self.id.rawValue, privacy: .public) produced patch successfully.")
+            return .success(patch)
         } catch {
+            logger.error("Agent \(self.id.rawValue, privacy: .public) failed with error: \(error.localizedDescription, privacy: .public)")
             return .terminalFailure(
                 AgentFailure(
                     agentID: id,
@@ -49,6 +64,10 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
     }
 }
 
+/// A factory for assembling the default set of home automation agents.
+/// 
+/// This factory configures each agent with its necessary workers, dependencies,
+/// and contextual mappers, yielding a ready-to-use `AgentRegistry`.
 public enum DefaultAgentRegistryFactory {
     public static func make(
         registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),

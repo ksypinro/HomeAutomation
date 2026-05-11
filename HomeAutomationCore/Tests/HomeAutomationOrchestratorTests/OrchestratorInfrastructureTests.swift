@@ -2,7 +2,6 @@ import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
 import HomeAutomationOrchestrator
-import HomeAutomationResolver
 import Testing
 
 @Suite
@@ -85,60 +84,6 @@ struct OrchestratorInfrastructureTests {
         }
     }
 
-    @Test
-    func orchestratorFallbackPathMatchesLegacyReadyResult() async throws {
-        let command = "Turn on the bedroom lamp"
-        let legacy = LegacyHomeCommandResolver(
-            registry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false }
-        )
-        let orchestrator = HomeCommandOrchestrator(
-            deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false }
-        )
-
-        let legacyResult = try await legacy.resolve(command, executeLowRiskCommands: false)
-        let orchestratorResult = try await orchestrator.resolve(command, executeLowRiskCommands: false)
-
-        #expect(orchestratorResult.aggregation.finalCandidateIDs == legacyResult.aggregation.finalCandidateIDs)
-        #expect(orchestratorResult.draft?.targetDeviceID == legacyResult.draft?.targetDeviceID)
-
-        guard case .readyToExecute(let legacyPlan) = legacyResult.resolution,
-              case .readyToExecute(let orchestratorPlan) = orchestratorResult.resolution else {
-            Issue.record("Expected both paths to return readyToExecute.")
-            return
-        }
-
-        #expect(orchestratorPlan.steps.first?.deviceID == legacyPlan.steps.first?.deviceID)
-        #expect(orchestratorPlan.steps.first?.capability == legacyPlan.steps.first?.capability)
-        #expect(orchestratorPlan.steps.first?.command == legacyPlan.steps.first?.command)
-    }
-
-    @Test
-    func orchestratorFallbackPathMatchesLegacyConfirmationResult() async throws {
-        let command = "Unlock the front door"
-        let legacy = LegacyHomeCommandResolver(
-            registry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false }
-        )
-        let orchestrator = HomeCommandOrchestrator(
-            deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false }
-        )
-
-        let legacyResult = try await legacy.resolve(command, executeLowRiskCommands: true)
-        let orchestratorResult = try await orchestrator.resolve(command, executeLowRiskCommands: true)
-
-        guard case .requiresConfirmation(let legacyDraft) = legacyResult.resolution,
-              case .requiresConfirmation(let orchestratorDraft) = orchestratorResult.resolution else {
-            Issue.record("Expected both paths to require confirmation.")
-            return
-        }
-
-        #expect(orchestratorDraft.targetDeviceID == legacyDraft.targetDeviceID)
-        #expect(orchestratorDraft.capability == legacyDraft.capability)
-        #expect(orchestratorDraft.command == legacyDraft.command)
-    }
 
     @Test
     func orchestratorStreamEmitsEventsAndResult() async throws {

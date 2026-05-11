@@ -1,8 +1,9 @@
 import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
-import os
+import OSLog
 
+/// Tracks contextual footprint metrics such as payload sizes and errors.
 public struct OrchestratorContextMetrics: Sendable, Codable, Equatable {
     public var commandCharacterCount: Int
     public var knowledgeSnippetCount: Int
@@ -31,6 +32,7 @@ public struct OrchestratorContextMetrics: Sendable, Codable, Equatable {
     }
 }
 
+/// Tracks which safety gates were executed and what risk/confirmation levels were determined.
 public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
     public var safetyValidationRan: Bool
     public var parameterValidationRan: Bool
@@ -65,6 +67,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
     }
 }
 
+/// Tracks the volume of candidates retrieved, hydrated, and selected.
 public struct OrchestratorCandidateMetrics: Sendable, Codable, Equatable {
     public var retrievedCandidateCount: Int
     public var hydratedCandidateCount: Int
@@ -93,6 +96,7 @@ public struct OrchestratorCandidateMetrics: Sendable, Codable, Equatable {
     }
 }
 
+/// Tracks language model availability, usage, tool execution, and prompt budget consumption.
 public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
     public var modelAvailabilityStatus: String
     public var modelCallCount: Int
@@ -136,6 +140,7 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
     }
 }
 
+/// A comprehensive snapshot of telemetry data for a single orchestrator run.
 public struct OrchestratorMetrics: Sendable, Codable {
     public var command: String
     public var startedAt: Date
@@ -310,8 +315,9 @@ public struct OrchestratorMetrics: Sendable, Codable {
     }
 }
 
+/// A thread-safe repository that stores the most recent metrics payload.
 public actor OrchestratorMetricsCollector {
-    private let logger = Logger(subsystem: "HomeAutomation", category: "Orchestrator")
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "OrchestratorMetricsCollector")
     private var last: OrchestratorMetrics?
 
     public init() {}

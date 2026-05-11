@@ -1,7 +1,14 @@
 import Foundation
 import HomeAutomationAgents
+import OSLog
 
+/// Coordinates the execution of agent tasks according to an `AgentExecutionPlan`.
+/// 
+/// The scheduler is responsible for resolving agent dependencies, executing tasks in 
+/// sequence or parallel, managing circuit breaker policies, handling execution traces,
+/// and returning a unified `AgentRunResult` when a terminal action or failure occurs.
 public struct AgentScheduler: Sendable {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AgentScheduler")
     private let registry: AgentRegistry
     private let contextStore: ResolutionContextStore
     private let eventBus: AgentEventBus
@@ -25,8 +32,14 @@ public struct AgentScheduler: Sendable {
         self.runID = runID
     }
 
+    /// Executes an execution plan, phase by phase.
+    ///
+    /// - Parameter plan: The `AgentExecutionPlan` defining the sequential and parallel tasks.
+    /// - Returns: The first terminal `AgentRunResult` produced by an agent, or `nil` if all agents succeed non-terminally.
     public func execute(_ plan: AgentExecutionPlan) async -> AgentRunResult? {
-        for phase in plan.phases {
+        logger.info("Starting execution of plan with \(plan.phases.count, privacy: .public) phases for runID: \(self.runID, privacy: .public)")
+        for (index, phase) in plan.phases.enumerated() {
+            logger.debug("Executing phase \(index + 1, privacy: .public)/\(plan.phases.count, privacy: .public)")
             switch phase {
             case .sequential(let task):
                 let context = await contextStore.snapshot()
@@ -51,16 +64,26 @@ public struct AgentScheduler: Sendable {
                     return firstExit
                 }
                 if let exit {
+                    logger.debug("Phase \(index + 1, privacy: .public) returned terminal exit.")
                     return exit
                 }
             }
         }
+        logger.info("Plan execution completed normally without terminal exit.")
         return nil
     }
 
+    /// Runs a single agent task.
+    ///
+    /// - Parameters:
+    ///   - task: The `AgentTask` to run.
+    ///   - context: The current snapshot of the `ResolutionContext`.
+    /// - Returns: An `AgentRunResult` if the agent exits terminally, or `nil` otherwise.
     @discardableResult
     private func runAgent(_ task: AgentTask, context: ResolutionContext) async -> AgentRunResult? {
+        logger.debug("Starting agent: \(task.agentID.rawValue, privacy: .public)")
         guard let agent = registry.agent(for: task.agentID) else {
+            logger.error("Agent \(task.agentID.rawValue, privacy: .public) not found in registry.")
             await eventBus.publish(
                 OrchestratorPipelineEvent(
                     runID: runID,
@@ -78,6 +101,7 @@ public struct AgentScheduler: Sendable {
 
         let breaker = await circuitBreakers.breaker(for: task.agentID)
         guard await breaker.shouldAllow() else {
+            logger.warning("Circuit breaker OPEN for agent \(task.agentID.rawValue, privacy: .public). Skipping execution.")
             let now = Date()
             await contextStore.appendTrace(
                 AgentTraceEntry(
@@ -111,9 +135,11 @@ public struct AgentScheduler: Sendable {
             )
         )
 
+        logger.debug("Agent \(task.agentID.rawValue, privacy: .public) running...")
         let start = Date()
         let result = await agent.run(context: context)
         let end = Date()
+        logger.debug("Agent \(task.agentID.rawValue, privacy: .public) finished in \(end.timeIntervalSince(start), format: .fixed(precision: 3))s with result: \(String(describing: result), privacy: .public)")
 
         await record(result: result, breaker: breaker)
 
