@@ -3,13 +3,22 @@ import FoundationModels
 import HomeAutomationAgents
 import HomeAutomationCore
 import HomeAutomationRAG
+import OSLog
 
+/// Real-time updates emitted during command resolution.
 public enum OrchestratorUpdate: Sendable {
+    /// A diagnostic event detailing a specific stage of resolution.
     case event(OrchestratorPipelineEvent)
+    /// The final output of the resolution process.
     case result(HomeAutomationResolverResult)
 }
 
+/// The primary entry point for processing home automation natural language commands.
+///
+/// `HomeCommandOrchestrator` coordinates the lifecycle of parsing user input, fetching RAG context,
+/// executing multi-agent execution plans, validating constraints, and generating the final command resolution.
 public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "HomeCommandOrchestrator")
     private let registry: AgentRegistry
     private let planner: AgentPlanner
     private let policy: OrchestratorPolicyEngine
@@ -62,6 +71,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         )
     }
 
+    /// Initializes a fully configured, RAG-enabled orchestrator.
+    ///
+    /// This async initializer prepares the Vector Store and indexes all canonical
+    /// device capability knowledge before returning the orchestrator.
     public static func makeRAGEnabled(
         deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
@@ -87,7 +100,14 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         )
     }
 
+    /// Synchronously waits for the complete resolution of a user command.
+    ///
+    /// - Parameters:
+    ///   - text: The natural language command.
+    ///   - executeLowRiskCommands: Whether to automatically mock execution for low risk intents.
+    /// - Returns: The final `HomeAutomationResolverResult`.
     public func resolve(_ text: String, executeLowRiskCommands: Bool = true) async throws -> HomeAutomationResolverResult {
+        logger.info("Resolving text command synchronously: '\(text, privacy: .private)'")
         var finalResult: HomeAutomationResolverResult?
         for try await update in resolveStream(text, executeLowRiskCommands: executeLowRiskCommands) {
             if case .result(let result) = update {
@@ -100,6 +120,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         return finalResult
     }
 
+    /// Returns an asynchronous stream of real-time updates as the command is resolved.
+    ///
+    /// The stream emits intermediate `.event` updates and terminates with a final `.result`.
     public func resolveStream(
         _ text: String,
         executeLowRiskCommands: Bool = true
@@ -108,14 +131,17 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             Task {
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedText.isEmpty else {
+                    logger.error("Rejecting empty command request.")
                     continuation.finish(throwing: FoundationLabCoreError.invalidRequest("Missing home command"))
                     return
                 }
 
+                logger.info("Starting resolution stream for command: '\(trimmedText, privacy: .private)'")
                 let request = CommandRequest(text: trimmedText, executeLowRiskCommands: executeLowRiskCommands)
                 let contextStore = ResolutionContextStore(request: request)
                 if ConversationMemoryReferenceDetector.containsMemoryReference(trimmedText),
                    let hint = await conversationMemory.lastResolvedDeviceHint() {
+                    logger.debug("Injecting conversational memory hint.")
                     await contextStore.appendMemoryHint(hint)
                 }
                 let eventBus = AgentEventBus()
@@ -135,9 +161,12 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 await eventBus.publish(inputEvent)
                 continuation.yield(.event(inputEvent))
 
+                logger.debug("Generating execution plan.")
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 let plan = planner.plan(for: trimmedText, context: await contextStore.snapshot())
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
+                
+                logger.debug("Initializing AgentScheduler for runID: \(runID, privacy: .public)")
                 let scheduler = AgentScheduler(
                     registry: registry,
                     contextStore: contextStore,
@@ -150,6 +179,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 let exit = await scheduler.execute(plan)
 
                 if exit == nil, policy.canExecute(context: await contextStore.snapshot()) {
+                    logger.info("Executing post-pipeline mock execution.")
                     _ = await scheduler.execute(
                         AgentExecutionPlan(phases: [
                             .sequential(AgentTask(.mockExecution))
@@ -191,6 +221,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 await eventBus.publish(outcomeEvent)
                 continuation.yield(.event(outcomeEvent))
                 continuation.yield(.result(result))
+                logger.info("Stream resolution completed successfully.")
                 eventForwarder.cancel()
                 continuation.finish()
             }

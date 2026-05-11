@@ -1,9 +1,11 @@
 import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
+import OSLog
 
 /// Thread-safe store that owns the mutable context and applies typed updates.
 public actor ResolutionContextStore {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "ResolutionContextStore")
     private var context: ResolutionContext
 
     public init(request: CommandRequest) {
@@ -11,12 +13,17 @@ public actor ResolutionContextStore {
     }
 
     /// Get a read-only snapshot for agents.
+    ///
+    /// - Returns: A safe, immutable copy of the current context.
     public func snapshot() -> ResolutionContext {
         context
     }
 
     /// Apply a patch from an agent. Field-specific updates are intentionally typed below.
+    ///
+    /// - Parameter patch: The `ResolutionContextPatch` containing key-value updates.
     public func apply(_ patch: ResolutionContextPatch) {
+        logger.debug("Applying patch from agent: \(patch.agentID.rawValue, privacy: .public)")
         if let result = patch.updates[ResolutionContextPatchKey.resolverResult]?.get(HomeAutomationResolverResult.self) {
             context.resolutionState = result.state
             context.retrievedCandidates = result.retrievedCandidates
@@ -78,10 +85,13 @@ public actor ResolutionContextStore {
         refreshResolutionStateIfPossible()
     }
 
+    /// Sets the language detection result.
     public func setLanguage(_ value: HomeLanguageDetectionResult) {
+        logger.debug("Setting language: \(value.languageCode, privacy: .public)")
         context.language = value
     }
 
+    /// Sets the domain classification result.
     public func setDomain(_ value: HomeDomainClassificationResult) {
         context.domain = value
     }
@@ -134,23 +144,31 @@ public actor ResolutionContextStore {
         context.executionPlan = value
     }
 
+    /// Sets the command resolution outcome.
     public func setResolution(_ value: HomeCommandResolution) {
+        logger.debug("Setting final resolution.")
         context.resolution = value
     }
 
+    /// Appends RAG knowledge snippets to the context.
     public func appendKnowledge(_ snippets: [KnowledgeSnippet]) {
+        logger.debug("Appending \(snippets.count, privacy: .public) knowledge snippets.")
         context.knowledgeSnippets.append(contentsOf: snippets)
     }
 
+    /// Appends a conversational memory hint.
     public func appendMemoryHint(_ hint: MemoryHint) {
         context.memoryHints.append(hint)
     }
 
+    /// Appends an agent execution trace.
     public func appendTrace(_ entry: AgentTraceEntry) {
         context.trace.append(entry)
     }
 
+    /// Appends an agent failure record.
     public func appendError(_ error: AgentFailure) {
+        logger.warning("Appending error from agent \(error.agentID.rawValue, privacy: .public): \(error.reason, privacy: .public)")
         context.errors.append(error)
     }
 

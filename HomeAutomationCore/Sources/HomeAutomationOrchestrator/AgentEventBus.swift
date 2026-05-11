@@ -1,5 +1,10 @@
 import Foundation
+import OSLog
 
+/// A pipeline event generated during the orchestration process.
+/// 
+/// Events are published when agents start, complete, fail, or skip execution,
+/// allowing external observers (like UI) to track the orchestrator's progress in real-time.
 public struct OrchestratorPipelineEvent: Sendable, Identifiable {
     public let id: String
     public let runID: UUID
@@ -34,20 +39,33 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
     }
 }
 
+/// An actor responsible for distributing orchestrator pipeline events to subscribers.
+/// 
+/// `AgentEventBus` allows components to publish events without blocking, and provides
+/// an `AsyncStream` for consumers to observe the real-time execution of the orchestrator.
 public actor AgentEventBus {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AgentEventBus")
     private var events: [OrchestratorPipelineEvent] = []
     private var continuations: [AsyncStream<OrchestratorPipelineEvent>.Continuation] = []
 
     public init() {}
 
+    /// Publishes a new event to the bus and delivers it to all active continuations.
+    ///
+    /// - Parameter event: The `OrchestratorPipelineEvent` to broadcast.
     public func publish(_ event: OrchestratorPipelineEvent) {
+        logger.debug("Publishing event for runID: \(event.runID, privacy: .public), stage: \(event.stage, privacy: .public), status: \(event.status.rawValue, privacy: .public)")
         events.append(event)
         for continuation in continuations {
             continuation.yield(event)
         }
     }
 
+    /// Creates an asynchronous stream that replays all historical events and yields future ones.
+    ///
+    /// - Returns: An `AsyncStream` emitting `OrchestratorPipelineEvent`s.
     public func stream() -> AsyncStream<OrchestratorPipelineEvent> {
+        logger.debug("Creating new event stream. Replaying \(self.events.count, privacy: .public) historical events.")
         let replayEvents = events
         return AsyncStream { continuation in
             for event in replayEvents {
@@ -57,7 +75,9 @@ public actor AgentEventBus {
         }
     }
 
+    /// Resets the event history and terminates active continuations.
     public func reset() {
+        logger.debug("Resetting event bus. Clearing \(self.events.count, privacy: .public) events and \(self.continuations.count, privacy: .public) active continuations.")
         events = []
         continuations = []
     }

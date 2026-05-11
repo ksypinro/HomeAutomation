@@ -1,8 +1,11 @@
 import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
+import OSLog
 
+/// Encapsulates routing, fallback, and retry rules for the orchestrator pipeline.
 public struct OrchestratorPolicyEngine: Sendable {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "OrchestratorPolicyEngine")
     private let isModelAvailable: @Sendable () -> Bool
     private let modelAvailabilityStatusProvider: @Sendable () -> String?
 
@@ -14,18 +17,28 @@ public struct OrchestratorPolicyEngine: Sendable {
         self.modelAvailabilityStatusProvider = modelAvailabilityStatus
     }
 
+    /// Determines whether the pipeline should attempt Foundation Model-based resolution.
     public func shouldUseModels() -> Bool {
-        isModelAvailable()
+        let available = isModelAvailable()
+        logger.debug("Policy evaluated shouldUseModels: \(available, privacy: .public)")
+        return available
     }
 
+    /// Provides a human-readable reason for model availability status.
     public func modelAvailabilityStatus() -> String {
         modelAvailabilityStatusProvider() ?? (isModelAvailable() ? "available" : "unavailable")
     }
 
+    /// Determines if a failed agent should be retried based on its failure type and attempt count.
     public func shouldRetry(failure: AgentFailure, attemptCount: Int) -> Bool {
-        failure.isRetryable && attemptCount < maxRetries(for: failure.agentID)
+        let retry = failure.isRetryable && attemptCount < maxRetries(for: failure.agentID)
+        if !retry {
+            logger.debug("Policy rejecting retry for agent \(failure.agentID.rawValue, privacy: .public). Attempt: \(attemptCount, privacy: .public)")
+        }
+        return retry
     }
 
+    /// Evaluates whether an agent's run result should prematurely terminate the pipeline.
     public func isTerminalExit(_ result: AgentRunResult) -> Bool {
         switch result {
         case .clarification, .unsupported, .terminalFailure:
@@ -35,6 +48,7 @@ public struct OrchestratorPolicyEngine: Sendable {
         }
     }
 
+    /// Determines if the current context has produced a fully verified and executable plan.
     public func canExecute(context: ResolutionContext) -> Bool {
         guard context.request.executeLowRiskCommands else { return false }
         guard let resolution = context.resolution else { return false }
@@ -44,6 +58,7 @@ public struct OrchestratorPolicyEngine: Sendable {
         return false
     }
 
+    /// Defines which agents are critical safety validators that must never be skipped.
     public func isMandatorySafetyGate(_ agentID: AgentID) -> Bool {
         [.safetyValidation, .parameterValidation, .confirmationPolicy, .executionPlanning, .mockExecution].contains(agentID)
     }
@@ -58,7 +73,9 @@ public struct OrchestratorPolicyEngine: Sendable {
         )
     }
 
+    /// Generates a fallback resolution when a mandatory safety gate fails closed.
     public func failClosedResult(for agentID: AgentID, reason: String, context: ResolutionContext) -> AgentRunResult {
+        logger.warning("Failing closed for mandatory gate: \(agentID.rawValue, privacy: .public) due to: \(reason, privacy: .public)")
         let resolution: HomeCommandResolution
         switch agentID {
         case .safetyValidation:

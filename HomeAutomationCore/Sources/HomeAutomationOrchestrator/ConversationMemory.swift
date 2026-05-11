@@ -1,7 +1,9 @@
 import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
+import OSLog
 
+/// A record representing a single interaction or turn in the conversation.
 public struct ConversationTurn: Sendable, Identifiable, Hashable, Codable {
     public let id: UUID
     public let timestamp: Date
@@ -30,7 +32,12 @@ public struct ConversationTurn: Sendable, Identifiable, Hashable, Codable {
     }
 }
 
+/// A localized, short-term memory store for a specific user's conversation session.
+///
+/// It tracks recent interactions, enabling follow-up commands (e.g., "turn it off")
+/// by retrieving previously resolved device hints.
 public actor ConversationMemory {
+    private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "ConversationMemory")
     private var turns: [ConversationTurn] = []
     private let maxTurns: Int
 
@@ -38,17 +45,24 @@ public actor ConversationMemory {
         self.maxTurns = max(1, maxTurns)
     }
 
+    /// Appends a new turn to the memory, maintaining the `maxTurns` limit.
     public func append(_ turn: ConversationTurn) {
         turns.append(turn)
         if turns.count > maxTurns {
             turns.removeFirst(turns.count - maxTurns)
         }
+        logger.debug("Appended new turn. Current memory size: \(self.turns.count, privacy: .public)")
     }
 
+    /// Retrieves a contextual hint based on the most recently resolved device.
+    ///
+    /// - Returns: A `MemoryHint` if a device was resolved recently, or `nil`.
     public func lastResolvedDeviceHint() -> MemoryHint? {
         guard let turn = turns.last(where: { $0.resolvedDeviceID != nil }) else {
+            logger.debug("No recently resolved device found in memory.")
             return nil
         }
+        logger.debug("Providing memory hint for device ID: \(turn.resolvedDeviceID ?? "nil", privacy: .public)")
         return MemoryHint(
             deviceID: turn.resolvedDeviceID,
             capability: turn.resolvedCapability,
@@ -57,16 +71,21 @@ public actor ConversationMemory {
         )
     }
 
+    /// Returns a slice of the most recent conversation turns.
     public func recentContext(limit: Int = 3) -> [ConversationTurn] {
         Array(turns.suffix(max(0, limit)))
     }
 
+    /// Clears the entire conversation memory.
     public func clear() {
+        logger.debug("Clearing conversation memory.")
         turns.removeAll()
     }
 }
 
+/// A utility to detect if a user's input likely contains a pronoun referencing a past interaction.
 public enum ConversationMemoryReferenceDetector {
+    /// Detects linguistic markers like "it", "that", "there", implying a memory reference.
     public static func containsMemoryReference(_ text: String) -> Bool {
         let normalized = text
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
