@@ -1,6 +1,6 @@
 # HomeAutomationCore Source Module
 
-`HomeAutomationCore` is the domain foundation of the project. It owns the shared data contracts, canonical catalogs, generated resources, deterministic safety policies, mock device registry, and Foundation Models support types used by the app, agents, orchestrator, RAG system, and legacy resolver.
+`HomeAutomationCore` is the domain foundation of the project. It owns the shared data contracts, canonical catalogs, generated resources, deterministic safety policies, mock device registry, intent-capability hints, and Foundation Models support types used by the app, agents, orchestrator, and RAG system.
 
 This module should stay free of orchestration-specific behavior. It answers the question: "What is a home command, what devices and capabilities exist, and what is safe?"
 
@@ -12,7 +12,7 @@ flowchart TB
 
     subgraph Contracts["Contracts and Models"]
         Models["HomeAutomationModels"]
-        ResolverContracts["Resolver / Draft / Candidate / Worker Protocols"]
+        ResolverContracts["Command / Draft / Candidate / Worker Protocols"]
         Errors["FoundationLabCoreError"]
     end
 
@@ -44,7 +44,7 @@ flowchart TB
 
 ## Dependency Position
 
-`HomeAutomationCore` is the lowest project-specific target. Other package targets depend on it, but it does not depend on `HomeAutomationRAG`, `HomeAutomationAgents`, `HomeAutomationOrchestrator`, or `HomeAutomationResolver`.
+`HomeAutomationCore` is the lowest project-specific target. Other package targets depend on it, but it does not depend on `HomeAutomationRAG`, `HomeAutomationAgents`, or `HomeAutomationOrchestrator`.
 
 ```mermaid
 flowchart LR
@@ -52,13 +52,11 @@ flowchart LR
     RAG["HomeAutomationRAG"]
     Agents["HomeAutomationAgents"]
     Orchestrator["HomeAutomationOrchestrator"]
-    Resolver["HomeAutomationResolver"]
     App["HomeAutomation App"]
 
     RAG --> Core
     Agents --> Core
     Orchestrator --> Core
-    Resolver --> Core
     App --> Core
 ```
 
@@ -74,6 +72,7 @@ HomeAutomationCore/
 |   |-- HomeCandidateResolving.swift
 |   |-- HomeWorkerSessionAnalyzing.swift
 |   |-- HomeModelInstructionPackage.swift
+|   |-- IntentCapabilityMap.swift
 |   |-- HomeAutomationKnowledgeBase.swift
 |   |-- HomeCapabilityRegistry.swift
 |   |-- HomeBixbyCommandCatalog.swift
@@ -95,7 +94,7 @@ flowchart TD
     B --> D["MockHomeDeviceRegistry default devices"]
     C --> E["Capability commands, attributes, ranges, enum values, risk"]
     D --> F["Candidate records and current device state"]
-    F --> G["Agents or resolver hydrate selected candidates"]
+    F --> G["Agents hydrate selected candidates"]
     E --> H["HomeRiskPolicy and HomeParameterValidator"]
     G --> H
     H --> I["HomeCommandResolution and HomeAutomationExecutionPlan"]
@@ -129,16 +128,17 @@ flowchart TD
 | `HomeAutomationExecutionPlan` | Ordered execution steps plus plan-level confirmation requirement. |
 | `HomeCommandResolution` | Final result shape: ready to execute, executed, requires confirmation, needs clarification, or unsupported. |
 | `HomeFinalResolutionInput` | Compound input for draft generation and validation: raw text, worker state, hydrated candidates, and candidate aggregation. |
-| `HomeAutomationResolverResult` | Top-level resolver result returned by orchestrator and legacy resolver. |
-| `HomeCommandResolving` | Resolver abstraction implemented by orchestrator, fallback, and legacy resolver paths. |
+| `HomeAutomationResolverResult` | Stable top-level command-resolution result returned by the orchestrator and fallback agents. |
+| `HomeCommandResolving` | Resolver abstraction implemented by orchestrator-compatible and deterministic fallback paths. |
 | `HomeCommandDraftResolving` | Draft-generation abstraction used by Foundation Models and test doubles. |
-| `HomeCandidateResolving` | Candidate-selection abstraction used by both agent and legacy candidate resolvers. |
+| `HomeCandidateResolving` | Candidate-selection abstraction used by agent candidate resolvers and test doubles. |
 | `HomeWorkerSessionAnalyzing` | Worker-analysis abstraction for creating `HomeResolutionState`. |
 | `HomeGenerationMode` | Prompt generation mode, currently default or greedy. Greedy mode is passed through to Foundation Models generation options. |
 | `HomeModelInstructionPackage` | Foundation Models prompt package containing instructions, raw instruction text, prompt text, tools, adapter flag, generation mode, and context-budget report. |
 | `HomeModelContextBudgetReport` | Estimated input tokens, max context size, tool/candidate/RAG counts, selected tools, output estimate, and compaction level. |
 | `FoundationModelContextBudgeter` | Estimates prompt/tool/context size and supports prompt compaction before draft generation. |
 | `FoundationModelFailureKind` | Structured context-window, guardrail, adapter, tool, generation, or unknown model failure category. |
+| `IntentCapabilityMap` | Maps NLU intent families to likely capability IDs for structured retrieval hints and query expansion. |
 | `HomeCapabilityDefinition` | Canonical in-memory capability definition with commands, attributes, numeric ranges, enum values, and risk. |
 | `HomeCapabilityRegistry` | Source-of-truth capability lookup. Agents and validators hydrate final facts from here instead of trusting retrieved text. |
 | `HomeAutomationKnowledgeBase` | Loads generated resources and builds catalog summaries and catalog-derived mock devices. |

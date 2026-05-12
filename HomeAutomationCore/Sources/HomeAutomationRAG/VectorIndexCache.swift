@@ -167,12 +167,14 @@ public actor VectorIndexCache {
 /// This keeps version computation fast (no hashing of content) while still being
 /// sensitive to the most common causes of index staleness.
 public enum RAGIndexVersion {
+    public static let semanticIndexVersion = "semantic-v2"
+
     public static func compute(
         knowledgeBaseSchemaVersion: String,
         bixbyCommandCount: Int,
         datasetCommandCount: Int,
         deviceCount: Int
     ) -> String {
-        "\(knowledgeBaseSchemaVersion)-b\(bixbyCommandCount)-d\(datasetCommandCount)-v\(deviceCount)"
+        "\(semanticIndexVersion)-\(knowledgeBaseSchemaVersion)-b\(bixbyCommandCount)-d\(datasetCommandCount)-v\(deviceCount)"
     }
 }

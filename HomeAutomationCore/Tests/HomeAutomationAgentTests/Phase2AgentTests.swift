@@ -40,6 +40,15 @@ struct Phase2AgentTests {
     }
 
     @Test
+    func deterministicIntentKeepsExplicitPowerActionForWarmerByTurningOffAC() {
+        let state = AgentTextParser.deterministicState(for: "Make bedroom warmer by turning off the AC")
+
+        #expect(Array(state.intent.topFamilies.prefix(2)) == [.power, .temperature])
+        #expect(state.deviceType.deviceTypes == ["airConditioner"])
+        #expect(state.slots.rooms == ["bedroom"])
+    }
+
+    @Test
     func deviceTypeAgentReturnsLightType() async throws {
         let agent = DeviceTypeAgent { _ in
             HomeDeviceTypeResult(deviceTypes: ["light"], confidence: 0.9)
@@ -65,6 +74,51 @@ struct Phase2AgentTests {
         let result = try await agent.run("turn on bedroom lamp", context: Self.context())
 
         #expect(result.rooms == ["bedroom"])
+    }
+
+    @Test
+    func slotDeterministicFallbackIgnoresFewShotExamplesInPrompt() {
+        let prompt = """
+        Relevant prior smart-home examples for slot extraction:
+        Natural language example please mute the living room television for me. Room living room. Risk low
+        Natural language example hey assistant, mute the television in the garage. Room garage. Risk low
+        Natural language example run the home routine. Room home. Risk low
+
+        User command:
+        Make the living room television volume mute
+        """
+
+        let state = AgentTextParser.deterministicState(for: prompt)
+
+        #expect(state.slots.rooms == ["living room"])
+        #expect(state.slots.modes.isEmpty)
+        #expect(state.deviceType.deviceTypes == ["tv"])
+    }
+
+    @Test
+    func slotWorkerUsesModelToConfirmAmbiguousDeterministicSlots() async throws {
+        let promptCapture = PromptCapture()
+        let worker = SlotExtractionAgentWorkerSession(
+            modelExtract: { prompt in
+                await promptCapture.store(prompt)
+                return HomeSlotExtractionResult(
+                    rooms: ["living room"],
+                    deviceNicknames: [],
+                    values: [],
+                    modes: [],
+                    confidence: 0.9
+                )
+            },
+            foundationModelAvailability: { true }
+        )
+
+        let result = try await worker.extractSlots(
+            "Turn on the living room and garage television",
+            modelPrompt: "few-shot examples plus user command"
+        )
+
+        #expect(await promptCapture.value() == "few-shot examples plus user command")
+        #expect(result.rooms == ["living room"])
     }
 
     @Test
@@ -140,11 +194,11 @@ struct Phase2AgentTests {
     @Test
     func candidateRankingUsesParallelShardMetricsForLargeSets() async throws {
         let candidates = [
-            HomeCompactCandidateView(id: "entry_sensor", label: "Entry Sensor", room: "hallway", deviceType: "sensor", shortCapabilities: ["contactSensor"]),
-            HomeCompactCandidateView(id: "water_sensor", label: "Water Sensor", room: "utility", deviceType: "sensor", shortCapabilities: ["waterSensor"]),
+            HomeCompactCandidateView(id: "bedroom_sconce", label: "Bedroom Sconce", room: "bedroom", deviceType: "light", shortCapabilities: ["switch"]),
             HomeCompactCandidateView(id: "bedroom_lamp", label: "Bedroom Lamp", room: "bedroom", deviceType: "light", shortCapabilities: ["switch", "switchLevel"]),
-            HomeCompactCandidateView(id: "air_monitor", label: "Air Monitor", room: "living room", deviceType: "sensor", shortCapabilities: ["airQualityMeasurement"]),
-            HomeCompactCandidateView(id: "washer", label: "Washer", room: "laundry", deviceType: "washer", shortCapabilities: ["washerOperatingState"])
+            HomeCompactCandidateView(id: "bedroom_strip", label: "Bedroom Strip Light", room: "bedroom", deviceType: "light", shortCapabilities: ["switch", "switchLevel"]),
+            HomeCompactCandidateView(id: "bedroom_ceiling", label: "Bedroom Ceiling Light", room: "bedroom", deviceType: "light", shortCapabilities: ["switch"]),
+            HomeCompactCandidateView(id: "bedroom_closet", label: "Bedroom Closet Light", room: "bedroom", deviceType: "light", shortCapabilities: ["switch"])
         ]
         let metrics = HomeCandidateResolverMetrics()
         let resolver = HomeCandidateResolverSupport(
@@ -166,6 +220,25 @@ struct Phase2AgentTests {
         #expect(await metrics.lastShardCount == 3)
         #expect(await metrics.lastParallelTaskCount == 3)
         #expect(await metrics.lastShardWinnerCount == 1)
+    }
+
+    @Test
+    func candidateRankingScopesByRoomAndDeviceTypeForWarmerByTurningOffAC() async throws {
+        let devices = try await Self.devices(ids: ["bedroom_ac", "hallway_thermostat", "catalog_airconditioner", "bedroom_lamp"])
+        let state = AgentTextParser.deterministicState(for: "Make bedroom warmer by turning off the AC")
+        let resolver = HomeCandidateResolverSupport(
+            shardSize: 1,
+            foundationModelAvailability: { false }
+        )
+
+        let result = try await resolver.resolveCandidates(
+            userText: "Make bedroom warmer by turning off the AC",
+            resolutionState: state,
+            candidates: devices.map(\.compactView)
+        )
+
+        #expect(result.finalCandidateIDs == ["bedroom_ac"])
+        #expect(!result.needsClarification)
     }
 
     @Test
@@ -724,5 +797,17 @@ private struct AdapterFailingDraftResolver: HomeCommandDraftResolving {
 private struct ContextWindowTestError: LocalizedError {
     var errorDescription: String? {
         "exceeded context window size"
+    }
+}
+
+private actor PromptCapture {
+    private var stored = ""
+
+    func store(_ value: String) {
+        stored = value
+    }
+
+    func value() -> String {
+        stored
     }
 }

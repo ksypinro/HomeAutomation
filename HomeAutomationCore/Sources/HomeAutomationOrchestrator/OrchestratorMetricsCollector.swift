@@ -96,6 +96,37 @@ public struct OrchestratorCandidateMetrics: Sendable, Codable, Equatable {
     }
 }
 
+public struct RetrievalQualityMetrics: Sendable, Codable, Equatable {
+    public var strategyNames: [String]
+    public var averageScore: Double
+    public var maxScore: Double
+    public var lowScoreSourceCount: Int
+    public var judgeInvoked: Bool
+    public var judgeSkipped: Bool
+    public var retryCount: Int
+    public var reformulatedQueryCount: Int
+
+    public init(
+        strategyNames: [String] = [],
+        averageScore: Double = 0,
+        maxScore: Double = 0,
+        lowScoreSourceCount: Int = 0,
+        judgeInvoked: Bool = false,
+        judgeSkipped: Bool = false,
+        retryCount: Int = 0,
+        reformulatedQueryCount: Int = 0
+    ) {
+        self.strategyNames = strategyNames
+        self.averageScore = averageScore
+        self.maxScore = maxScore
+        self.lowScoreSourceCount = lowScoreSourceCount
+        self.judgeInvoked = judgeInvoked
+        self.judgeSkipped = judgeSkipped
+        self.retryCount = retryCount
+        self.reformulatedQueryCount = reformulatedQueryCount
+    }
+}
+
 /// Tracks language model availability, usage, tool execution, and prompt budget consumption.
 public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
     public var modelAvailabilityStatus: String
@@ -157,6 +188,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var safetyMetrics: OrchestratorSafetyMetrics
     public var candidateMetrics: OrchestratorCandidateMetrics
     public var foundationModelUsage: FoundationModelUsageMetrics
+    public var retrievalQuality: RetrievalQualityMetrics
 
     public init(command: String) {
         self.command = command
@@ -172,6 +204,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.safetyMetrics = OrchestratorSafetyMetrics()
         self.candidateMetrics = OrchestratorCandidateMetrics()
         self.foundationModelUsage = FoundationModelUsageMetrics()
+        self.retrievalQuality = RetrievalQualityMetrics()
     }
 
     public mutating func captureEvaluationFields(
@@ -226,6 +259,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
                 context.memoryHints.contains { $0.deviceID == targetID }
             } ?? false
         )
+        retrievalQuality = Self.retrievalQualityMetrics(context: context, agentStatuses: agentStatuses)
         captureFoundationModelFields(context: context)
     }
 
@@ -258,6 +292,30 @@ public struct OrchestratorMetrics: Sendable, Codable {
         return values
     }
 
+    private static func retrievalQualityMetrics(
+        context: ResolutionContext,
+        agentStatuses: [String: String]
+    ) -> RetrievalQualityMetrics {
+        let reports = context.retrievalReports
+        let averages = reports.map(\.averageScore)
+        let average = averages.isEmpty ? 0 : averages.reduce(0, +) / Double(averages.count)
+        let strategies = reports.map(\.strategy).reduce(into: [String]()) { partial, strategy in
+            if !partial.contains(strategy) {
+                partial.append(strategy)
+            }
+        }
+        return RetrievalQualityMetrics(
+            strategyNames: strategies,
+            averageScore: average,
+            maxScore: reports.map(\.maxScore).max() ?? 0,
+            lowScoreSourceCount: reports.filter { $0.returnedCount == 0 || $0.maxScore < $0.minScore || $0.averageScore < 0.01 }.count,
+            judgeInvoked: agentStatuses[AgentID.retrievalJudge.rawValue] != nil,
+            judgeSkipped: reports.contains { $0.agentID == AgentID.retrievalJudge.rawValue && $0.strategy.contains("skipped") },
+            retryCount: reports.map(\.retryCount).reduce(0, +),
+            reformulatedQueryCount: reports.filter { $0.reformulatedQuery != nil }.count
+        )
+    }
+
     private mutating func captureFoundationModelFields(context: ResolutionContext) {
         let modelStages: [AgentID] = [
             .language,
@@ -266,6 +324,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
             .deviceType,
             .slotExtraction,
             .riskClassification,
+            .retrievalJudge,
             .candidateRanking,
             .candidateShard,
             .draftGeneration,

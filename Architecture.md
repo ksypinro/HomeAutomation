@@ -1,6 +1,6 @@
 # Unified HomeAutomation Architecture
 
-This document is the canonical architecture reference for `HomeAutomation`. It merges the historical resolver architecture from `ARCHITECTURE.md` with the implemented multi-agent/orchestrator design, and it describes both the high-level runtime shape and the low-level component responsibilities.
+This document is the canonical architecture reference for `HomeAutomation`. It describes the current SwiftUI app, four-target Swift package, multi-agent orchestrator, hybrid RAG layer, deterministic fallback path, and low-level component responsibilities.
 
 ## 1. Executive Summary
 
@@ -9,9 +9,8 @@ This document is the canonical architecture reference for `HomeAutomation`. It m
 1. The SwiftUI app collects a command and streams orchestrator updates.
 2. `HomeCommandOrchestrator` creates a `ResolutionContext`, plans work, schedules agents, records metrics, and returns a `HomeAutomationResolverResult`.
 3. `HomeAutomationAgents` contains specialized agents for NLU, knowledge lookup, candidate selection, draft generation, safety validation, execution planning, fallback, and response formatting.
-4. `HomeAutomationRAG` retrieves compact, relevant context from canonical catalogs, examples, Bixby commands, and device records.
-5. `HomeAutomationCore` remains the source of truth for models, registries, catalogs, policies, generated resources, and Foundation Models support.
-6. `HomeAutomationResolver` keeps the legacy resolver for compatibility and parity testing.
+4. `HomeAutomationRAG` retrieves compact, relevant context from canonical catalogs, examples, Bixby commands, and device records using semantic, BM25, and hybrid retrieval.
+5. `HomeAutomationCore` remains the source of truth for models, registries, catalogs, policies, generated resources, intent-capability mapping, and Foundation Models support.
 
 The central safety rule is that model output and memory hints are advisory. Deterministic validation, parameter checks, confirmation policy, and execution planning must pass before a command can mutate the mock device registry.
 
@@ -24,7 +23,7 @@ The central safety rule is that model output and memory hints are advisory. Dete
 5. Context flows through typed patches instead of shared mutable state.
 6. Mandatory safety gates fail closed to confirmation, clarification, ready-without-mutation, or unsupported outcomes.
 7. Conversation memory provides low-priority hints only and never grants execution authority.
-8. The legacy resolver remains isolated behind its own package target.
+8. Fallback behavior lives inside agent and core abstractions; there is no separate resolver package target in the current Swift package.
 
 ## 3. High-Level Architecture
 
@@ -48,7 +47,7 @@ flowchart TB
         Memory["ConversationMemory"]
     end
 
-    subgraph AgentLayer["HomeAutomationAgents — 26 Specialist Agents"]
+    subgraph AgentLayer["HomeAutomationAgents - 27 Specialist Agents"]
         subgraph NLU["NLU Agents"]
             LanguageAgent["LanguageAgent"]
             DomainAgent["DomainAgent"]
@@ -61,6 +60,7 @@ flowchart TB
             CapabilityKnowledgeAgent["CapabilityKnowledgeAgent"]
             BixbyKnowledgeAgent["BixbyKnowledgeAgent"]
             CommandExampleAgent["CommandExampleAgent"]
+            RetrievalJudgeAgent["RetrievalJudgeAgent"]
         end
         subgraph Candidates["Candidate Agents"]
             CandidateRetrievalAgent["CandidateRetrievalAgent"]
@@ -97,6 +97,9 @@ flowchart TB
         Indexer["KnowledgeIndexer"]
         Retriever["ContextRetriever"]
         Store["VectorStore"]
+        BM25["BM25Index"]
+        Hybrid["HybridRetrievalStrategy"]
+        Query["StructuredRetrievalQuery"]
         Embedder["EmbeddingProvider"]
         Chunker["DocumentChunker"]
     end
@@ -125,10 +128,16 @@ flowchart TB
     CapabilityKnowledgeAgent --> RAGLayer
     BixbyKnowledgeAgent --> RAGLayer
     CommandExampleAgent --> RAGLayer
+    RetrievalJudgeAgent --> RAGLayer
     CandidateRetrievalAgent --> RAGLayer
     NLU --> RAGLayer
     AgentLayer --> CoreLayer
     Indexer --> Chunker --> Embedder --> Store
+    Indexer --> BM25
+    Retriever --> Query
+    Retriever --> Hybrid
+    Hybrid --> Store
+    Hybrid --> BM25
     Retriever --> Store
     CoreLayer --> Indexer
     SafetyValidationAgent --> SafetyPolicy
@@ -150,7 +159,6 @@ flowchart LR
     RAG["HomeAutomationRAG"]
     Agents["HomeAutomationAgents"]
     Orchestrator["HomeAutomationOrchestrator"]
-    Resolver["HomeAutomationResolver"]
 
     Xcode --> AppTarget
     AppTarget --> Core
@@ -160,7 +168,6 @@ flowchart LR
     Package --> RAG
     Package --> Agents
     Package --> Orchestrator
-    Package --> Resolver
 
     RAG --> Core
     Agents --> Core
@@ -168,7 +175,6 @@ flowchart LR
     Orchestrator --> Core
     Orchestrator --> RAG
     Orchestrator --> Agents
-    Resolver --> Core
 ```
 
 Dependency direction:
@@ -177,11 +183,10 @@ Dependency direction:
 HomeAutomationRAG -> HomeAutomationCore
 HomeAutomationAgents -> HomeAutomationCore + HomeAutomationRAG
 HomeAutomationOrchestrator -> HomeAutomationCore + HomeAutomationRAG + HomeAutomationAgents
-HomeAutomationResolver -> HomeAutomationCore
 HomeAutomation app target -> HomeAutomationCore + HomeAutomationOrchestrator
 ```
 
-`HomeAutomationResolver` is retained for legacy parity and fallback comparison. New orchestrator code does not depend on that target.
+The current Swift package has four products: `HomeAutomationCore`, `HomeAutomationRAG`, `HomeAutomationAgents`, and `HomeAutomationOrchestrator`. Deterministic fallback and shared resolver result contracts remain, but they are implemented inside those targets.
 
 ## 5. Detailed Command Flow
 
@@ -202,25 +207,26 @@ flowchart TD
     G -->|Yes| I["Full agent plan"]
     I --> J["Run NLU agents in parallel"]
     J --> K["Merge language, domain, intent, device type, slot, and risk patches"]
-    K --> L["Run knowledge agents and candidate retrieval in parallel"]
-    L --> M["CandidateRankingAgent"]
-    M --> N{"Needs clarification?"}
-    N -->|Yes| O["ClarificationAgent or clarification resolution"]
-    N -->|No| P["CandidateHydrationAgent"]
-    P --> Q["InstructionComposerAgent"]
-    Q --> R["DraftGenerationAgent"]
-    R --> S["SafetyValidationAgent"]
-    S --> T["ParameterValidationAgent"]
-    T --> U["ConfirmationPolicyAgent"]
-    U --> V["ExecutionPlanningAgent"]
-    V --> W{"Can execute low-risk commands?"}
-    W -->|Yes| X["MockExecutionAgent"]
-    W -->|No| Y["Return ready/confirmation/query result"]
+    K --> L["Run NLU-informed knowledge agents and candidate retrieval in parallel"]
+    L --> M["RetrievalJudgeAgent accepts or retries weak retrieval"]
+    M --> N["CandidateRankingAgent scopes and ranks candidates"]
+    N --> O{"Needs clarification?"}
+    O -->|Yes| P["ClarificationAgent or clarification resolution"]
+    O -->|No| Q["CandidateHydrationAgent"]
+    Q --> R["InstructionComposerAgent"]
+    R --> S["DraftGenerationAgent"]
+    S --> T["SafetyValidationAgent"]
+    T --> U["ParameterValidationAgent"]
+    U --> V["ConfirmationPolicyAgent"]
+    V --> W["ExecutionPlanningAgent"]
+    W --> X{"Can execute low-risk commands?"}
+    X -->|Yes| Y["Post-pipeline MockExecutionAgent"]
+    X -->|No| YA["Return ready/confirmation/query result"]
 
     H3 --> Z["Assemble resolver result"]
-    O --> Z
-    X --> Z
+    P --> Z
     Y --> Z
+    YA --> Z
     Z --> AA["Store metrics, append memory turn, emit outcome"]
 ```
 
@@ -267,8 +273,8 @@ sequenceDiagram
 | `selectedCandidateIDs`, `aggregation` | Ranked candidate IDs and clarification metadata. |
 | `hydratedCandidates` | Full candidate records used by draft, safety, and execution stages. |
 | `knowledgeSnippets` | Canonical and RAG-selected context for prompts and fallback. |
-| `ragChunks` | Per-agent retrieved chunk trace. |
-| `instructionPackage` | Foundation Models prompt, instructions, tools, and mode. |
+| `retrievalReports` | Per-agent retrieval quality reports, including strategy, score stats, filters, retry count, and reformulated query. |
+| `instructionPackage` | Foundation Models prompt, raw instruction text, instructions, tools, generation mode, and context-budget report. |
 | `draft` | Model or fallback-produced command draft. |
 | `executionPlan` | Deterministic execution plan. |
 | `resolution` | Final or intermediate command resolution. |
@@ -278,7 +284,7 @@ sequenceDiagram
 
 ## 8. Agent Inventory
 
-The implemented system has 26 specialist agents.
+The implemented system has 27 specialist agents.
 
 | # | Agent | Group | Role |
 | --- | --- | --- | --- |
@@ -291,23 +297,24 @@ The implemented system has 26 specialist agents.
 | 7 | `CapabilityKnowledgeAgent` | Knowledge | Retrieves relevant capability facts, then hydrates source-of-truth definitions from `HomeCapabilityRegistry`. |
 | 8 | `BixbyKnowledgeAgent` | Knowledge | Retrieves and hydrates relevant Bixby voice-command snippets. |
 | 9 | `CommandExampleAgent` | Knowledge | Retrieves similar generated command examples for few-shot context. |
-| 10 | `CandidateRetrievalAgent` | Candidates | Retrieves device/routine candidates from `MockHomeDeviceRegistry`, enhanced with semantic device hints. |
-| 11 | `CandidateRankingAgent` | Candidates | Ranks retrieved candidates and decides whether clarification is needed. |
-| 12 | `CandidateShardAgent` | Candidates | Supports shard-level candidate selection for large candidate sets. |
-| 13 | `CandidateHydrationAgent` | Candidates | Hydrates selected candidate IDs into full `HomeCandidateRecord` values. |
-| 14 | `InstructionComposerAgent` | Draft | Builds `HomeModelInstructionPackage` using canonical data plus selected RAG slices. |
-| 15 | `DraftGenerationAgent` | Draft | Produces a `HomeCommandDraft` through the draft resolver. |
-| 16 | `DraftRepairAgent` | Draft | Attempts draft repair or lower-confidence fallback draft selection. |
-| 17 | `SafetyValidationAgent` | Safety | Validates target, capability, command, risk, and plan eligibility. Mandatory fail-closed gate. |
-| 18 | `ParameterValidationAgent` | Safety | Checks enum values, ranges, and required parameters. Mandatory fail-closed gate. |
-| 19 | `ConfirmationPolicyAgent` | Safety | Enforces high-risk and memory-derived-target confirmation. Mandatory fail-closed gate. |
-| 20 | `ExecutionPlanningAgent` | Execution | Converts valid drafts into deterministic execution plans. Mandatory fail-closed gate. |
-| 21 | `MockExecutionAgent` | Execution | Mutates `MockHomeDeviceRegistry` for allowed low-risk command steps only. Mandatory fail-closed gate. |
-| 22 | `RuleFallbackAgent` | Fallback | Runs deterministic rule-based resolution when models are unavailable or fallback is selected. |
-| 23 | `BixbyFallbackAgent` | Fallback | Maps Bixby-style voice intents or catalog utterances to drafts. |
-| 24 | `UnsupportedCommandAgent` | Fallback | Produces a clear unsupported result when no route can resolve safely. |
-| 25 | `ClarificationAgent` | Response | Converts ambiguity into a user-facing clarification result. |
-| 26 | `ResultSummaryAgent` | Response | Formats final result summaries from `HomeCommandResolution`. |
+| 10 | `RetrievalJudgeAgent` | Knowledge | Reviews retrieval reports, fast-path accepts good retrieval, or performs one bounded reformulated retry for weak sources. |
+| 11 | `CandidateRetrievalAgent` | Candidates | Retrieves device/routine candidates from `MockHomeDeviceRegistry`, enhanced with semantic device hints. |
+| 12 | `CandidateRankingAgent` | Candidates | Scopes by strong room/device-type hints, ranks retrieved candidates, and decides whether clarification is needed. |
+| 13 | `CandidateShardAgent` | Candidates | Supports shard-level candidate selection for large candidate sets. |
+| 14 | `CandidateHydrationAgent` | Candidates | Hydrates selected candidate IDs into full `HomeCandidateRecord` values. |
+| 15 | `InstructionComposerAgent` | Draft | Builds `HomeModelInstructionPackage` using canonical data plus selected RAG slices. |
+| 16 | `DraftGenerationAgent` | Draft | Produces a `HomeCommandDraft` through the draft resolver. |
+| 17 | `DraftRepairAgent` | Draft | Attempts draft repair or lower-confidence fallback draft selection. |
+| 18 | `SafetyValidationAgent` | Safety | Validates target, capability, command, risk, and plan eligibility. Mandatory fail-closed gate. |
+| 19 | `ParameterValidationAgent` | Safety | Checks enum values, ranges, and required parameters. Mandatory fail-closed gate. |
+| 20 | `ConfirmationPolicyAgent` | Safety | Enforces high-risk and memory-derived-target confirmation. Mandatory fail-closed gate. |
+| 21 | `ExecutionPlanningAgent` | Execution | Converts valid drafts into deterministic execution plans. Mandatory fail-closed gate. |
+| 22 | `MockExecutionAgent` | Execution | Mutates `MockHomeDeviceRegistry` for allowed low-risk command steps only. Mandatory fail-closed gate. |
+| 23 | `RuleFallbackAgent` | Fallback | Runs deterministic rule-based resolution when models are unavailable or fallback is selected. |
+| 24 | `BixbyFallbackAgent` | Fallback | Maps Bixby-style voice intents or catalog utterances to drafts. |
+| 25 | `UnsupportedCommandAgent` | Fallback | Produces a clear unsupported result when no route can resolve safely. |
+| 26 | `ClarificationAgent` | Response | Converts ambiguity into a user-facing clarification result. |
+| 27 | `ResultSummaryAgent` | Response | Formats final result summaries from `HomeCommandResolution`. |
 
 ## 9. Agent Execution Plan
 
@@ -320,6 +327,7 @@ RuleFallbackAgent -> BixbyFallbackAgent -> UnsupportedCommandAgent
 Full model path:
 Parallel NLU group
 -> Parallel knowledge/candidate retrieval group
+-> RetrievalJudgeAgent
 -> CandidateRankingAgent
 -> CandidateHydrationAgent
 -> InstructionComposerAgent
@@ -328,7 +336,7 @@ Parallel NLU group
 -> ParameterValidationAgent
 -> ConfirmationPolicyAgent
 -> ExecutionPlanningAgent
--> MockExecutionAgent when policy permits execution
+-> post-pipeline MockExecutionAgent when policy permits execution
 ```
 
 The full plan can still reach fallback or terminal results through agent outputs, policy checks, and deterministic safety behavior.
@@ -342,23 +350,27 @@ flowchart LR
         Examples["Generated NL Dataset"] --> Chunker
         Bixby["Bixby Command Catalog"] --> Chunker
         Devices["Mock Device Registry"] --> Chunker
-        Chunker --> Embedder["TFIDF / Semantic / Fallback Embeddings"]
+        Chunker --> Embedder["TFIDF / Semantic / Fallback Embeddings over semanticContent"]
         Embedder --> Store["VectorStore"]
+        Chunker --> BM25["BM25Index over content + metadata"]
     end
 
     subgraph Query["Per-agent retrieval"]
         Agent["Agent"] --> Retriever["ContextRetriever"]
         Retriever --> Store
+        Retriever --> BM25
+        Retriever --> Strategy["Semantic / Keyword / Hybrid Strategy"]
         Store --> Results["ScoredChunk values"]
+        BM25 --> Results
         Results --> Agent
     end
 ```
 
 | Component | Role |
 | --- | --- |
-| `DocumentChunk` | Identifiable knowledge unit with content, source, and metadata. |
+| `DocumentChunk` | Identifiable knowledge unit with full display `content`, clean embeddable `semanticContent`, source, and metadata. |
 | `KnowledgeSource` | Source enum: capability, generated command dataset, Bixby command, or device. |
-| `MetadataFilter` | Restricts retrieval by source and metadata keys. |
+| `MetadataFilter` | Restricts retrieval by source, exact metadata tags, and multi-value metadata matches such as comma-separated `relatedDeviceTypes`. |
 | `ScoredChunk` | Retrieval result with chunk plus similarity score. |
 | `DocumentChunker` | Converts canonical catalogs, generated examples, Bixby commands, and device records into chunks. |
 | `EmbeddingProviding` | Protocol for text embedding providers. |
@@ -366,9 +378,15 @@ flowchart LR
 | `TFIDFEmbeddingProvider` | Deterministic local embedding implementation. |
 | `SemanticEmbeddingProvider` | Production-grade semantic embedding wrapper that can drive retrieval ranking when configured. |
 | `FallbackEmbeddingProvider` | Uses semantic embeddings when available and falls back to TF-IDF when semantic vectors are empty. |
-| `VectorStore` | Actor-backed in-memory vector index with cosine similarity search and metadata filtering. |
-| `KnowledgeIndexer` | Builds the full index from canonical knowledge at app launch. |
-| `ContextRetriever` | Public retrieval API used by agents. |
+| `VectorStore` | Actor-backed in-memory vector index with cosine similarity search, metadata filtering, and `minScore` gating. |
+| `BM25Index` | Actor-backed sparse keyword index over full chunk content, semantic content, and metadata values. |
+| `StructuredRetrievalQuery` | Query object carrying raw text, semantic text, keyword terms, filters, NLU hints, strategy, score floor, and top-K. |
+| `NLURetrievalHints` | Device type, intent family, room, and capability hints passed from NLU into retrieval. |
+| `RetrievalStrategy` | Strategy selector for semantic-only, keyword-only, hybrid, and agentic retrieval. |
+| `HybridRetrievalStrategy` | Runs semantic and BM25 searches and fuses evidence with reciprocal-rank fusion. |
+| `QueryReformulator` | Expands weak retrieval queries with deterministic NLU hints for the retrieval judge retry path. |
+| `KnowledgeIndexer` | Builds the vector and BM25 indexes from canonical knowledge at app launch, and restores both when vector cache hits. |
+| `ContextRetriever` | Public retrieval API used by agents for string and structured queries. |
 
 ## 11. Safety Architecture
 
@@ -476,7 +494,8 @@ HomeAutomation/
 |   |   |   |   |-- KnowledgeInputs.swift
 |   |   |   |   |-- CapabilityKnowledgeAgent.swift
 |   |   |   |   |-- BixbyKnowledgeAgent.swift
-|   |   |   |   `-- CommandExampleAgent.swift
+|   |   |   |   |-- CommandExampleAgent.swift
+|   |   |   |   `-- RetrievalJudgeAgent.swift
 |   |   |   |-- Candidates/
 |   |   |   |   |-- CandidateInputs.swift
 |   |   |   |   |-- CandidateResolverSupport.swift
@@ -516,12 +535,10 @@ HomeAutomation/
 |   |   |   `-- RAG/
 |   |   |       `-- AgentRAGSupport.swift
 |   |   |-- HomeAutomationOrchestrator/
-|   |   `-- HomeAutomationResolver/
 |   `-- Tests/
 |       |-- HomeAutomationRAGTests/
 |       |-- HomeAutomationAgentTests/
-|       |-- HomeAutomationOrchestratorTests/
-|       `-- HomeAutomationResolverTests/
+|       `-- HomeAutomationOrchestratorTests/
 ```
 
 ## 15. Low-Level Component Description: App Layer
@@ -544,7 +561,7 @@ HomeAutomation/
 | Component | Role |
 | --- | --- |
 | `FoundationLabCoreError` | Shared typed errors for invalid requests, provider failures, unavailable functionality, and unsupported cases. |
-| `HomeCommandResolving` | Main resolver abstraction implemented by orchestrator, rule fallback, and legacy resolver. |
+| `HomeCommandResolving` | Main resolver abstraction implemented by orchestrator-compatible and deterministic fallback paths. |
 | `HomeCommandDraftResolving` | Draft-generation abstraction for Foundation Models and test doubles. |
 | `HomeCandidateResolving` | Candidate selection abstraction. |
 | `HomeWorkerSessionAnalyzing` | Worker-analysis abstraction for language/domain/intent/device/slot/risk extraction. |
@@ -571,12 +588,13 @@ HomeAutomation/
 | `HomeAutomationExecutionPlan` | Ordered execution steps and confirmation flag. |
 | `HomeCommandResolution` | Final result: ready, executed, confirmation, clarification, or unsupported. |
 | `HomeFinalResolutionInput` | Compound input for draft resolution and validation. |
-| `HomeAutomationResolverResult` | Top-level resolver output. |
+| `HomeAutomationResolverResult` | Top-level command-resolution output returned by the orchestrator and fallback agents. |
 | `HomeGenerationMode` | Foundation Models generation mode. |
 | `HomeModelInstructionPackage` | Prompt, raw instruction text, tools, adapter flag, generation mode, and optional context-budget report. |
 | `HomeModelContextBudgetReport` | Token-budget estimate for instructions, prompt, tools, candidates, RAG sections, and selected compaction level. |
 | `FoundationModelContextBudgeter` | Estimates Foundation Models input size and selects compact prompt variants before draft generation. |
 | `FoundationModelFailureKind` | Structured Foundation Models failure category for context-window, guardrail, adapter, tool, and generation errors. |
+| `IntentCapabilityMap` | Maps NLU intent families to likely capability IDs for retrieval hints and query expansion. |
 
 ## 17. Low-Level Component Description: Core Catalogs, Policies, Registry
 
@@ -635,15 +653,18 @@ HomeAutomation/
 | `LanguageAgentWorkerSession`, `DomainAgentWorkerSession`, `IntentFamilyAgentWorkerSession`, `DeviceTypeAgentWorkerSession`, `SlotExtractionAgentWorkerSession`, `RiskClassificationAgentWorkerSession` | Per-agent Foundation Models worker sessions with deterministic fallback and deterministic-first model-call policy. |
 | `NLUModelCallPolicy` | Threshold policy that skips low-value NLU model calls when deterministic parsing is already high-confidence. |
 | `AgentRAGSupport` | Internal helper for retrieving RAG context for agents. |
-| `CapabilityKnowledgeAgent` | Retrieves and hydrates capability knowledge. |
-| `BixbyKnowledgeAgent` | Retrieves and hydrates Bixby command knowledge. |
-| `CommandExampleAgent` | Retrieves generated command examples. |
+| `KnowledgeRetrievalAgentOutput` | Knowledge snippets plus retrieval reports emitted by knowledge agents. |
+| `CapabilityKnowledgeAgent` | Retrieves and hydrates capability knowledge using NLU hints, hybrid retrieval, and canonical registry hydration. |
+| `BixbyKnowledgeAgent` | Retrieves and hydrates Bixby command knowledge using device names plus NLU hints. |
+| `CommandExampleAgent` | Retrieves generated command examples with semantic-only retrieval and device-type filters. |
+| `RetrievalJudgeAgent` | Reviews retrieval quality, accepts high-quality fast paths, and performs one reformulated retry for weak sources. |
+| `QueryReformulator` | Builds deterministic reformulated queries from raw text plus NLU hints. |
 | `CandidateRetrievalInput` | Input for candidate retrieval. |
 | `CandidateRankingInput` | Input for candidate ranking. |
 | `CandidateShardInput` | Input for shard-level candidate ranking. |
 | `CandidateHydrationInput` | Input for candidate hydration. |
 | `HomeCandidateResolverMetrics` | Stores candidate resolver metrics for tests and diagnostics. |
-| `HomeCandidateResolverSupport` | Candidate ranking and shard support. |
+| `HomeCandidateResolverSupport` | Candidate ranking, strong room/device-type scoping, shard support, and aggregation. |
 | `CandidateRetrievalAgent` | Retrieves candidates from registry and RAG hints. |
 | `CandidateRankingAgent` | Selects final candidates or clarification. |
 | `CandidateShardAgent` | Selects candidates from one shard. |
@@ -717,42 +738,23 @@ HomeAutomation/
 | `OrchestratorContextMetrics` | Metrics about context and RAG usage. |
 | `OrchestratorSafetyMetrics` | Safety-specific metrics. |
 | `OrchestratorCandidateMetrics` | Candidate and shard metrics. |
+| `RetrievalQualityMetrics` | Retrieval strategy, score, low-source, judge, retry, and reformulated-query metrics. |
 | `FoundationModelUsageMetrics` | Foundation Models availability, model-call, skipped-call, tool, budget, and failure metrics. |
 | `OrchestratorMetrics` | Full metrics payload. |
 | `OrchestratorMetricsCollector` | Stores and serializes latest metrics. |
 
-## 21. Low-Level Component Description: Legacy Compatibility Target
+## 21. Low-Level Component Description: Fallback and Compatibility Contracts
 
-`HomeAutomationResolver` preserves the original staged resolver. It is useful for regression tests, parity comparisons, and migration documentation.
+The current package does not ship a separate legacy resolver target. Compatibility is maintained through shared result contracts in `HomeAutomationCore` and model-free fallback agents in `HomeAutomationAgents`.
 
 | Component | Role |
 | --- | --- |
-| `LegacyHomeCommandResolver` | Original end-to-end resolver. |
-| `LegacyRuleBasedResolver` | Original deterministic rule fallback. |
-| `LegacyPartialSafeWorkerSessionLayer` | Original worker-analysis layer with partial safety fallbacks. |
-| `LegacyCandidateResolver` | Original candidate selector. |
-| `LegacyCandidateResolverMetrics` | Original candidate metrics store. |
-| `LegacyCandidateContextStore` | Original async candidate cache. |
-| `LegacyInstructionSetFactory` | Original prompt and tool package builder. |
-| `LegacyDraftResolver` | Original draft retry wrapper. |
-| `LegacyDraftAttemptReport` | Original single draft-attempt report. |
-| `LegacyDraftResolutionReport` | Original aggregate draft report. |
-| `LegacyDraftResolutionOutput` | Original draft plus report output. |
-| `LegacyDraftResolverMetrics` | Original draft metrics store. |
-| `LegacyCommandValidator` | Original deterministic draft validator. |
-| `LegacyExecutionPlanner` | Original execution planner. |
-| `LegacyPlanExecutor` | Original plan executor. |
-| `LegacyBixbyFallbackMapper` | Original Bixby fallback mapper. |
-| `LegacyBixbyDraftMatch` | Original Bixby match record. |
-| `LegacyPipelineStage` | Original stream stage enum. |
-| `LegacyPipelineEvent` | Original timeline event. |
-| `LegacyResolverUpdate` | Original stream update enum. |
-| `LegacyResolutionMetrics` | Original metrics payload. |
-| `LegacyMetricsCollector` | Original metrics store. |
-| `LegacyAdapterTrainingExporter` | JSONL/export helper for generated dataset examples. |
-| `LegacyDeploymentChecklist` | Static deployment checklist. |
-| `LegacyTextParser` | Original deterministic text parser. |
-| `LegacyToolProvider` and `Legacy*Tool` types | Original Foundation Models tools. |
+| `HomeAutomationResolverResult` | Stable top-level result shape consumed by the app and tests. |
+| `HomeCommandResolving` | Resolver abstraction that lets orchestrated and deterministic paths expose the same call shape. |
+| `AgentTextParser` | Deterministic parser used by NLU fallback, rule fallback, confidence estimation, and few-shot prompt cleanup. |
+| `AgentRuleBasedResolver` | Model-free resolver used when Foundation Models are unavailable or fallback is selected. |
+| `AgentBixbyFallbackMapper` | Model-free Bixby-style command mapper. |
+| `RuleFallbackAgent`, `BixbyFallbackAgent`, `UnsupportedCommandAgent` | Fallback plan agents that produce safe ready, clarification, or unsupported results without model calls. |
 
 ## 22. Resource Model
 
@@ -769,7 +771,7 @@ The runtime exposes several layers of observability:
 
 - `OrchestratorPipelineEvent` streams live stage and agent updates to the UI.
 - `AgentTraceEntry` records per-agent timing and result.
-- `OrchestratorMetrics` records final outcome, fallback status, circuit states, safety fields, candidate fields, and evaluation fields.
+- `OrchestratorMetrics` records final outcome, fallback status, circuit states, safety fields, candidate fields, retrieval quality, Foundation Models usage, and evaluation fields.
 - `HomeAutomationViewModel` renders timeline, JSON metrics, and agent dashboard data.
 - Tests assert metrics and event behavior for fallback, RAG, memory, safety, and parallel shard scenarios.
 
@@ -777,12 +779,11 @@ The runtime exposes several layers of observability:
 
 | Test Target | Focus |
 | --- | --- |
-| `HomeAutomationRAGTests` | Chunking, embedding, vector search, metadata filtering, indexer, retriever, and semantic fallback. |
-| `HomeAutomationAgentTests` | Agent contracts, NLU agents, knowledge agents, candidate agents, draft agents, safety agents, execution agents, fallback agents, and RAG integration. |
-| `HomeAutomationOrchestratorTests` | Scheduler, registry, circuit breakers, conversation memory, orchestrator streams, parity, metrics, and fail-closed behavior. |
-| `HomeAutomationResolverTests` | Legacy resolver parity and safety regression coverage. |
+| `HomeAutomationRAGTests` | Semantic chunking, BM25, hybrid retrieval, vector search, metadata filtering, cache invalidation, indexer, retriever, and semantic fallback. |
+| `HomeAutomationAgentTests` | Agent contracts, NLU agents, knowledge agents, retrieval judge, candidate agents, draft agents, safety agents, execution agents, fallback agents, and RAG integration. |
+| `HomeAutomationOrchestratorTests` | Scheduler, registry, circuit breakers, conversation memory, orchestrator streams, metrics, retrieval quality, and fail-closed behavior. |
 
-Verified command set:
+Useful verification commands:
 
 ```sh
 cd HomeAutomationCore
@@ -791,16 +792,16 @@ cd ..
 xcodebuild -scheme HomeAutomation -destination platform=macOS build
 ```
 
-Current verified state: 77 Swift package tests pass, and the `HomeAutomation` Xcode scheme builds successfully.
+Current verified package state: `swift test` passes with 101 tests.
 
 ## 25. Architecture Invariants
 
-1. New orchestrator code must not depend on `HomeAutomationResolver`.
+1. Orchestrator code depends only on `HomeAutomationCore`, `HomeAutomationRAG`, and `HomeAutomationAgents`.
 2. RAG may rank and retrieve, but final facts must be hydrated from canonical registries.
-3. Safety, parameter, confirmation, execution-planning, and mock-execution gates must fail closed.
-4. Memory hints must never bypass candidate hydration or safety validation.
-5. High-risk and security-sensitive actions must require explicit confirmation.
-6. Execution is allowed only for low-risk command steps when `executeLowRiskCommands` is true.
-7. Query/read steps do not mutate registry state.
-8. Every agent execution path should emit traceable events or metrics.
-9. Legacy compatibility should remain test-covered until intentionally removed.
+3. Retrieval reports should expose strategy, score, filter, retry, and reformulation information for metrics and judge decisions.
+4. Safety, parameter, confirmation, execution-planning, and mock-execution gates must fail closed.
+5. Memory hints must never bypass candidate hydration or safety validation.
+6. High-risk and security-sensitive actions must require explicit confirmation.
+7. Execution is allowed only for low-risk command steps when `executeLowRiskCommands` is true.
+8. Query/read steps do not mutate registry state.
+9. Every agent execution path should emit traceable events or metrics.

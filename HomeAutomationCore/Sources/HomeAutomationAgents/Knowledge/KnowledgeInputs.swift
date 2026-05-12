@@ -4,6 +4,26 @@ import HomeAutomationRAG
 
 /// Input types shared across Knowledge agents.
 
+public struct KnowledgeRetrievalAgentOutput: Sendable, Hashable, RandomAccessCollection {
+    public typealias Element = KnowledgeSnippet
+    public typealias Index = Array<KnowledgeSnippet>.Index
+
+    public let snippets: [KnowledgeSnippet]
+    public let reports: [KnowledgeRetrievalReport]
+
+    public init(snippets: [KnowledgeSnippet], reports: [KnowledgeRetrievalReport] = []) {
+        self.snippets = snippets
+        self.reports = reports
+    }
+
+    public var startIndex: Index { snippets.startIndex }
+    public var endIndex: Index { snippets.endIndex }
+
+    public subscript(position: Index) -> KnowledgeSnippet {
+        snippets[position]
+    }
+}
+
 /// Input for `BixbyKnowledgeAgent` containing the user text and device names
 /// to use for Bixby command matching.
 public struct BixbyKnowledgeInput: Sendable, Hashable {

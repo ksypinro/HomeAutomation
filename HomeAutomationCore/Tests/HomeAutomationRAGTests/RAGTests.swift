@@ -23,6 +23,23 @@ struct RAGTests {
     }
 
     @Test
+    func vectorStoreAppliesMinimumScore() async {
+        let store = VectorStore()
+        await store.insert(
+            DocumentChunk(id: "a", content: "light on", source: .device),
+            embedding: [1, 0]
+        )
+        await store.insert(
+            DocumentChunk(id: "b", content: "weak match", source: .device),
+            embedding: [0.1, 0.9]
+        )
+
+        let results = await store.query([1, 0], topK: 5, minScore: 0.5)
+
+        #expect(results.map(\.chunk.id) == ["a"])
+    }
+
+    @Test
     func similarTextGetsHigherScore() async {
         let embeddingProvider = TFIDFEmbeddingProvider()
         await embeddingProvider.buildVocabulary(from: [
@@ -36,6 +53,14 @@ struct RAGTests {
         let different = await embeddingProvider.embed("set thermostat")
 
         #expect(cosineSimilarity(base, similar) > cosineSimilarity(base, different))
+    }
+
+    @Test
+    func tfidfSynonymsIncludeCanonicalKnowledge() {
+        let tokens = TFIDFEmbeddingProvider.tokenize("freezing")
+
+        #expect(tokens.contains("temperature"))
+        #expect(tokens.contains("thermostat"))
     }
 
     @Test
@@ -96,6 +121,19 @@ struct RAGTests {
         #expect(datasetExample?.metadata["deviceType"]?.isEmpty == false)
         #expect(datasetExample?.metadata["capability"]?.isEmpty == false)
         #expect(datasetExample?.metadata["command"]?.isEmpty == false)
+        #expect(datasetExample?.semanticContent == HomeAutomationKnowledgeBase.generatedDatasetCommands().first?.text)
+        #expect(capability?.metadata["relatedDeviceTypes"]?.contains("light") == true)
+    }
+
+    @Test
+    func documentChunkDecodingDefaultsMissingSemanticContent() throws {
+        let data = try #require("""
+        {"id":"legacy","content":"legacy content","source":"device","metadata":{}}
+        """.data(using: .utf8))
+
+        let chunk = try JSONDecoder().decode(DocumentChunk.self, from: data)
+
+        #expect(chunk.semanticContent == "legacy content")
     }
 
     @Test
@@ -127,6 +165,82 @@ struct RAGTests {
         #expect(result.indexedChunkCount == chunks.count)
         #expect(result.sourceCounts[.capability] == chunks.count)
         #expect(results.first?.chunk.id == "capability:switch")
+    }
+
+    @Test
+    func knowledgeIndexerEmbedsSemanticContent() async {
+        let chunks = [
+            DocumentChunk(
+                id: "nl:dim",
+                content: "Natural language example unrelated boilerplate thermostat heating",
+                semanticContent: "dim the bedroom lamp",
+                source: .nlDataset,
+                metadata: ["exampleId": "dim"]
+            ),
+            DocumentChunk(
+                id: "nl:heat",
+                content: "Natural language example dim lamp boilerplate",
+                semanticContent: "increase thermostat heat",
+                source: .nlDataset,
+                metadata: ["exampleId": "heat"]
+            )
+        ]
+
+        let indexer = KnowledgeIndexer()
+        _ = await indexer.index(chunks: chunks)
+        let retriever = await indexer.makeRetriever()
+        let results = await retriever.retrieve("dim lamp", topK: 1)
+
+        #expect(results.first?.chunk.id == "nl:dim")
+    }
+
+    @Test
+    func bm25FindsExactKeywordMatches() async {
+        let index = BM25Index()
+        let chunks = [
+            DocumentChunk(id: "capability:switchLevel", content: "switchLevel setLevel brightness", source: .capability),
+            DocumentChunk(id: "capability:lock", content: "lock unlock door", source: .capability)
+        ]
+        await index.index(chunks)
+
+        let results = await index.search(terms: ["setLevel"], topK: 1)
+
+        #expect(results.first?.chunk.id == "capability:switchLevel")
+    }
+
+    @Test
+    func structuredHybridRetrievalUsesBM25AndSemanticEvidence() async {
+        let chunks = [
+            DocumentChunk(
+                id: "capability:switchLevel",
+                content: "switchLevel setLevel brightness",
+                semanticContent: "brightness level dim",
+                source: .capability,
+                metadata: ["capabilityId": "switchLevel"]
+            ),
+            DocumentChunk(
+                id: "capability:lock",
+                content: "lock unlock door",
+                semanticContent: "door lock",
+                source: .capability,
+                metadata: ["capabilityId": "lock"]
+            )
+        ]
+        let indexer = KnowledgeIndexer()
+        _ = await indexer.index(chunks: chunks)
+        let retriever = await indexer.makeRetriever()
+
+        let results = await retriever.retrieve(
+            StructuredRetrievalQuery(
+                rawText: "switchLevel setLevel 75",
+                keywordTerms: ["switchLevel", "setLevel"],
+                metadataFilter: MetadataFilter(source: .capability),
+                strategy: .hybrid(alpha: 0.5),
+                topK: 1
+            )
+        )
+
+        #expect(results.first?.chunk.id == "capability:switchLevel")
     }
 
     @Test
@@ -356,5 +470,6 @@ struct RAGTests {
         #expect(v1 != v2)
         #expect(v1 != v3)
         #expect(v2 != v3)
+        #expect(v1.contains(RAGIndexVersion.semanticIndexVersion))
     }
 }

@@ -70,6 +70,9 @@ public actor ResolutionContextStore {
         if let value = patch.updates[ResolutionContextPatchKey.knowledgeSnippets]?.get([KnowledgeSnippet].self) {
             context.knowledgeSnippets.append(contentsOf: value)
         }
+        if let value = patch.updates[ResolutionContextPatchKey.retrievalReports]?.get([KnowledgeRetrievalReport].self) {
+            context.retrievalReports.append(contentsOf: value)
+        }
         if let value = patch.updates[ResolutionContextPatchKey.instructionPackage]?.get(HomeModelInstructionPackage.self) {
             context.instructionPackage = value
         }
@@ -154,6 +157,10 @@ public actor ResolutionContextStore {
     public func appendKnowledge(_ snippets: [KnowledgeSnippet]) {
         logger.debug("Appending \(snippets.count, privacy: .public) knowledge snippets.")
         context.knowledgeSnippets.append(contentsOf: snippets)
+    }
+
+    public func appendRetrievalReports(_ reports: [KnowledgeRetrievalReport]) {
+        context.retrievalReports.append(contentsOf: reports)
     }
 
     /// Appends a conversational memory hint.

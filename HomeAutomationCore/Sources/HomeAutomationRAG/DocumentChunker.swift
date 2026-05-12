@@ -20,15 +20,25 @@ public struct DocumentChunker: Sendable {
                     "Enum values \(definition.enumValues.joined(separator: " "))",
                     "Risk \(definition.riskLevel)"
                 ].joined(separator: ". ")
+                let semanticContent = [
+                    definition.id,
+                    definition.displayName,
+                    definition.commands.joined(separator: " "),
+                    definition.attributeNames.joined(separator: " "),
+                    definition.enumValues.joined(separator: " ")
+                ].joined(separator: " ")
+                let relatedDeviceTypes = Self.relatedDeviceTypes(for: definition.id)
 
                 return DocumentChunk(
                     id: "capability:\(definition.id)",
                     content: content,
+                    semanticContent: semanticContent,
                     source: .capability,
                     metadata: [
                         "capabilityId": definition.id,
                         "commands": definition.commands.joined(separator: ","),
-                        "risk": String(describing: definition.riskLevel)
+                        "risk": String(describing: definition.riskLevel),
+                        "relatedDeviceTypes": relatedDeviceTypes.joined(separator: ",")
                     ]
                 )
             }
@@ -47,10 +57,20 @@ public struct DocumentChunker: Sendable {
                 "State \(device.currentState.map { "\($0.key) \($0.value)" }.joined(separator: " "))",
                 "Risk \(device.riskLevel)"
             ].joined(separator: ". ")
+            let semanticContent = [
+                device.displayName,
+                device.deviceType,
+                device.room ?? "",
+                device.capabilities.joined(separator: " "),
+                device.metadata["nickname"] ?? "",
+                device.metadata["aliases"] ?? "",
+                device.metadata["description"] ?? ""
+            ].joined(separator: " ")
 
             return DocumentChunk(
                 id: "device:\(device.id)",
                 content: content,
+                semanticContent: semanticContent,
                 source: .device,
                 metadata: [
                     "deviceId": device.id,
@@ -74,15 +94,25 @@ public struct DocumentChunker: Sendable {
                 "Access \(command.accessLevel)",
                 "Hint \(command.hint)"
             ].joined(separator: ". ")
+            let semanticContent = [
+                command.capabilityAction,
+                command.capability,
+                command.action,
+                command.method,
+                command.hint
+            ].joined(separator: " ")
+            let relatedDeviceTypes = Self.relatedDeviceTypes(for: command.capability)
 
             return DocumentChunk(
                 id: "bixby:\(stableID(command.id))",
                 content: content,
+                semanticContent: semanticContent,
                 source: .bixbyCommand,
                 metadata: [
                     "capability": command.capability,
                     "action": command.action,
-                    "method": command.method
+                    "method": command.method,
+                    "relatedDeviceTypes": relatedDeviceTypes.joined(separator: ",")
                 ]
             )
         }
@@ -107,6 +137,7 @@ public struct DocumentChunker: Sendable {
             return DocumentChunk(
                 id: "nl:\(example.id)",
                 content: content,
+                semanticContent: example.text,
                 source: .nlDataset,
                 metadata: [
                     "exampleId": example.id,
@@ -131,5 +162,20 @@ public struct DocumentChunker: Sendable {
             .lowercased()
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private static func relatedDeviceTypes(for capabilityID: String) -> [String] {
+        capabilityDeviceTypes()[capabilityID] ?? []
+    }
+
+    private static func capabilityDeviceTypes() -> [String: [String]] {
+        var mapping: [String: Set<String>] = [:]
+        let devices = MockHomeDeviceRegistry.defaultDevices + HomeAutomationKnowledgeBase.shared.makeCatalogDeviceRecords()
+        for device in devices {
+            for capability in device.capabilities {
+                mapping[capability, default: []].insert(device.deviceType)
+            }
+        }
+        return mapping.mapValues { $0.sorted() }
     }
 }

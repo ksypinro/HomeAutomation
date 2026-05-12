@@ -2,15 +2,15 @@
 
 `HomeAutomation` is a SwiftUI smart-home command resolution demo. It turns natural-language requests such as "Set the bedroom lamp to 40 percent" into validated home-automation drafts, execution plans, confirmations, or clarification questions.
 
-The current implementation is orchestrator-first: a SwiftUI app calls a multi-agent command orchestrator, the orchestrator coordinates specialist agents, agents use canonical domain catalogs plus optional RAG context, and deterministic safety gates decide whether anything can execute.
+The current implementation is orchestrator-first: a SwiftUI app calls a multi-agent command orchestrator, the orchestrator coordinates specialist agents, agents use canonical domain catalogs plus NLU-informed hybrid RAG context, and deterministic safety gates decide whether anything can execute.
 
 ## Project Goals
 
 - Resolve natural-language home commands into structured `HomeCommandDraft` and `HomeCommandResolution` values.
 - Keep model output advisory until deterministic validation passes.
 - Support Foundation Models when available while preserving deterministic fallback behavior.
-- Retrieve only relevant catalog, device, command, and Bixby context through RAG.
-- Preserve observability through streamed pipeline events, per-agent traces, metrics JSON, and UI dashboards.
+- Retrieve only relevant catalog, device, command, and Bixby context through semantic, BM25, and hybrid RAG.
+- Preserve observability through streamed pipeline events, per-agent traces, retrieval-quality reports, metrics JSON, and UI dashboards.
 - Execute only low-risk mock-device commands when execution is enabled.
 
 ## High-Level Architecture
@@ -34,7 +34,7 @@ flowchart TB
         Memory["ConversationMemory"]
     end
 
-    subgraph Agents["HomeAutomationAgents — 26 Specialist Agents"]
+    subgraph Agents["HomeAutomationAgents - 27 Specialist Agents"]
         subgraph NLU["NLU Agents"]
             LanguageAgent["LanguageAgent"]
             DomainAgent["DomainAgent"]
@@ -47,6 +47,7 @@ flowchart TB
             CapabilityKnowledgeAgent["CapabilityKnowledgeAgent"]
             BixbyKnowledgeAgent["BixbyKnowledgeAgent"]
             CommandExampleAgent["CommandExampleAgent"]
+            RetrievalJudgeAgent["RetrievalJudgeAgent"]
         end
         subgraph Candidates["Candidate Agents"]
             CandidateRetrievalAgent["CandidateRetrievalAgent"]
@@ -83,7 +84,10 @@ flowchart TB
         Indexer["KnowledgeIndexer"]
         Retriever["ContextRetriever"]
         VectorStore["VectorStore"]
+        BM25["BM25Index"]
+        Hybrid["HybridRetrievalStrategy"]
         Embeddings["EmbeddingProvider"]
+        Query["StructuredRetrievalQuery"]
     end
 
     subgraph Core["HomeAutomationCore"]
@@ -108,7 +112,10 @@ flowchart TB
     CapabilityKnowledgeAgent --> RAG
     BixbyKnowledgeAgent --> RAG
     CommandExampleAgent --> RAG
+    RetrievalJudgeAgent --> RAG
     CandidateRetrievalAgent --> RAG
+    RAG --> BM25
+    RAG --> Hybrid
     RAG --> Core
     Agents --> Core
     MockExecutionAgent --> DeviceRegistry
@@ -132,27 +139,28 @@ flowchart TD
     G --> H["UnsupportedCommandAgent if no deterministic match"]
 
     E -->|Yes| I["Run 6 NLU agents in parallel"]
-    I --> J["Run knowledge and candidate retrieval in parallel"]
-    J --> K["Rank and hydrate candidates"]
-    K --> L{"Clarification needed?"}
-    L -->|Yes| M["Clarification result"]
-    L -->|No| N["Compose instruction package"]
-    N --> O["Generate or repair draft"]
-    O --> P["SafetyValidationAgent"]
-    P --> Q["ParameterValidationAgent"]
-    Q --> R["ConfirmationPolicyAgent"]
-    R --> S{"Allowed to execute?"}
-    S -->|Requires confirmation| T["Return confirmation result"]
-    S -->|Low risk and enabled| U["ExecutionPlanningAgent"]
-    U --> V["MockExecutionAgent mutates mock registry"]
-    S -->|Execution disabled or query| W["Return ready/query result"]
+    I --> J["Run NLU-informed knowledge and candidate retrieval in parallel"]
+    J --> K["RetrievalJudgeAgent accepts or retries weak retrieval"]
+    K --> L["Rank and hydrate scoped candidates"]
+    L --> M{"Clarification needed?"}
+    M -->|Yes| N["Clarification result"]
+    M -->|No| O["Compose instruction package"]
+    O --> P["Generate or repair draft"]
+    P --> Q["SafetyValidationAgent"]
+    Q --> R["ParameterValidationAgent"]
+    R --> S["ConfirmationPolicyAgent"]
+    S --> T["ExecutionPlanningAgent"]
+    T --> U{"Allowed to execute?"}
+    U -->|Requires confirmation| V["Return confirmation result"]
+    U -->|Low risk and enabled| W["MockExecutionAgent mutates mock registry"]
+    U -->|Execution disabled or query| X["Return ready/query result"]
 
-    H --> X["Assemble result and metrics"]
-    M --> X
-    T --> X
-    V --> X
-    W --> X
-    X --> Y["Stream outcome, metrics, dashboard updates"]
+    H --> Y["Assemble result and metrics"]
+    N --> Y
+    V --> Y
+    W --> Y
+    X --> Y
+    Y --> Z["Stream outcome, metrics, dashboard updates"]
 ```
 
 ## Package Structure
@@ -170,32 +178,27 @@ HomeAutomation/
 |   |   |-- HomeAutomationCore/
 |   |   |-- HomeAutomationRAG/
 |   |   |-- HomeAutomationAgents/
-|   |   |-- HomeAutomationOrchestrator/
-|   |   `-- HomeAutomationResolver/
+|   |   `-- HomeAutomationOrchestrator/
 |   `-- Tests/
 |       |-- HomeAutomationRAGTests/
 |       |-- HomeAutomationAgentTests/
-|       |-- HomeAutomationOrchestratorTests/
-|       `-- HomeAutomationResolverTests/
-|-- ARCHITECTURE.md
-|-- UNIFIED_ARCHITECTURE.md
-|-- UNIFIED_IMPLEMENTATION_PLAN.md
-`-- unified_impl/
+|       `-- HomeAutomationOrchestratorTests/
+|-- Architecture.md
+|-- implementation_plan.md
+|-- implementation_plan_part2.md
+`-- implementation_plan_part3.md
 ```
 
-## Swift Package Modules
-
-## Source Module READMEs
+## Swift Package Modules and READMEs
 
 The main Swift package source folders each have their own detailed architecture note:
 
 | Source folder | README | Focus |
 | --- | --- | --- |
 | `HomeAutomationCore/Sources/HomeAutomationCore` | [Core module README](HomeAutomationCore/Sources/HomeAutomationCore/README.md) | Domain contracts, canonical catalogs, policies, generated resources, mock registry, and Foundation Models support. |
-| `HomeAutomationCore/Sources/HomeAutomationAgents` | [Agents module README](HomeAutomationCore/Sources/HomeAutomationAgents/README.md) | Agent protocol, 26 specialist agents, group responsibilities, agent flow, and safety constraints. |
-| `HomeAutomationCore/Sources/HomeAutomationRAG` | [RAG module README](HomeAutomationCore/Sources/HomeAutomationRAG/README.md) | Chunking, embeddings, vector store, indexing, retrieval flow, metadata filters, and retrieval invariants. |
+| `HomeAutomationCore/Sources/HomeAutomationAgents` | [Agents module README](HomeAutomationCore/Sources/HomeAutomationAgents/README.md) | Agent protocol, 27 specialist agents, group responsibilities, retrieval reports, agent flow, and safety constraints. |
+| `HomeAutomationCore/Sources/HomeAutomationRAG` | [RAG module README](HomeAutomationCore/Sources/HomeAutomationRAG/README.md) | Semantic content, embeddings, BM25, hybrid retrieval, indexing, retrieval flow, metadata filters, and retrieval invariants. |
 | `HomeAutomationCore/Sources/HomeAutomationOrchestrator` | [Orchestrator module README](HomeAutomationCore/Sources/HomeAutomationOrchestrator/README.md) | Planning, scheduling, context patching, event streaming, metrics, memory, circuit breakers, and fail-closed behavior. |
-| `HomeAutomationCore/Sources/HomeAutomationResolver` | [Resolver module README](HomeAutomationCore/Sources/HomeAutomationResolver/README.md) | Legacy-compatible resolver pipeline, parity role, fallback flow, metrics, tools, validation, and execution safety. |
 
 | Module | Role |
 | --- | --- |
@@ -203,7 +206,6 @@ The main Swift package source folders each have their own detailed architecture 
 | `HomeAutomationRAG` | In-memory retrieval system for capabilities, generated command examples, Bixby commands, and device records. |
 | `HomeAutomationAgents` | Specialist agents for NLU, knowledge lookup, candidate handling, draft generation, safety checks, execution, fallback, and response formatting. |
 | `HomeAutomationOrchestrator` | Runtime coordinator that plans stages, schedules agents, merges context patches, emits events, records metrics, applies circuit breakers, and manages conversation memory. |
-| `HomeAutomationResolver` | Legacy-compatible resolver implementation retained for parity tests and migration safety. New app flow uses the orchestrator. |
 
 Dependency direction:
 
@@ -213,7 +215,6 @@ flowchart LR
     RAG["HomeAutomationRAG"]
     Agents["HomeAutomationAgents"]
     Orchestrator["HomeAutomationOrchestrator"]
-    Resolver["HomeAutomationResolver"]
     App["HomeAutomation App Target"]
 
     RAG --> Core
@@ -222,7 +223,6 @@ flowchart LR
     Orchestrator --> Core
     Orchestrator --> RAG
     Orchestrator --> Agents
-    Resolver --> Core
     App --> Core
     App --> Orchestrator
 ```
@@ -253,7 +253,7 @@ flowchart LR
 | `ConversationMemory` | Stores recent resolved turns and contributes low-priority memory hints for follow-up commands. |
 | `OrchestratorMetricsCollector` | Stores and serializes the latest orchestrator metrics. |
 
-### Agent Inventory (26 Specialist Agents)
+### Agent Inventory (27 Specialist Agents)
 
 #### NLU Agents (6) — Parallel Signal Extraction
 
@@ -268,20 +268,21 @@ flowchart LR
 
 All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline. Each supports optional RAG few-shot enrichment via `ContextRetriever`.
 
-#### Knowledge Agents (3) — Context Hydration
+#### Knowledge Agents (4) - Context Hydration and Retrieval Quality
 
 | Agent | Input | Output | Description |
 | --- | --- | --- | --- |
 | `CapabilityKnowledgeAgent` | `[String]` | `[KnowledgeSnippet]` | Retrieves relevant capability context via RAG, then hydrates canonical definitions from `HomeCapabilityRegistry`. |
 | `BixbyKnowledgeAgent` | `BixbyKnowledgeInput` | `[KnowledgeSnippet]` | Finds relevant Bixby voice commands via RAG + `HomeBixbyCommandCatalog` matching. |
 | `CommandExampleAgent` | `CommandExampleInput` | `[KnowledgeSnippet]` | Retrieves similar generated command examples for few-shot context during draft generation. |
+| `RetrievalJudgeAgent` | `RetrievalJudgeInput` | `KnowledgeRetrievalAgentOutput` | Reviews retrieval reports, fast-path accepts high-quality retrieval, and performs one bounded reformulated retry when retrieval quality is weak and models/RAG are available. |
 
 #### Candidate Agents (4) — Device Resolution
 
 | Agent | Input | Output | Description |
 | --- | --- | --- | --- |
 | `CandidateRetrievalAgent` | `CandidateRetrievalInput` | `[HomeCandidateRecord]` | Retrieves candidate devices from `MockHomeDeviceRegistry`, optionally merging semantic RAG device matches. |
-| `CandidateRankingAgent` | `CandidateRankingInput` | `HomeCandidateAggregationResult` | Scores and ranks candidates, selects final IDs, or triggers clarification when ambiguous. |
+| `CandidateRankingAgent` | `CandidateRankingInput` | `HomeCandidateAggregationResult` | Scopes candidates by strong room/device-type hints before ranking, selects final IDs, or triggers clarification when ambiguous. |
 | `CandidateShardAgent` | `CandidateShardInput` | `[String]` | Selects candidates within a single shard for large candidate lists (>12 devices). |
 | `CandidateHydrationAgent` | `CandidateHydrationInput` | `[HomeCandidateRecord]` | Converts selected candidate IDs into fully hydrated `HomeCandidateRecord` values. |
 
@@ -334,6 +335,7 @@ All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline
 | `HomeAutomationKnowledgeBase` | Loads generated capability catalog and natural-language dataset resources. |
 | `HomeBixbyCommandCatalog` and `HomeBixbyCommandMapper` | Bixby command source data and utterance-to-draft mapping support. |
 | `HomeRiskPolicy` and `HomeParameterValidator` | Deterministic safety and parameter validation rules. |
+| `IntentCapabilityMap` | Maps NLU intent families to likely capability IDs for retrieval hints. |
 | `HomeModelInstructionPackage`, `FoundationModelContextBudgeter`, and `HomeAdapterModelProvider` | Foundation Models prompt/tool/session support, context budgeting, and adapter diagnostics. |
 
 ## Safety Rules
@@ -354,6 +356,8 @@ All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline
 | Bixby command catalog | Voice-command chunks | Bixby knowledge and fallback mapping |
 | Device registry | Device chunks | Candidate retrieval and semantic device matching |
 
+RAG now stores both full display `content` and clean `semanticContent`. Embeddings use the clean semantic field, while BM25 and formatted debugging keep the full content plus metadata. Knowledge agents use `StructuredRetrievalQuery`, `NLURetrievalHints`, and metadata filters so intent families, device types, rooms, and capability hints can narrow retrieval before prompts are built.
+
 ## Testing
 
 Run all package tests:
@@ -369,4 +373,4 @@ Build the macOS app target:
 xcodebuild -scheme HomeAutomation -destination platform=macOS build
 ```
 
-The current verified state has 77 passing Swift package tests across the RAG, agent, orchestrator, and legacy resolver suites, and the `HomeAutomation` Xcode scheme builds successfully.
+Current verified package state: `swift test` passes with 101 tests across the RAG, agent, and orchestrator suites.

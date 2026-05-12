@@ -265,7 +265,8 @@ public struct HomeCandidateResolverSupport: Sendable {
         candidates: [HomeCompactCandidateView],
         memoryHints: [MemoryHint] = []
     ) async throws -> HomeCandidateAggregationResult {
-        guard !candidates.isEmpty else {
+        let scopedCandidates = Self.scopedCandidates(candidates, using: resolutionState)
+        guard !scopedCandidates.isEmpty else {
             await metrics?.record(strategy: "empty", candidateCount: 0)
             return HomeCandidateAggregationResult(
                 finalCandidateIDs: [],
@@ -275,23 +276,23 @@ public struct HomeCandidateResolverSupport: Sendable {
             )
         }
 
-        if candidates.count <= shardSize {
+        if scopedCandidates.count <= shardSize {
             let result = try await resolveDirectly(
                 userText: userText,
                 resolutionState: resolutionState,
-                candidates: candidates,
+                candidates: scopedCandidates,
                 memoryHints: memoryHints
             )
             await metrics?.record(
                 strategy: "direct",
-                candidateCount: candidates.count,
+                candidateCount: scopedCandidates.count,
                 shardWinnerCount: result.finalCandidateIDs.count
             )
             return result
         }
 
-        let shards = stride(from: 0, to: candidates.count, by: shardSize).map {
-            Array(candidates[$0..<min($0 + shardSize, candidates.count)])
+        let shards = stride(from: 0, to: scopedCandidates.count, by: shardSize).map {
+            Array(scopedCandidates[$0..<min($0 + shardSize, scopedCandidates.count)])
         }
         let selections = try await resolveShardsInParallel(
             userText: userText,
@@ -305,10 +306,10 @@ public struct HomeCandidateResolverSupport: Sendable {
         )
         await metrics?.record(
             strategy: "parallel-sharded",
-            candidateCount: candidates.count,
+            candidateCount: scopedCandidates.count,
             shardCount: shards.count,
             parallelTaskCount: shards.count,
-            shardWinnerCount: selections.flatMap(\.selectedCandidateIDs).count
+            shardWinnerCount: result.finalCandidateIDs.count
         )
         return result
     }
@@ -712,7 +713,7 @@ public struct HomeCandidateResolverSupport: Sendable {
         return HomeCandidateAggregationResult(
             finalCandidateIDs: [best.candidate.id],
             needsClarification: false,
-            confidence: min(0.95, Double(best.score) / 28.0)
+            confidence: min(0.95, Double(best.score) / 44.0)
         )
     }
 
@@ -784,6 +785,49 @@ public struct HomeCandidateResolverSupport: Sendable {
             needsClarification: false,
             confidence: best.confidence
         )
+    }
+
+    private static func scopedCandidates(
+        _ candidates: [HomeCompactCandidateView],
+        using resolutionState: HomeResolutionState
+    ) -> [HomeCompactCandidateView] {
+        var scoped = candidates
+        let rooms = Set(
+            resolutionState.slots.rooms
+                .map(\.agentNormalizedHomeTokenString)
+                .filter { !$0.isEmpty && $0 != "home" }
+        )
+        if !rooms.isEmpty {
+            let roomMatches = scoped.filter { candidateMatchesRoom($0, rooms: rooms) }
+            if !roomMatches.isEmpty {
+                scoped = roomMatches
+            }
+        }
+
+        let types = Set(
+            resolutionState.deviceType.deviceTypes
+                .map(\.agentNormalizedHomeTokenString)
+                .filter { !$0.isEmpty }
+        )
+        if !types.isEmpty {
+            let typeMatches = scoped.filter { types.contains($0.deviceType.agentNormalizedHomeTokenString) }
+            if !typeMatches.isEmpty {
+                scoped = typeMatches
+            }
+        }
+
+        return scoped
+    }
+
+    private static func candidateMatchesRoom(_ candidate: HomeCompactCandidateView, rooms: Set<String>) -> Bool {
+        if let room = candidate.room?.agentNormalizedHomeTokenString, rooms.contains(room) {
+            return true
+        }
+        let label = candidate.label.agentNormalizedHomeTokenString
+        let id = candidate.id.agentNormalizedHomeTokenString
+        return rooms.contains { room in
+            label.contains(room) || id.contains(room)
+        }
     }
 }
 

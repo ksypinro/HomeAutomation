@@ -25,8 +25,10 @@ public enum AgentTextParser {
         confidence: Double,
         riskReason: String = "Agent deterministic fallback"
     ) -> HomeResolutionState {
-        let normalized = text.agentNormalizedHomeTokenString
-        let family = intentFamily(for: normalized)
+        let commandText = userCommandText(from: text)
+        let normalized = commandText.agentNormalizedHomeTokenString
+        let families = intentFamilies(for: normalized)
+        let family = families.first ?? .unsupported
         let deviceTypes = deviceTypes(for: normalized)
         let rooms = knownRooms.filter { normalized.contains($0) }
         let values = extractedNumbers(from: normalized).map {
@@ -43,7 +45,7 @@ public enum AgentTextParser {
         let risk = riskLevel(for: normalized)
 
         return HomeResolutionState(
-            rawText: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            rawText: commandText.trimmingCharacters(in: .whitespacesAndNewlines),
             language: HomeLanguageDetectionResult(
                 languageCode: "en",
                 isMixedLanguage: false,
@@ -51,7 +53,7 @@ public enum AgentTextParser {
                 unsupportedLanguageLikely: false
             ),
             domain: HomeDomainClassificationResult(domain: domain, confidence: confidence),
-            intent: HomeIntentFamilyResult(topFamilies: [family], confidence: confidence),
+            intent: HomeIntentFamilyResult(topFamilies: families, confidence: confidence),
             deviceType: HomeDeviceTypeResult(deviceTypes: deviceTypes, confidence: confidence),
             slots: HomeSlotExtractionResult(
                 rooms: rooms,
@@ -81,7 +83,7 @@ public enum AgentTextParser {
     }
 
     public static func deterministicConfidence(for text: String) -> Double {
-        let normalized = text.agentNormalizedHomeTokenString
+        let normalized = userCommandText(from: text).agentNormalizedHomeTokenString
         var score = 0.35
 
         if intentFamily(for: normalized) != .unsupported {
@@ -110,35 +112,41 @@ public enum AgentTextParser {
     }
 
     public static func intentFamily(for normalized: String) -> HomeAutomationIntentFamily {
+        intentFamilies(for: normalized).first ?? .unsupported
+    }
+
+    public static func intentFamilies(for normalized: String) -> [HomeAutomationIntentFamily] {
+        var families: [HomeAutomationIntentFamily] = []
+
         if containsAny(normalized, ["unlock", "lock the", "secure"]) {
-            return .lockUnlock
+            append(.lockUnlock, to: &families)
         }
         if containsAny(normalized, ["open", "close", "raise", "lower"]) &&
             containsAny(normalized, ["door", "garage", "blind", "shade", "valve"]) {
-            return .openClose
+            append(.openClose, to: &families)
         }
         if containsAny(normalized, ["routine", "scene", "movie time", "good night"]) {
-            return .routine
+            append(.routine, to: &families)
         }
         if containsAny(normalized, ["status", "check", "what is", "is the", "tell me", "battery"]) {
-            return .statusQuery
+            append(.statusQuery, to: &families)
+        }
+        if containsAny(normalized, ["turn on", "turn off", "turning on", "turning off", "switch on", "switch off", "power"]) {
+            append(.power, to: &families)
         }
         if containsAny(normalized, ["temperature", "cooler", "warmer", "thermostat", "ac", "air conditioner", "fan mode"]) {
-            return .temperature
+            append(.temperature, to: &families)
         }
         if containsAny(normalized, ["brightness", "bright", "dim", "percent", "level", "color", "hue", "saturation"]) {
-            return .brightness
+            append(.brightness, to: &families)
         }
-        if containsAny(normalized, ["tv", "speaker", "volume", "channel", "play", "pause", "mute"]) {
-            return .media
+        if containsAny(normalized, ["tv", "television", "speaker", "volume", "channel", "play", "pause", "mute"]) {
+            append(.media, to: &families)
         }
         if containsAny(normalized, ["washer", "dryer", "oven", "vacuum", "cleaner", "start", "stop"]) {
-            return .applianceCycle
+            append(.applianceCycle, to: &families)
         }
-        if containsAny(normalized, ["turn on", "turn off", "switch on", "switch off", "power"]) {
-            return .power
-        }
-        return .unsupported
+        return families.isEmpty ? [.unsupported] : Array(families.prefix(3))
     }
 
     public static func deviceTypes(for normalized: String) -> [String] {
@@ -150,7 +158,7 @@ public enum AgentTextParser {
         append("lock", to: &values, if: containsAny(normalized, ["lock", "front door"]))
         append("garageDoor", to: &values, if: normalized.contains("garage door"))
         append("blind", to: &values, if: containsAny(normalized, ["blind", "shade"]))
-        append("tv", to: &values, if: normalized.contains("tv"))
+        append("tv", to: &values, if: containsAny(normalized, ["tv", "television"]))
         append("speaker", to: &values, if: normalized.contains("speaker"))
         append("washer", to: &values, if: normalized.contains("washer"))
         append("dryer", to: &values, if: normalized.contains("dryer"))
@@ -174,9 +182,23 @@ public enum AgentTextParser {
     }
 
     public static func modeCandidates(in normalized: String) -> [String] {
-        ["auto", "cool", "heat", "dry", "fanOnly", "low", "medium", "high", "turbo", "eco"].filter {
-            normalized.contains($0.agentNormalizedHomeTokenString)
+        let words = Set(normalized.split(separator: " ").map(String.init))
+        return ["auto", "cool", "heat", "dry", "fanOnly", "low", "medium", "high", "turbo", "eco"].filter {
+            let candidate = $0.agentNormalizedHomeTokenString
+            if candidate.contains(" ") {
+                return normalized.contains(candidate)
+            }
+            return words.contains(candidate)
         }
+    }
+
+    public static func userCommandText(from text: String) -> String {
+        let marker = "User command:"
+        guard let range = text.range(of: marker, options: [.caseInsensitive, .backwards]) else {
+            return text
+        }
+        return String(text[range.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func containsAny(_ value: String, _ needles: [String]) -> Bool {
@@ -185,6 +207,11 @@ public enum AgentTextParser {
 
     private static func append(_ value: String, to values: inout [String], if condition: Bool) {
         guard condition, !values.contains(value) else { return }
+        values.append(value)
+    }
+
+    private static func append(_ value: HomeAutomationIntentFamily, to values: inout [HomeAutomationIntentFamily]) {
+        guard !values.contains(value) else { return }
         values.append(value)
     }
 

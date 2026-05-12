@@ -77,6 +77,7 @@ public struct AgentPlanner: Sendable {
                 AgentTask(.commandExample),
                 AgentTask(.candidateRetrieval)
             ]),
+            .sequential(AgentTask(.retrievalJudge)),
             .sequential(AgentTask(.candidateRanking)),
             .sequential(AgentTask(.candidateHydration)),
             .sequential(AgentTask(.instructionComposer)),

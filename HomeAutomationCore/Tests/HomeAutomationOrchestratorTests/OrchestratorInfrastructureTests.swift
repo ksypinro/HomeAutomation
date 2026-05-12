@@ -49,6 +49,25 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func plannerIncludesRetrievalJudgeAfterKnowledgePhaseWhenModelsAvailable() {
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { true })
+        let planner = AgentPlanner(policy: policy)
+        let context = ResolutionContext(
+            request: CommandRequest(text: "turn on the light", executeLowRiskCommands: false)
+        )
+
+        let plan = planner.plan(for: "turn on the light", context: context)
+
+        #expect(!plan.isFallbackOnly)
+        #expect(plan.phases.contains { phase in
+            if case .sequential(let task) = phase {
+                return task.agentID == .retrievalJudge
+            }
+            return false
+        })
+    }
+
+    @Test
     func defaultRegistryContainsAllPhaseThreeAgents() {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
 
@@ -62,6 +81,7 @@ struct OrchestratorInfrastructureTests {
             .capabilityKnowledge,
             .bixbyKnowledge,
             .commandExample,
+            .retrievalJudge,
             .candidateRetrieval,
             .candidateRanking,
             .candidateShard,
