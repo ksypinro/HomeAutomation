@@ -13,7 +13,12 @@ public actor VectorStore {
         entries.append(contentsOf: items.map { (chunk: $0.0, embedding: $0.1) })
     }
 
-    public func query(_ queryEmbedding: [Float], topK: Int = 5, filter: MetadataFilter? = nil) -> [ScoredChunk] {
+    public func query(
+        _ queryEmbedding: [Float],
+        topK: Int = 5,
+        filter: MetadataFilter? = nil,
+        minScore: Float = 0
+    ) -> [ScoredChunk] {
         entries
             .filter { item in
                 filter.map { $0.matches(item.chunk) } ?? true
@@ -21,6 +26,7 @@ public actor VectorStore {
             .map { item in
                 ScoredChunk(chunk: item.chunk, score: cosineSimilarity(queryEmbedding, item.embedding))
             }
+            .filter { $0.score >= minScore }
             .sorted { lhs, rhs in
                 if lhs.score == rhs.score {
                     return lhs.chunk.id < rhs.chunk.id

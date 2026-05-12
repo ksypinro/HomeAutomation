@@ -15,6 +15,7 @@ public enum ResolutionContextPatchKey {
     public static let aggregation = "aggregation"
     public static let hydratedCandidates = "hydratedCandidates"
     public static let knowledgeSnippets = "knowledgeSnippets"
+    public static let retrievalReports = "retrievalReports"
     public static let instructionPackage = "instructionPackage"
     public static let draft = "draft"
     public static let executionPlan = "executionPlan"

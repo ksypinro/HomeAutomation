@@ -13,13 +13,13 @@ The `HomeAutomationRAG` module acts as the targeted context retrieval layer for 
   2. **Generated NL Dataset**: Example natural language commands mapped to device capabilities and intents.
   3. **Bixby Command Catalog**: Mappings of Bixby actions to system capabilities.
   4. **Device Registry**: The actual smart home devices available to the user.
-- **`DocumentChunker`**: Converts the raw canonical data into small, manageable `DocumentChunk` records. Each chunk maintains its origin (`KnowledgeSource`) and dictionary metadata for precise filtering.
+- **`DocumentChunker`**: Converts the raw canonical data into small, manageable `DocumentChunk` records. Each chunk stores full display `content`, clean embeddable `semanticContent`, its origin (`KnowledgeSource`), and dictionary metadata for precise filtering.
 - **`EmbeddingProvider`**: Converts chunk text into mathematical vector representations (`[Float]`). The system uses a highly resilient provider architecture:
   - `SemanticEmbeddingProvider`: For high-quality, production-grade semantic vectors.
   - `TFIDFEmbeddingProvider`: A deterministic, local term frequency-inverse document frequency provider. Excellent for local testing, offline fallback, and reproducible behavior.
   - `FallbackEmbeddingProvider`: Seamlessly falls back to TF-IDF if semantic embeddings fail or are unavailable.
-- **`VectorStore` & `KnowledgeIndexer`**: The `KnowledgeIndexer` runs at app startup, processing all chunks and storing them in the `VectorStore`—an actor-backed, in-memory index. To optimize launch times, the system utilizes `VectorIndexCache` to persist the vectors and vocabulary to disk, allowing near-instant restoration on subsequent launches.
-- **`ContextRetriever`**: The public API consumed by the agents. It takes a user query, embeds it, and performs a Cosine Similarity search against the `VectorStore`, returning a ranked list of `ScoredChunk` results.
+- **`VectorStore`, `BM25Index` & `KnowledgeIndexer`**: The `KnowledgeIndexer` runs at app startup, processing all chunks into both an actor-backed semantic `VectorStore` and an actor-backed sparse `BM25Index`. To optimize launch times, the system utilizes `VectorIndexCache` to persist vectors and vocabulary to disk, while BM25 is rebuilt deterministically from restored chunks.
+- **`ContextRetriever`**: The public API consumed by the agents. It supports existing string queries and structured queries carrying semantic text, keyword terms, metadata filters, NLU hints, retrieval strategy, score floors, and top-K limits.
 
 ---
 
@@ -30,43 +30,47 @@ To understand exactly how canonical data is fed into the RAG system, we look at 
 The `DocumentChunker` parses the `HomeCapabilityRegistry` and translates each capability into a highly structured `DocumentChunk`.
 
 **Implementation Details:**
-1. **Flattened Content String**: For each capability, the chunker creates a single, searchable text block combining all critical fields:
+1. **Full Content String**: For each capability, the chunker creates a display/debug text block combining all critical fields:
    ```swift
    "Capability switch. Display name Switch. Commands on off. Attributes power. Enum values . Risk low"
    ```
-2. **Metadata Dictionary**: It also extracts exact values into a `metadata` dictionary for precise filtering later:
+2. **Semantic Content**: The chunker also creates clean `semanticContent` without boilerplate labels. Embeddings use this field so capability IDs, commands, attributes, enum values, and display names carry more signal.
+3. **Metadata Dictionary**: It also extracts exact values into a `metadata` dictionary for precise filtering later:
    ```swift
    metadata: [
        "capabilityId": "switch",
        "commands": "on,off",
-       "risk": "low"
+       "risk": "low",
+       "relatedDeviceTypes": "light,switch"
    ]
    ```
-3. **Source Tagging**: The chunk is tagged with `source: .capability`.
+4. **Source Tagging**: The chunk is tagged with `source: .capability`.
 
-When the `KnowledgeIndexer` runs, it loops through all these capability chunks, converts the flattened content string into a vector using the `EmbeddingProvider`, and stores the vector alongside the metadata in the `VectorStore`.
+When the `KnowledgeIndexer` runs, it converts `semanticContent` into vectors using the `EmbeddingProvider`, stores vectors alongside full chunks in the `VectorStore`, and indexes full content plus metadata in `BM25Index`.
 
 ---
 
 ## 3. Querying the RAG & Retrieval Techniques
 
 ### Current Retrieval Implementation
-When an agent queries the RAG, it uses the `ContextRetriever.retrieve()` method. 
-- **Query Strategy**: The agent passes the user's raw text command (e.g., "Turn on the lights") and a `MetadataFilter` (e.g., `filter: .capability`).
-- **Searching Technique**: The system uses **Cosine Similarity**. The `ContextRetriever` converts the user's query into a vector and then calculates the cosine angle between the query vector and all chunk vectors in the `VectorStore` that match the metadata filter. The top-K chunks with the highest cosine similarity (closest to 1.0) are returned.
+When an agent queries the RAG, it uses one of two `ContextRetriever.retrieve()` paths:
 
-### Alternative Retrieval Algorithms
-While Cosine Similarity over dense vectors (or TF-IDF sparse vectors) is used here, other algorithms could be implemented:
+- **String query path**: Existing callers pass raw text plus an optional `MetadataFilter` and `minScore`. The retriever embeds the text and performs cosine similarity search over the `VectorStore`.
+- **Structured query path**: NLU-aware callers pass `StructuredRetrievalQuery`, including raw text, semantic text, keyword terms, metadata filters, `NLURetrievalHints`, a `RetrievalStrategy`, score floor, and top-K. The retriever can run semantic-only, keyword-only, hybrid, or agentic retrieval.
+- **Hybrid strategy**: `HybridRetrievalStrategy` runs semantic vector search and BM25 keyword search, gates weak raw evidence, and fuses ranked results with reciprocal-rank fusion.
 
-- **BM25 (Best Matching 25)**: A highly efficient sparse-vector algorithm based on term frequency and document length. Excellent for exact keyword matching (e.g., finding exact capability IDs).
-- **Hybrid Search**: Combines Dense Vector Search (semantic meaning) with BM25 (exact keywords) and fuses the results using Reciprocal Rank Fusion (RRF). This is the industry standard for production RAG systems.
-- **HNSW (Hierarchical Navigable Small World)**: An Approximate Nearest Neighbor (ANN) algorithm. Instead of calculating cosine similarity against *every* vector (which is $O(N)$), HNSW uses a graph structure to find nearest neighbors in $O(\log N)$ time, crucial for massive datasets.
-- **MMR (Maximal Marginal Relevance)**: An algorithm that re-ranks results to ensure diversity. This prevents the RAG from returning 5 chunks that basically say the exact same thing.
+### Retrieval Algorithms
+
+- **Cosine similarity**: Used by `VectorStore` for semantic retrieval over `semanticContent`.
+- **BM25 (Best Matching 25)**: Implemented by `BM25Index` for exact and metadata-rich keyword evidence.
+- **Hybrid Search**: Implemented by `HybridRetrievalStrategy`, combining semantic and BM25 results with Reciprocal Rank Fusion (RRF).
+- **HNSW (future)**: An Approximate Nearest Neighbor (ANN) algorithm could replace linear vector scans if the catalog becomes very large.
+- **MMR (future)**: A diversity re-ranker could prevent near-duplicate snippets when many chunks describe similar capabilities or examples.
 
 ### Alternative Preprocessing Techniques for Efficient Retrieval
 To improve how information is fed into the RAG system, the following preprocessing techniques could be added:
 
-1. **Query Expansion & HyDE (Hypothetical Document Embeddings)**: Before querying the VectorStore, an LLM could generate a hypothetical capability JSON based on the user's command. The RAG system then embeds this hypothetical document instead of the raw user query, resulting in much higher similarity matches with the actual capability chunks.
+1. **Query Expansion & HyDE (Hypothetical Document Embeddings)**: The current `QueryReformulator` already performs deterministic NLU-hint expansion for weak retrievals. A future model-assisted HyDE step could generate a hypothetical capability JSON when deterministic expansion is not enough.
 2. **Sliding Window Chunking**: For very large datasets (like long generated examples), chunks can overlap by a certain number of tokens. This prevents important context from being cut off at the boundary between two chunks.
 3. **Hierarchical Metadata Enrichment**: Automatically expanding metadata based on relationships. For example, if a device chunk is located in the "Living Room", the chunker could enrich the metadata to also include "Zone: First Floor" or "Synonyms: Family Room, Lounge".
 4. **Entity Extraction**: Running a fast Named Entity Recognition (NER) pass over the user query to explicitly extract the target device and action, and mapping those directly as required filters before executing the vector search.
@@ -81,11 +85,12 @@ The `Generated NL Dataset` provides few-shot examples for NLU (Natural Language 
 When `KnowledgeIndexer` runs, the `DocumentChunker.nlDatasetChunks()` method parses every `HomeGeneratedCommandExample`. 
 
 **Implementation Details:**
-1. **Flattened Content String**: Similar to capabilities, the example is flattened into a descriptive sentence.
+1. **Full Content String**: Similar to capabilities, the example is flattened into a descriptive sentence for display, hydration, BM25, and formatted debug output.
    ```swift
    "Natural language example Dim the lights. Language en. Device type light. Device name living room lamp. Room living room. Capability switchLevel. Command setLevel. Intent set_brightness. Risk low"
    ```
-2. **Metadata Dictionary**: Key categorical data is extracted for targeted querying.
+2. **Semantic Content**: The chunk's `semanticContent` is only the natural-language command text, avoiding metadata dilution during vector embedding.
+3. **Metadata Dictionary**: Key categorical data is extracted for targeted querying.
    ```swift
    metadata: [
        "exampleId": "123",
@@ -95,36 +100,38 @@ When `KnowledgeIndexer` runs, the `DocumentChunker.nlDatasetChunks()` method par
        "command": "setLevel"
    ]
    ```
-3. **Source Tagging**: The chunk is strictly tagged with `source: .nlDataset`.
+4. **Source Tagging**: The chunk is strictly tagged with `source: .nlDataset`.
 
 ### How it is Queried
-Agents responsible for Natural Language Understanding (like `CommandExampleAgent`, `IntentFamilyAgent`, or `SlotExtractionAgent`) query the dataset using `ContextRetriever.retrieve()` with a `MetadataFilter(source: .nlDataset)`. 
+Agents responsible for Natural Language Understanding (like `CommandExampleAgent`, `IntentFamilyAgent`, or `SlotExtractionAgent`) query the dataset using `ContextRetriever.retrieve()` with a `MetadataFilter(source: .nlDataset)`.
 
-The user's query is converted to a vector. Because the chunk content begins with *"Natural language example [user phrase]"*, the Cosine Similarity heavily weights linguistic overlap, returning the closest historical examples to the user's current request.
+The user's query is converted to a vector and compared against each example's clean `semanticContent`. `CommandExampleAgent` also applies NLU-derived device-type filters when available, so examples for unrelated device classes do not crowd out the result.
 
 ### Flow Diagram
 
 ```mermaid
 flowchart TD
     A["HomeAutomationKnowledgeBase"] -->|Provides Examples| B["DocumentChunker"]
-    B -->|Flattens Text & Extracts Metadata| C["DocumentChunk (source: .nlDataset)"]
+    B -->|Full content + semanticContent + metadata| C["DocumentChunk (source: .nlDataset)"]
     C --> D["KnowledgeIndexer"]
-    D -->|Embeds Chunk Content| E["VectorStore"]
+    D -->|Embeds semanticContent| E["VectorStore"]
+    D -->|Indexes content + metadata| L["BM25Index"]
     
     F["User: 'Make it a bit brighter'"] --> G["CommandExampleAgent"]
-    G -->|Queries ContextRetriever| H["EmbeddingProvider"]
-    H -->|Input Vector| I["VectorStore Cosine Similarity"]
+    G -->|Structured or semantic query| H["ContextRetriever"]
+    H -->|semanticOnly for examples| I["VectorStore Cosine Similarity"]
+    H -->|hybrid for other agents| L
     I -->|Returns Top-K ScoredChunks| J["Agent Formats Few-Shot Prompt"]
     J --> K["Foundation Model"]
 ```
 
-### Potential Improvements for NL Dataset RAG
-Currently, the system embeds the entire flattened string. This can cause **"metadata dilution,"** where the actual user phrase is mathematically watered down by the boilerplate metadata text included in the chunk.
+### Remaining Improvements for NL Dataset RAG
 
-We can improve this via:
-1. **Targeted Embedding (Dual-Encoder Approach)**: Instead of embedding the entire flattened string, the `EmbeddingProvider` should *only* embed the `example.text` (e.g., "Dim the lights"). The rest of the data (Capability, Intent) remains strictly in the `metadata` payload. This guarantees that Cosine Similarity is measuring pure semantic intent without interference from boilerplate labels.
-2. **Pre-Filter by Device Type**: If a previous agent (like `DeviceTypeAgent`) has already classified the target device as a `light`, the `CommandExampleAgent` could apply a compound filter: `MetadataFilter(source: .nlDataset, metadata: ["deviceType": "light"])`. This instantly cuts out thousands of irrelevant examples (like thermostat commands) before the vector search even runs, achieving $O(1)$ scaling performance per device domain.
-3. **Hard Negative Mining**: The dataset likely has very similar linguistic commands with different consequences (e.g., "turn on the TV" vs "turn up the TV"). The embedding model could be fine-tuned using Hard Negative Mining to ensure the vector space accurately separates these subtle intent boundaries.
+The current implementation already avoids metadata dilution by embedding `example.text`, and it pre-filters by device type when NLU hints are available. Remaining improvements include:
+
+1. **Hard Negative Mining**: The dataset has similar linguistic commands with different consequences (e.g., "turn on the TV" vs "turn up the TV"). Adapter training or embedding fine-tuning could improve these boundaries.
+2. **Diversity Reranking**: If top examples are near-duplicates, an MMR-style reranker could preserve coverage across command/capability variants.
+3. **Model-Assisted Reformulation**: The retrieval judge currently uses deterministic reformulation. A tightly budgeted Foundation Models reformulator could be added for especially weak retrieval reports.
 
 ---
 
@@ -137,13 +144,17 @@ Let's assume the user says: *"Make it colder in the living room."*
 This string is passed into the `HomeCommandOrchestrator`, which spins up a series of specialized agents to resolve the command. 
 
 **2. The RAG Query**
-Instead of one massive RAG query, the orchestrator delegates to specialized agents (e.g., `CandidateRetrievalAgent` for devices, `CapabilityKnowledgeAgent` for actions). Each agent independently queries the RAG `ContextRetriever` using the user's input, but applies a specific **Metadata Filter**:
-- The `CandidateRetrievalAgent` calls `ContextRetriever.retrieve("Make it colder in the living room", filter: .device)`.
-- The `CapabilityKnowledgeAgent` calls `ContextRetriever.retrieve("Make it colder in the living room", filter: .capability)`.
+Instead of one massive RAG query, the orchestrator delegates to specialized agents (e.g., `CandidateRetrievalAgent` for devices, `CapabilityKnowledgeAgent` for actions). The NLU phase runs first, then knowledge agents build `StructuredRetrievalQuery` values from the user's input plus `NLURetrievalHints`:
+- The `CandidateRetrievalAgent` can query device chunks and merge semantic device matches with registry results.
+- The `CapabilityKnowledgeAgent` uses intent-to-capability hints from `IntentCapabilityMap`, device types, rooms, and a capability metadata filter.
+- The `BixbyKnowledgeAgent` uses inferred or hydrated device names plus NLU hints.
+- The `CommandExampleAgent` uses semantic-only retrieval over natural-language examples with device-type filtering.
 
 **3. Inside the Context Retriever**
-- **Embedding:** The `EmbeddingProvider` (using Semantic models or the local TF-IDF fallback) converts *"Make it colder in the living room"* into a mathematical vector (`[Float]`).
-- **Vector Search:** It searches the `VectorStore` (which was indexed at app startup) and calculates the Cosine Similarity between the input vector and all the chunk vectors in the database.
+- **Embedding:** The `EmbeddingProvider` (using Semantic models or the local TF-IDF fallback) converts semantic query text into a mathematical vector (`[Float]`).
+- **Keyword Evidence:** `BM25Index` scores exact terms and metadata values.
+- **Hybrid Fusion:** `HybridRetrievalStrategy` combines semantic and keyword rankings through reciprocal-rank fusion when the query strategy requests hybrid or agentic retrieval.
+- **Filtering:** `MetadataFilter` restricts sources and multi-value metadata, while `minScore` prevents weak semantic hits from entering the result set.
 
 **4. The RAG Output (`[ScoredChunk]`)**
 The `ContextRetriever` returns a ranked list of the `Top-K` (usually top 5) closest matches. For example, the device query might return a `ScoredChunk` that looks like this:
@@ -153,17 +164,21 @@ ScoredChunk(
     score: 0.89,
     chunk: DocumentChunk(
         content: "Living Room AC Thermostat",
+        semanticContent: "Living Room AC thermostat living room thermostatCoolingSetpoint",
         source: .device,
         metadata: ["deviceId": "living_room_ac", "room": "living_room"]
     )
 )
 ```
 
-**5. Hydration (The "Secret Sauce" for Accuracy)**
+**5. Retrieval Quality Reporting and Optional Judge**
+Knowledge agents append `KnowledgeRetrievalReport` records to the `ResolutionContext`. The `RetrievalJudgeAgent` accepts good reports on a fast path. If a source is empty or below score thresholds, and model/RAG support is available, it performs one bounded retry using `QueryReformulator` and appends any additional hydrated snippets.
+
+**6. Hydration (The "Secret Sauce" for Accuracy)**
 RAG output can sometimes be slightly outdated or hallucinated if generated poorly. To prevent this, the agents **do not** feed the raw RAG text directly to the model. 
 Instead, the agent looks at the `metadata["deviceId"]` (e.g., `"living_room_ac"`) and fetches the absolute, authoritative definition of that device directly from the hardcoded `DeviceRegistry` in `HomeAutomationCore`. 
 
-**6. Prompt Construction and Model Execution**
+**7. Prompt Construction and Model Execution**
 The agent packages these hydrated, canonical definitions into a concise `KnowledgeSnippet` and injects them into the Foundation Model's prompt. 
 The LLM receives a prompt that essentially says: *"The user said 'Make it colder'. Here are the 5 devices and capabilities that are most relevant to their request: [Canonical Details]. Draft the command."*
 

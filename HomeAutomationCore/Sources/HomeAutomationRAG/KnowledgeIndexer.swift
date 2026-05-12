@@ -38,17 +38,20 @@ public actor KnowledgeIndexer {
     private let chunker: DocumentChunker
     private let embeddingProvider: any EmbeddingProviding
     private let vectorStore: VectorStore
+    private let bm25Index: BM25Index
     private let cache: VectorIndexCache?
 
     public init(
         chunker: DocumentChunker = DocumentChunker(),
         embeddingProvider: any EmbeddingProviding = TFIDFEmbeddingProvider(),
         vectorStore: VectorStore = VectorStore(),
+        bm25Index: BM25Index = BM25Index(),
         cache: VectorIndexCache? = nil
     ) {
         self.chunker = chunker
         self.embeddingProvider = embeddingProvider
         self.vectorStore = vectorStore
+        self.bm25Index = bm25Index
         self.cache = cache
     }
 
@@ -58,10 +61,11 @@ public actor KnowledgeIndexer {
     /// it is used by tests and custom indexing pipelines.
     public func index(chunks: [DocumentChunk]) async -> KnowledgeIndexingResult {
         await vectorStore.clear()
+        await bm25Index.index(chunks)
         if let corpusAwareProvider = embeddingProvider as? any CorpusAwareEmbeddingProviding {
-            await corpusAwareProvider.prepareForCorpus(chunks.map(\.content))
+            await corpusAwareProvider.prepareForCorpus(chunks.map(\.semanticContent))
         }
-        let embeddings = await embeddingProvider.embedBatch(chunks.map(\.content))
+        let embeddings = await embeddingProvider.embedBatch(chunks.map(\.semanticContent))
         await vectorStore.insertBatch(Array(zip(chunks, embeddings)))
 
         let sourceCounts = Dictionary(grouping: chunks, by: \.source).mapValues(\.count)
@@ -135,7 +139,7 @@ public actor KnowledgeIndexer {
     }
 
     public func makeRetriever() -> ContextRetriever {
-        ContextRetriever(embeddingProvider: embeddingProvider, vectorStore: vectorStore)
+        ContextRetriever(embeddingProvider: embeddingProvider, vectorStore: vectorStore, bm25Index: bm25Index)
     }
 
     // MARK: - Private helpers
@@ -144,6 +148,7 @@ public actor KnowledgeIndexer {
         guard !snapshot.entries.isEmpty else { return false }
         await vectorStore.clear()
         await vectorStore.restore(from: snapshot.entries)
+        await bm25Index.index(snapshot.entries.map(\.chunk))
         if let vocabSnapshot = snapshot.tfidfVocabulary {
             let restoredVocabulary = await Self.restoreTFIDFVocabulary(
                 vocabSnapshot,
@@ -151,6 +156,7 @@ public actor KnowledgeIndexer {
             )
             guard restoredVocabulary else {
                 await vectorStore.clear()
+                await bm25Index.clear()
                 return false
             }
         }

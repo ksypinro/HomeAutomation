@@ -15,7 +15,7 @@ import HomeAutomationRAG
 /// registry before being passed to downstream agents like `InstructionComposerAgent`.
 public struct CapabilityKnowledgeAgent: HomeAgent {
     public typealias Input = [String]
-    public typealias Output = [KnowledgeSnippet]
+    public typealias Output = KnowledgeRetrievalAgentOutput
 
     public let id = AgentID.capabilityKnowledge
     public let capabilities: Set<AgentCapability> = [.knowledgeRetrieval]
@@ -26,23 +26,47 @@ public struct CapabilityKnowledgeAgent: HomeAgent {
         self.contextRetriever = contextRetriever
     }
 
-    public func run(_ input: [String], context: ResolutionContext) async throws -> [KnowledgeSnippet] {
+    public func run(_ input: [String], context: ResolutionContext) async throws -> KnowledgeRetrievalAgentOutput {
         var scoredIDs: [(id: String, score: Double?)] = input.map { ($0, nil) }
+        var reports: [KnowledgeRetrievalReport] = []
 
         if let contextRetriever {
-            let query = input.isEmpty ? context.request.text : input.joined(separator: " ")
-            let chunks = await contextRetriever.retrieve(
-                query: query,
-                topK: 5,
-                filter: MetadataFilter(source: .capability)
+            let hints = Self.nluHints(from: context, capabilityHints: input)
+            let query = input.isEmpty ? context.request.text : ([context.request.text] + input).joined(separator: " ")
+            let filter = MetadataFilter(
+                source: .capability,
+                requiredTagValues: hints.deviceTypes.isEmpty ? [:] : ["relatedDeviceTypes": hints.deviceTypes]
             )
+            let structuredQuery = StructuredRetrievalQuery(
+                rawText: context.request.text,
+                semanticText: query,
+                keywordTerms: hints.capabilities + hints.deviceTypes + hints.rooms,
+                metadataFilter: filter,
+                nluHints: hints,
+                strategy: .hybrid(alpha: 0.6),
+                minScore: 0.01,
+                topK: 5
+            )
+            let chunks = await contextRetriever.retrieve(structuredQuery)
             scoredIDs.append(contentsOf: chunks.compactMap { scored in
                 guard let id = scored.chunk.metadata["capabilityId"] else { return nil }
                 return (id, Double(scored.score))
             })
+            reports.append(
+                KnowledgeRetrievalReport.make(
+                    agentID: id,
+                    source: KnowledgeSource.capability.rawValue,
+                    strategy: structuredQuery.strategy.name,
+                    query: query,
+                    results: chunks.map { Double($0.score) },
+                    minScore: Double(structuredQuery.minScore),
+                    filterHints: Self.filterHints(from: hints)
+                )
+            )
         }
 
-        return AgentRAGSupport.stableUnique(scoredIDs) { $0.id }.compactMap { id, score in
+        let snippets = AgentRAGSupport.stableUnique(scoredIDs) { $0.id }.compactMap { item -> KnowledgeSnippet? in
+            let (id, score) = item
             guard let definition = HomeCapabilityRegistry.definitions[id] else { return nil }
             return KnowledgeSnippet(
                 sourceID: id,
@@ -58,5 +82,38 @@ public struct CapabilityKnowledgeAgent: HomeAgent {
                 metadata: ["source": "canonicalCapability"]
             )
         }
+        return KnowledgeRetrievalAgentOutput(snippets: snippets, reports: reports)
+    }
+
+    private static func nluHints(from context: ResolutionContext, capabilityHints: [String]) -> NLURetrievalHints {
+        let families = context.intent?.topFamilies ?? context.resolutionState?.intent.topFamilies ?? []
+        let deviceTypes = context.deviceType?.deviceTypes ?? context.resolutionState?.deviceType.deviceTypes ?? []
+        let rooms = context.slots?.rooms ?? context.resolutionState?.slots.rooms ?? []
+        let capabilities = IntentCapabilityMap.capabilities(for: families) + capabilityHints
+        return NLURetrievalHints(
+            deviceTypes: deviceTypes,
+            intentFamilies: families.map { String(describing: $0) },
+            rooms: rooms,
+            capabilities: Self.stableUnique(capabilities)
+        )
+    }
+
+    private static func filterHints(from hints: NLURetrievalHints) -> [String: [String]] {
+        [
+            "deviceTypes": hints.deviceTypes,
+            "intentFamilies": hints.intentFamilies,
+            "rooms": hints.rooms,
+            "capabilities": hints.capabilities
+        ].filter { !$0.value.isEmpty }
+    }
+
+    private static func stableUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            result.append(value)
+        }
+        return result
     }
 }

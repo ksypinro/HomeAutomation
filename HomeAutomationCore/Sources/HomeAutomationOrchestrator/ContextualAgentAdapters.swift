@@ -146,7 +146,7 @@ public enum DefaultAgentRegistryFactory {
             ContextualHomeAgent(
                 agent: CapabilityKnowledgeAgent(contextRetriever: contextRetriever),
                 makeInput: capabilityHints,
-                makePatch: { output, _ in patch(.capabilityKnowledge, [ResolutionContextPatchKey.knowledgeSnippets: output]) }
+                makePatch: { output, _ in knowledgePatch(.capabilityKnowledge, output) }
             ),
             ContextualHomeAgent(
                 agent: BixbyKnowledgeAgent(contextRetriever: contextRetriever),
@@ -156,12 +156,20 @@ public enum DefaultAgentRegistryFactory {
                         deviceNames: deviceNames(from: context)
                     )
                 },
-                makePatch: { output, _ in patch(.bixbyKnowledge, [ResolutionContextPatchKey.knowledgeSnippets: output]) }
+                makePatch: { output, _ in knowledgePatch(.bixbyKnowledge, output) }
             ),
             ContextualHomeAgent(
                 agent: CommandExampleAgent(contextRetriever: contextRetriever),
                 makeInput: { CommandExampleInput(text: $0.request.text, limit: 5) },
-                makePatch: { output, _ in patch(.commandExample, [ResolutionContextPatchKey.knowledgeSnippets: output]) }
+                makePatch: { output, _ in knowledgePatch(.commandExample, output) }
+            ),
+            ContextualHomeAgent(
+                agent: RetrievalJudgeAgent(
+                    contextRetriever: contextRetriever,
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                makeInput: { RetrievalJudgeInput(text: $0.request.text) },
+                makePatch: { output, _ in knowledgePatch(.retrievalJudge, output) }
             ),
             ContextualHomeAgent(
                 agent: CandidateRetrievalAgent(registry: registry, contextRetriever: contextRetriever),
@@ -396,6 +404,19 @@ public enum DefaultAgentRegistryFactory {
         )
     }
 
+    private static func knowledgePatch(
+        _ agentID: AgentID,
+        _ output: KnowledgeRetrievalAgentOutput
+    ) -> ResolutionContextPatch {
+        patch(
+            agentID,
+            [
+                ResolutionContextPatchKey.knowledgeSnippets: output.snippets,
+                ResolutionContextPatchKey.retrievalReports: output.reports
+            ]
+        )
+    }
+
     private static func state(from context: ResolutionContext, agentID: AgentID) throws -> HomeResolutionState {
         guard let state = context.resolutionState else {
             throw AgentContextInputError(agentID: agentID, message: "Missing resolution state")
@@ -434,7 +455,36 @@ public enum DefaultAgentRegistryFactory {
 
     private static func deviceNames(from context: ResolutionContext) -> [String] {
         let names = (context.hydratedCandidates + context.retrievedCandidates).map(\.displayName)
-        return names.isEmpty ? ["bedroom light"] : names
+        if !names.isEmpty {
+            return names
+        }
+
+        let slots = context.slots ?? context.resolutionState?.slots
+        let deviceTypes = context.deviceType?.deviceTypes ?? context.resolutionState?.deviceType.deviceTypes ?? []
+        let rooms = slots?.rooms ?? []
+        let inferred = rooms.flatMap { room in
+            deviceTypes.map { "\(room) \(Self.displayName(forDeviceType: $0))" }
+        } + deviceTypes.map(Self.displayName(forDeviceType:))
+        return inferred.isEmpty ? ["device"] : stableUnique(inferred)
+    }
+
+    private static func displayName(forDeviceType deviceType: String) -> String {
+        deviceType
+            .agentNormalizedHomeTokenString
+            .split(separator: " ")
+            .joined(separator: " ")
+    }
+
+    private static func stableUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values {
+            let key = value.agentNormalizedHomeTokenString
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(value)
+        }
+        return result
     }
 
     private static func capabilityHints(from context: ResolutionContext) -> [String] {

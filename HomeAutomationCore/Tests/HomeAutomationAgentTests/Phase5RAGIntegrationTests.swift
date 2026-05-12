@@ -26,6 +26,46 @@ struct Phase5RAGIntegrationTests {
     }
 
     @Test
+    func capabilityKnowledgeUsesNLUHintsForStructuredRetrieval() async throws {
+        let retriever = await Self.retriever(chunks: [
+            DocumentChunk(
+                id: "capability:switchLevel",
+                content: "switchLevel setLevel brightness",
+                semanticContent: "brightness level dim",
+                source: .capability,
+                metadata: [
+                    "capabilityId": "switchLevel",
+                    "commands": "setLevel",
+                    "risk": "low",
+                    "relatedDeviceTypes": "light"
+                ]
+            ),
+            DocumentChunk(
+                id: "capability:thermostatCoolingSetpoint",
+                content: "thermostat cooling setpoint",
+                semanticContent: "temperature cooling",
+                source: .capability,
+                metadata: [
+                    "capabilityId": "thermostatCoolingSetpoint",
+                    "commands": "setCoolingSetpoint",
+                    "risk": "medium",
+                    "relatedDeviceTypes": "thermostat"
+                ]
+            )
+        ])
+        let agent = CapabilityKnowledgeAgent(contextRetriever: retriever)
+
+        let output = try await agent.run(
+            [],
+            context: Self.context(text: "Dim it", intent: [.brightness], deviceTypes: ["light"])
+        )
+
+        #expect(output.first?.sourceID == "switchLevel")
+        #expect(output.reports.first?.strategy == "hybrid")
+        #expect(output.reports.first?.filterHints["deviceTypes"] == ["light"])
+    }
+
+    @Test
     func bixbyKnowledgeUsesRAGAndHydratesCanonicalCatalog() async throws {
         let retriever = await Self.retriever(chunks: [
             DocumentChunk(
@@ -76,6 +116,98 @@ struct Phase5RAGIntegrationTests {
     }
 
     @Test
+    func commandExampleReportsNLUDeviceTypeFilter() async throws {
+        let example = try #require(HomeAutomationKnowledgeBase.generatedDatasetCommands().first)
+        let retriever = await Self.retriever(chunks: [
+            DocumentChunk(
+                id: "nl:\(example.id)",
+                content: "Natural language example: \(example.text)",
+                semanticContent: example.text,
+                source: .nlDataset,
+                metadata: [
+                    "exampleId": example.id,
+                    "language": example.language,
+                    "deviceType": "light",
+                    "capability": example.capability,
+                    "command": example.command
+                ]
+            )
+        ])
+        let agent = CommandExampleAgent(contextRetriever: retriever)
+
+        let output = try await agent.run(
+            CommandExampleInput(text: "dim the lamp", limit: 1),
+            context: Self.context(text: "dim the lamp", intent: [.brightness], deviceTypes: ["light"])
+        )
+
+        #expect(output.reports.first?.strategy == "semanticOnly")
+        #expect(output.reports.first?.filterHints["deviceTypes"] == ["light"])
+    }
+
+    @Test
+    func retrievalJudgeSkipsRetryWhenModelUnavailable() async throws {
+        var context = Self.context(text: "make it cozy", intent: [.routine], deviceTypes: ["light"])
+        context.retrievalReports = [
+            KnowledgeRetrievalReport(
+                agentID: AgentID.capabilityKnowledge.rawValue,
+                source: KnowledgeSource.capability.rawValue,
+                strategy: "hybrid",
+                query: "make it cozy",
+                returnedCount: 0,
+                acceptedCount: 0,
+                averageScore: 0,
+                maxScore: 0,
+                minScore: 0.01
+            )
+        ]
+        let agent = RetrievalJudgeAgent(contextRetriever: nil, foundationModelAvailability: { false })
+
+        let output = try await agent.run(RetrievalJudgeInput(text: "make it cozy"), context: context)
+
+        #expect(output.snippets.isEmpty)
+        #expect(output.reports.first?.strategy == "skippedUnavailable")
+    }
+
+    @Test
+    func retrievalJudgeRetriesLowQualityCapabilityRetrieval() async throws {
+        let retriever = await Self.retriever(chunks: [
+            DocumentChunk(
+                id: "capability:switch",
+                content: "switch on off light",
+                semanticContent: "light power switch",
+                source: .capability,
+                metadata: [
+                    "capabilityId": "switch",
+                    "commands": "on,off",
+                    "risk": "low",
+                    "relatedDeviceTypes": "light"
+                ]
+            )
+        ])
+        var context = Self.context(text: "turn on the lamp", intent: [.power], deviceTypes: ["light"])
+        context.retrievalReports = [
+            KnowledgeRetrievalReport(
+                agentID: AgentID.capabilityKnowledge.rawValue,
+                source: KnowledgeSource.capability.rawValue,
+                strategy: "hybrid",
+                query: "turn on the lamp",
+                returnedCount: 0,
+                acceptedCount: 0,
+                averageScore: 0,
+                maxScore: 0,
+                minScore: 0.01
+            )
+        ]
+        let agent = RetrievalJudgeAgent(contextRetriever: retriever, foundationModelAvailability: { true })
+
+        let output = try await agent.run(RetrievalJudgeInput(text: "turn on the lamp"), context: context)
+
+        #expect(output.first?.sourceID == "switch")
+        #expect(output.reports.first?.retryCount == 1)
+        #expect(output.reports.first?.reformulatedQuery != nil)
+    }
+
+    @Test
     func nluAgentPrependsRAGFewShotExamples() async throws {
         let example = try #require(HomeAutomationKnowledgeBase.generatedDatasetCommands().first)
         let retriever = await Self.retriever(chunks: [
@@ -110,6 +242,48 @@ struct Phase5RAGIntegrationTests {
         #expect(seen.contains("User command:"))
         #expect(seen.contains("turn on the lamp"))
     }
+
+    @Test
+    func slotExtractionFallbackDoesNotPromoteRoomsFromRAGExamples() async throws {
+        let retriever = await Self.retriever(chunks: [
+            DocumentChunk(
+                id: "nl:living-room-tv",
+                content: "Natural language example please mute the living room television for me. Room living room. Risk low",
+                semanticContent: "please mute the living room television for me",
+                source: .nlDataset,
+                metadata: ["exampleId": "living-room-tv", "deviceType": "tv"]
+            ),
+            DocumentChunk(
+                id: "nl:garage-tv",
+                content: "Natural language example hey assistant, mute the television in the garage. Room garage. Risk low",
+                semanticContent: "mute the television in the garage",
+                source: .nlDataset,
+                metadata: ["exampleId": "garage-tv", "deviceType": "tv"]
+            ),
+            DocumentChunk(
+                id: "nl:home-routine",
+                content: "Natural language example run the home routine. Room home. Risk low",
+                semanticContent: "run the home routine",
+                source: .nlDataset,
+                metadata: ["exampleId": "home-routine", "deviceType": "routine"]
+            )
+        ])
+        let agent = SlotExtractionAgent(
+            worker: SlotExtractionAgentWorkerSession(foundationModelAvailability: { false }),
+            contextRetriever: retriever
+        )
+
+        let result = try await agent.run(
+            "Make the living room television volume mute",
+            context: Self.context(text: "Make the living room television volume mute")
+        )
+
+        #expect(result.rooms == ["living room"])
+        #expect(!result.rooms.contains("garage"))
+        #expect(!result.rooms.contains("home"))
+        #expect(result.modes.isEmpty)
+    }
+
 
     @Test
     func candidateRetrievalMergesSemanticDeviceMatches() async throws {
@@ -219,6 +393,25 @@ struct Phase5RAGIntegrationTests {
 
     private static func context(text: String) -> ResolutionContext {
         ResolutionContext(request: CommandRequest(text: text, executeLowRiskCommands: false))
+    }
+
+    private static func context(
+        text: String,
+        intent: [HomeAutomationIntentFamily],
+        deviceTypes: [String],
+        rooms: [String] = []
+    ) -> ResolutionContext {
+        var context = ResolutionContext(request: CommandRequest(text: text, executeLowRiskCommands: false))
+        context.intent = HomeIntentFamilyResult(topFamilies: intent, confidence: 0.95)
+        context.deviceType = HomeDeviceTypeResult(deviceTypes: deviceTypes, confidence: 0.95)
+        context.slots = HomeSlotExtractionResult(
+            rooms: rooms,
+            deviceNicknames: [],
+            values: [],
+            modes: [],
+            confidence: 0.9
+        )
+        return context
     }
 
     private static func state(_ text: String) -> HomeResolutionState {

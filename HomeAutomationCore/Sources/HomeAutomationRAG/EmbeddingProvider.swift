@@ -1,4 +1,5 @@
 import Foundation
+import HomeAutomationCore
 
 public protocol EmbeddingProviding: Sendable {
     func embed(_ text: String) async -> [Float]
@@ -18,8 +19,11 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabul
     private var vocabulary: [String: Int] = [:]
     private var documentFrequency: [String: Int] = [:]
     private var documentCount: Int = 0
+    private let synonyms: [String: [String]]
 
-    public init() {}
+    public init(synonyms: [String: [String]] = TFIDFEmbeddingProvider.defaultSynonyms()) {
+        self.synonyms = synonyms
+    }
 
     public func buildVocabulary(from texts: [String]) async {
         await prepareForCorpus(texts)
@@ -32,7 +36,7 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabul
 
         var allTokens = Set<String>()
         for text in texts {
-            let tokens = Set(Self.tokenize(text))
+            let tokens = Set(Self.tokenize(text, synonyms: synonyms))
             for token in tokens {
                 documentFrequency[token, default: 0] += 1
                 allTokens.insert(token)
@@ -53,6 +57,10 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabul
     }
 
     public static func tokenize(_ text: String) -> [String] {
+        tokenize(text, synonyms: defaultSynonyms())
+    }
+
+    public static func normalizedTokens(_ text: String) -> [String] {
         let normalized = text
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()
@@ -68,13 +76,18 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabul
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { $0.count > 1 }
 
+        return tokens
+    }
+
+    public static func tokenize(_ text: String, synonyms: [String: [String]]) -> [String] {
+        let tokens = normalizedTokens(text)
         return tokens.flatMap { token -> [String] in
-            Self.synonyms[token, default: []] + [token]
+            synonyms[token, default: []] + [token]
         }
     }
 
     private func tfidfVector(for text: String) -> [Float] {
-        let tokens = Self.tokenize(text)
+        let tokens = Self.tokenize(text, synonyms: synonyms)
         guard !vocabulary.isEmpty else { return [] }
 
         var vector = [Float](repeating: 0, count: vocabulary.count)
@@ -92,23 +105,108 @@ public actor TFIDFEmbeddingProvider: CorpusAwareEmbeddingProviding, TFIDFVocabul
         return vector
     }
 
-    private static let synonyms: [String: [String]] = [
+    public static func defaultSynonyms() -> [String: [String]] {
+        var values = baseSynonyms
+        merge(Self.knowledgeBaseSynonyms(), into: &values)
+        return values.mapValues { stableUnique($0) }
+    }
+
+    private static let baseSynonyms: [String: [String]] = [
         "lamp": ["light", "switch"],
         "bulb": ["light", "switch"],
         "lights": ["light", "switch"],
         "switch": ["light"],
-        "thermostat": ["temperature", "setpoint"],
-        "ac": ["air", "conditioner", "temperature"],
+        "thermostat": ["temperature", "setpoint", "heat", "cooling"],
+        "ac": ["air", "conditioner", "temperature", "cooling"],
         "cooler": ["cooling", "temperature"],
+        "cool": ["cooling", "temperature"],
+        "cold": ["cooling", "temperature"],
+        "freezing": ["heating", "temperature", "thermostat"],
+        "heat": ["heating", "temperature", "thermostat"],
         "warmer": ["heating", "temperature"],
         "brightness": ["level", "light"],
-        "dim": ["brightness", "level"],
+        "bright": ["brightness", "level", "light"],
+        "brighter": ["brightness", "level", "light"],
+        "dim": ["brightness", "level", "light"],
         "lock": ["door", "security"],
         "unlock": ["door", "security"],
+        "blinds": ["blind", "shade", "windowShade"],
+        "shade": ["blind", "windowShade"],
         "camera": ["video", "stream"],
         "scene": ["routine"],
-        "movie": ["routine", "scene"]
+        "movie": ["routine", "scene"],
+        "cozy": ["routine", "scene", "brightness", "temperature"]
     ]
+
+    private static func knowledgeBaseSynonyms() -> [String: [String]] {
+        var values: [String: [String]] = [:]
+        for deviceType in HomeAutomationKnowledgeBase.shared.deviceTypes {
+            addSynonyms(for: deviceType.id, expansions: [deviceType.id], into: &values)
+            addSynonyms(for: deviceType.displayName, expansions: [deviceType.id], into: &values)
+            for alias in deviceType.aliases {
+                addSynonyms(for: alias, expansions: [deviceType.id], into: &values)
+            }
+            for capability in deviceType.allCapabilityIDs {
+                addSynonyms(for: deviceType.id, expansions: [capability], into: &values)
+            }
+        }
+
+        for definition in HomeCapabilityRegistry.definitions.values {
+            let expansions = [definition.id] + definition.commands + definition.attributeNames
+            addSynonyms(for: definition.id, expansions: expansions, into: &values)
+            addSynonyms(for: definition.displayName, expansions: expansions, into: &values)
+            for command in definition.commands {
+                addSynonyms(for: command, expansions: [definition.id] + definition.attributeNames, into: &values)
+            }
+            for attribute in definition.attributeNames {
+                addSynonyms(for: attribute, expansions: [definition.id], into: &values)
+            }
+            for enumValue in definition.enumValues {
+                addSynonyms(for: enumValue, expansions: [definition.id], into: &values)
+            }
+        }
+
+        for device in MockHomeDeviceRegistry.defaultDevices {
+            let expansions = [device.deviceType] + device.capabilities
+            addSynonyms(for: device.displayName, expansions: expansions, into: &values)
+            if let room = device.room {
+                addSynonyms(for: room, expansions: [device.deviceType], into: &values)
+            }
+            for metadataValue in device.metadata.values {
+                addSynonyms(for: metadataValue, expansions: expansions, into: &values)
+            }
+        }
+
+        for example in HomeAutomationKnowledgeBase.generatedDatasetCommands() {
+            let expansions = [example.deviceType, example.capability, example.command, example.intent]
+            addSynonyms(for: example.deviceName, expansions: expansions, into: &values)
+            addSynonyms(for: example.room, expansions: [example.deviceType], into: &values)
+        }
+        return values
+    }
+
+    private static func addSynonyms(for text: String, expansions: [String], into values: inout [String: [String]]) {
+        let expansionTokens = stableUnique(expansions.flatMap(normalizedTokens))
+        for token in normalizedTokens(text) where !token.isEmpty {
+            values[token, default: []].append(contentsOf: expansionTokens.filter { $0 != token })
+        }
+    }
+
+    private static func merge(_ incoming: [String: [String]], into values: inout [String: [String]]) {
+        for (key, expansions) in incoming {
+            values[key, default: []].append(contentsOf: expansions)
+        }
+    }
+
+    private static func stableUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where !value.isEmpty && !seen.contains(value) {
+            seen.insert(value)
+            result.append(value)
+        }
+        return result
+    }
 
     // MARK: - Persistence
 

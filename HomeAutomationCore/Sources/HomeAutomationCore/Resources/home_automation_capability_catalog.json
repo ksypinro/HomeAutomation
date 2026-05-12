@@ -6587,6 +6587,51 @@
       }
     },
     {
+      "id": "routine",
+      "displayName": "Routine",
+      "category": "routine",
+      "aliases": [
+        "scene",
+        "automation"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "routine"
+      ],
+      "recommendedCapabilities": [],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Routine",
+        "Routine device",
+        "routine"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [
+          "Label"
+        ],
+        "smartThingsDeviceTypes": [
+          "Scene"
+        ],
+        "smartThingsCapabilities": [
+          "routine",
+          "scene"
+        ],
+        "googleDeviceTypes": [
+          "SCENE"
+        ],
+        "googleTraits": [
+          "Scene"
+        ],
+        "alexaDisplayCategories": [
+          "SCENE_TRIGGER"
+        ],
+        "alexaInterfaces": [
+          "Alexa.SceneController"
+        ]
+      }
+    },
+    {
       "id": "scene",
       "displayName": "Scene",
       "category": "routine",

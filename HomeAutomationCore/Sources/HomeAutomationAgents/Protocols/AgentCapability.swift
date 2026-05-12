@@ -26,6 +26,7 @@ public extension AgentID {
     static let capabilityKnowledge = AgentID("capabilityKnowledge")
     static let bixbyKnowledge = AgentID("bixbyKnowledge")
     static let commandExample = AgentID("commandExample")
+    static let retrievalJudge = AgentID("retrievalJudge")
 
     // Candidates
     static let candidateRetrieval = AgentID("candidateRetrieval")

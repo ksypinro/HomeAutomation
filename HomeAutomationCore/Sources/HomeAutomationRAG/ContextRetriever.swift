@@ -3,27 +3,52 @@ import Foundation
 public struct ContextRetriever: Sendable {
     private let embeddingProvider: any EmbeddingProviding
     private let vectorStore: VectorStore
+    private let bm25Index: BM25Index?
 
-    public init(embeddingProvider: any EmbeddingProviding, vectorStore: VectorStore) {
+    public init(
+        embeddingProvider: any EmbeddingProviding,
+        vectorStore: VectorStore,
+        bm25Index: BM25Index? = nil
+    ) {
         self.embeddingProvider = embeddingProvider
         self.vectorStore = vectorStore
+        self.bm25Index = bm25Index
     }
 
     public func retrieve(
         _ query: String,
         topK: Int = 5,
-        filter: MetadataFilter? = nil
+        filter: MetadataFilter? = nil,
+        minScore: Float = 0
     ) async -> [ScoredChunk] {
         let embedding = await embeddingProvider.embed(query)
-        return await vectorStore.query(embedding, topK: topK, filter: filter)
+        return await vectorStore.query(embedding, topK: topK, filter: filter, minScore: minScore)
     }
 
     public func retrieve(
         query: String,
         topK: Int = 5,
-        filter: MetadataFilter? = nil
+        filter: MetadataFilter? = nil,
+        minScore: Float = 0
     ) async -> [ScoredChunk] {
-        await retrieve(query, topK: topK, filter: filter)
+        await retrieve(query, topK: topK, filter: filter, minScore: minScore)
+    }
+
+    public func retrieve(_ query: StructuredRetrievalQuery) async -> [ScoredChunk] {
+        guard let bm25Index else {
+            return await retrieve(
+                query.semanticText,
+                topK: query.topK,
+                filter: query.metadataFilter,
+                minScore: query.minScore
+            )
+        }
+        let strategy = HybridRetrievalStrategy(
+            vectorStore: vectorStore,
+            bm25Index: bm25Index,
+            embeddingProvider: embeddingProvider
+        )
+        return await strategy.retrieve(query)
     }
 
     public func retrieveFormatted(
