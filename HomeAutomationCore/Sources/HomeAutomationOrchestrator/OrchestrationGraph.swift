@@ -24,7 +24,7 @@ public struct OrchestrationGraph: Sendable, Hashable {
     }
 }
 
-public enum OrchestrationGoal: Sendable, Hashable {
+public enum OrchestrationGoal: String, Sendable, Hashable, Codable {
     case executeDeviceCommand
     case automationCreation
     case unsupported

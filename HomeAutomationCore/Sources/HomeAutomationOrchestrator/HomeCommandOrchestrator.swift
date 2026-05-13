@@ -13,6 +13,12 @@ public enum OrchestratorUpdate: Sendable {
     case result(HomeAutomationResolverResult)
 }
 
+private struct DirectCommandExecutionResult: Sendable {
+    let exit: AgentRunResult?
+    let fallbackUsed: Bool
+    let graphRun: GraphRunMetrics?
+}
+
 /// The primary entry point for processing home automation natural language commands.
 ///
 /// `HomeCommandOrchestrator` coordinates the lifecycle of parsing user input, fetching RAG context,
@@ -21,7 +27,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "HomeCommandOrchestrator")
     private let registry: AgentRegistry
     private let planner: AgentPlanner
+    private let graphPlanner: GraphPlanner
     private let policy: OrchestratorPolicyEngine
+    private let runtimeMode: OrchestratorRuntimeMode
     private let metricsCollector: OrchestratorMetricsCollector
     private let conversationMemory: ConversationMemory
     private let circuitBreakers: CircuitBreakerRegistry
@@ -35,6 +43,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         registry: AgentRegistry,
         planner: AgentPlanner,
         policy: OrchestratorPolicyEngine,
+        runtimeMode: OrchestratorRuntimeMode = .legacy,
         deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
@@ -42,7 +51,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ) {
         self.registry = registry
         self.planner = planner
+        self.graphPlanner = GraphPlanner(policy: policy)
         self.policy = policy
+        self.runtimeMode = runtimeMode
         self.deviceRegistry = deviceRegistry
         self.metricsCollector = metricsCollector
         self.conversationMemory = conversationMemory
@@ -60,6 +71,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
+        runtimeMode: OrchestratorRuntimeMode = .legacy,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
@@ -76,6 +88,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             ),
             planner: AgentPlanner(policy: policy),
             policy: policy,
+            runtimeMode: runtimeMode,
             deviceRegistry: deviceRegistry,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
@@ -93,6 +106,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
+        runtimeMode: OrchestratorRuntimeMode = .legacy,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         indexCache: VectorIndexCache = VectorIndexCache()
     ) async -> HomeCommandOrchestrator {
@@ -106,6 +120,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             contextRetriever: retriever,
             foundationModelAvailability: foundationModelAvailability,
             foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
+            runtimeMode: runtimeMode,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
             circuitBreakers: circuitBreakers
@@ -248,23 +263,24 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     return
                 }
 
-                logger.debug("Generating execution plan.")
-                let plan = planner.plan(for: trimmedText, context: await contextStore.snapshot())
-                
-                logger.debug("Initializing AgentScheduler for runID: \(runID, privacy: .public)")
-                let scheduler = AgentScheduler(
-                    registry: registry,
+                let execution = await executeDirectCommandPipeline(
+                    text: trimmedText,
                     contextStore: contextStore,
                     eventBus: eventBus,
-                    policy: policy,
-                    circuitBreakers: circuitBreakers,
                     runID: runID
                 )
-
-                let exit = await scheduler.execute(plan)
+                let exit = execution.exit
 
                 if exit == nil, policy.canExecute(context: await contextStore.snapshot()) {
                     logger.info("Executing post-pipeline mock execution.")
+                    let scheduler = AgentScheduler(
+                        registry: registry,
+                        contextStore: contextStore,
+                        eventBus: eventBus,
+                        policy: policy,
+                        circuitBreakers: circuitBreakers,
+                        runID: runID
+                    )
                     _ = await scheduler.execute(
                         AgentExecutionPlan(phases: [
                             .sequential(AgentTask(.mockExecution))
@@ -290,7 +306,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 metrics.finishedAt = Date()
                 metrics.agentTraces = ctx.trace
                 metrics.outcome = Self.outcomeName(for: result.resolution)
-                metrics.fallbackUsed = plan.isFallbackOnly
+                metrics.fallbackUsed = execution.fallbackUsed
+                metrics.graphRun = execution.graphRun
                 metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(metrics.startedAt)
                 metrics.circuitStates = await circuitBreakers.allStatusStrings()
                 metrics.captureEvaluationFields(context: ctx, result: result)
@@ -537,16 +554,13 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ) async -> HomeAutomationResolverResult {
         let request = CommandRequest(text: text, executeLowRiskCommands: false)
         let contextStore = ResolutionContextStore(request: request)
-        let plan = planner.plan(for: text, context: await contextStore.snapshot())
-        let scheduler = AgentScheduler(
-            registry: registry,
+        let execution = await executeDirectCommandPipeline(
+            text: text,
             contextStore: contextStore,
             eventBus: eventBus,
-            policy: policy,
-            circuitBreakers: circuitBreakers,
             runID: runID
         )
-        let exit = await scheduler.execute(plan)
+        let exit = execution.exit
         let ctx = await contextStore.snapshot()
         let resolution = ctx.resolution ?? Self.resolution(from: exit)
         return HomeAutomationResolverResult(
@@ -561,6 +575,52 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             draft: ctx.draft,
             resolution: resolution
         )
+    }
+
+    private func executeDirectCommandPipeline(
+        text: String,
+        contextStore: ResolutionContextStore,
+        eventBus: AgentEventBus,
+        runID: UUID
+    ) async -> DirectCommandExecutionResult {
+        switch runtimeMode {
+        case .legacy:
+            logger.debug("Generating legacy execution plan.")
+            let plan = planner.plan(for: text, context: await contextStore.snapshot())
+            logger.debug("Initializing AgentScheduler for runID: \(runID, privacy: .public)")
+            let scheduler = AgentScheduler(
+                registry: registry,
+                contextStore: contextStore,
+                eventBus: eventBus,
+                policy: policy,
+                circuitBreakers: circuitBreakers,
+                runID: runID
+            )
+            let exit = await scheduler.execute(plan)
+            return DirectCommandExecutionResult(
+                exit: exit,
+                fallbackUsed: plan.isFallbackOnly,
+                graphRun: nil
+            )
+        case .graph:
+            logger.debug("Generating graph execution plan.")
+            let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
+            let scheduler = GraphScheduler()
+            let result = await scheduler.execute(
+                plan.graph,
+                registry: registry,
+                contextStore: contextStore,
+                eventBus: eventBus,
+                policy: policy,
+                circuitBreakers: circuitBreakers,
+                runID: runID
+            )
+            return DirectCommandExecutionResult(
+                exit: result.exit,
+                fallbackUsed: plan.isFallbackOnly,
+                graphRun: result.metrics
+            )
+        }
     }
 
     private static func resolution(from exit: AgentRunResult?) -> HomeCommandResolution {

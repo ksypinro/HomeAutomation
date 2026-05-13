@@ -184,6 +184,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var stageDurations: [String: Double]
     public var agentStatuses: [String: String]
     public var agentConfidence: [String: Double]
+    public var graphRun: GraphRunMetrics?
     public var contextMetrics: OrchestratorContextMetrics
     public var safetyMetrics: OrchestratorSafetyMetrics
     public var candidateMetrics: OrchestratorCandidateMetrics
@@ -200,6 +201,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.stageDurations = [:]
         self.agentStatuses = [:]
         self.agentConfidence = [:]
+        self.graphRun = nil
         self.contextMetrics = OrchestratorContextMetrics()
         self.safetyMetrics = OrchestratorSafetyMetrics()
         self.candidateMetrics = OrchestratorCandidateMetrics()
