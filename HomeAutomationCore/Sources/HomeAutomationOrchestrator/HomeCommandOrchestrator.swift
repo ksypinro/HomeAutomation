@@ -35,7 +35,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let circuitBreakers: CircuitBreakerRegistry
     private let deviceRegistry: MockHomeDeviceRegistry
     private let operationDetector: HomeOperationDetectionService
-    private let automationParser: AutomationPatternParser
+    private let automationDraftAgent: AutomationDraftAgent
     private let conditionOperandResolver: AutomationConditionOperandResolver
     private let smartThingsCompiler: SmartThingsRuleCompiler
 
@@ -47,7 +47,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
-        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
+        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
+        automationDraftAgent: AutomationDraftAgent = AutomationDraftAgent()
     ) {
         self.registry = registry
         self.planner = planner
@@ -59,7 +60,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.conversationMemory = conversationMemory
         self.circuitBreakers = circuitBreakers
         self.operationDetector = HomeOperationDetectionService()
-        self.automationParser = AutomationPatternParser()
+        self.automationDraftAgent = automationDraftAgent
         self.conditionOperandResolver = AutomationConditionOperandResolver(registry: deviceRegistry)
         self.smartThingsCompiler = SmartThingsRuleCompiler()
     }
@@ -92,7 +93,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             deviceRegistry: deviceRegistry,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
-            circuitBreakers: circuitBreakers
+            circuitBreakers: circuitBreakers,
+            automationDraftAgent: AutomationDraftAgent(
+                worker: AutomationDraftWorkerSession(foundationModelAvailability: foundationModelAvailability)
+            )
         )
     }
 
@@ -349,7 +353,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         runID: UUID
     ) async -> HomeAutomationResolverResult {
         let state = Self.makeOperationState(for: text, operation: operation)
-        guard var ruleDraft = automationParser.parse(text) else {
+        let draftOutput: AutomationDraftOutput
+        do {
+            draftOutput = try await automationDraftAgent.run(
+                AutomationDraftInput(text: text, operation: operation),
+                context: ResolutionContext(
+                    request: CommandRequest(text: text, executeLowRiskCommands: false)
+                )
+            )
+        } catch {
             return HomeAutomationResolverResult(
                 state: state,
                 retrievedCandidates: [],
@@ -360,7 +372,25 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 ),
                 hydratedCandidates: [],
                 draft: nil,
-                resolution: .unsupported("I could not extract a supported automation trigger and action from this command.")
+                resolution: .unsupported(error.localizedDescription)
+            )
+        }
+
+        let ruleDraft: HomeAutomationRuleDraft
+        do {
+            ruleDraft = try draftOutput.makeRuleDraft()
+        } catch {
+            return HomeAutomationResolverResult(
+                state: state,
+                retrievedCandidates: [],
+                aggregation: HomeCandidateAggregationResult(
+                    finalCandidateIDs: [],
+                    needsClarification: false,
+                    confidence: operation.confidence
+                ),
+                hydratedCandidates: [],
+                draft: nil,
+                resolution: .unsupported(error.localizedDescription)
             )
         }
 
@@ -375,7 +405,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         )
 
         let resolvedCondition = await conditionOperandResolver.resolve(ruleDraft.condition)
-        ruleDraft = HomeAutomationRuleDraft(
+        let resolvedRuleDraft = HomeAutomationRuleDraft(
             name: ruleDraft.name,
             domain: ruleDraft.domain,
             operation: ruleDraft.operation,
@@ -393,7 +423,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         var firstDraft: HomeCommandDraft?
         var requiresConfirmation = false
 
-        for (index, actionText) in ruleDraft.actionDescriptions.enumerated() {
+        for (index, actionText) in resolvedRuleDraft.actionDescriptions.enumerated() {
             await eventBus.publish(
                 OrchestratorPipelineEvent(
                     runID: runID,
@@ -491,7 +521,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
         var plan = HomeAutomationCreationPlan(
             name: ruleDraft.name,
-            ruleDraft: ruleDraft,
+            ruleDraft: resolvedRuleDraft,
             resolvedActions: resolvedActions,
             smartThingsRuleJSON: nil,
             requiresConfirmation: requiresConfirmation,

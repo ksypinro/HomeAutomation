@@ -145,6 +145,20 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk: output]) }
             ),
             ContextualHomeAgent(
+                agent: AutomationDraftAgent(
+                    worker: AutomationDraftWorkerSession(foundationModelAvailability: foundationModelAvailability)
+                ),
+                makeInput: { context in
+                    AutomationDraftInput(
+                        text: context.request.text,
+                        operation: HomeOperationDetectionService().detect(context.request.text)
+                    )
+                },
+                makePatch: { output, _ in
+                    patch(.automationDraft, [ResolutionContextPatchKey.automationDraft: output])
+                }
+            ),
+            ContextualHomeAgent(
                 agent: CapabilityKnowledgeAgent(contextRetriever: contextRetriever),
                 makeInput: capabilityHints,
                 makePatch: { output, _ in knowledgePatch(.capabilityKnowledge, output) }

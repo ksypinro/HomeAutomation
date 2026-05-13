@@ -1,3 +1,4 @@
+import HomeAutomationAgents
 import HomeAutomationCore
 import HomeAutomationOrchestrator
 import Testing
@@ -19,7 +20,8 @@ struct AutomationCreationFlowTests {
     func patternParserExtractsDailyScheduleAndAction() throws {
         let parser = AutomationPatternParser()
 
-        let draft = try #require(parser.parse("Turn on AC everyday at 7 AM"))
+        let output = try #require(parser.parse("Turn on AC everyday at 7 AM"))
+        let draft = try output.makeRuleDraft()
 
         #expect(draft.intent == .createAutomation)
         #expect(draft.actionDescriptions == ["Turn on AC"])
