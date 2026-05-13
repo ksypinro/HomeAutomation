@@ -15,6 +15,7 @@ public struct AgentID: Sendable, Hashable, Codable, CustomStringConvertible {
 
 public extension AgentID {
     // NLU
+    static let operationDetection = AgentID("operationDetection")
     static let language = AgentID("language")
     static let domain = AgentID("domain")
     static let intentFamily = AgentID("intentFamily")
@@ -35,11 +36,13 @@ public extension AgentID {
     static let candidateHydration = AgentID("candidateHydration")
 
     // Draft
+    static let automationDraft = AgentID("automationDraft")
     static let instructionComposer = AgentID("instructionComposer")
     static let draftGeneration = AgentID("draftGeneration")
     static let draftRepair = AgentID("draftRepair")
 
     // Safety
+    static let automationValidation = AgentID("automationValidation")
     static let safetyValidation = AgentID("safetyValidation")
     static let parameterValidation = AgentID("parameterValidation")
     static let confirmationPolicy = AgentID("confirmationPolicy")
@@ -60,6 +63,7 @@ public extension AgentID {
 
 /// What an agent can do, used by the registry and planner for dynamic lookup.
 public enum AgentCapability: String, Sendable, Hashable, Codable {
+    case operationDetection
     case languageDetection
     case domainClassification
     case intentClassification
@@ -74,6 +78,8 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case instructionComposition
     case draftGeneration
     case draftRepair
+    case automationDrafting
+    case automationValidation
     case safetyValidation
     case parameterValidation
     case confirmationPolicy

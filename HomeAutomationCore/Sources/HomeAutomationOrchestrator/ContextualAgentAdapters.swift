@@ -26,6 +26,7 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
 
     public var id: AgentID { agent.id }
     public var capabilities: Set<AgentCapability> { agent.capabilities }
+    public var manifest: AgentManifest { agent.manifest }
     public var timeoutNanoseconds: UInt64 { agent.timeoutNanoseconds }
 
     public init(
