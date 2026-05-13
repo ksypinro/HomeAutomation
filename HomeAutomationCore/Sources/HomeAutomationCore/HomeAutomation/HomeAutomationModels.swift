@@ -11,6 +11,7 @@ public enum HomeAutomationCommandDomain: Sendable, Hashable, Codable {
 
 @Generable
 public enum HomeAutomationIntentFamily: Sendable, Hashable, Codable {
+    case createAutomation
     case power
     case temperature
     case brightness
@@ -470,6 +471,8 @@ public enum HomeCommandResolution: Sendable, Hashable, Codable {
     case readyToExecute(HomeAutomationExecutionPlan)
     case executed(HomeAutomationExecutionPlan, updatedDevice: HomeCandidateRecord)
     case requiresConfirmation(HomeCommandDraft)
+    case automationDrafted(HomeAutomationCreationPlan)
+    case automationRequiresConfirmation(HomeAutomationCreationPlan)
     case needsClarification(String)
     case unsupported(String)
 
@@ -484,6 +487,13 @@ public enum HomeCommandResolution: Sendable, Hashable, Codable {
             return "Executed \(plan.steps.count) step(s) on \(device.displayName)."
         case .requiresConfirmation:
             return "This command requires confirmation before execution."
+        case .automationDrafted(let plan):
+            if plan.smartThingsRuleJSON != nil {
+                return "Automation drafted with \(plan.resolvedActions.count) action(s) and SmartThings JSON."
+            }
+            return "Automation drafted with \(plan.resolvedActions.count) action(s)."
+        case .automationRequiresConfirmation:
+            return "This automation requires confirmation before it can be created."
         case .needsClarification(let question):
             return question
         case .unsupported(let reason):

@@ -132,6 +132,8 @@ final class HomeAutomationViewModel {
                             if case .executed = output.resolution { return true }
                             if case .readyToExecute = output.resolution { return true }
                             if case .requiresConfirmation = output.resolution { return true }
+                            if case .automationDrafted = output.resolution { return true }
+                            if case .automationRequiresConfirmation = output.resolution { return true }
                             return false
                         }()
                     ),
@@ -326,6 +328,8 @@ final class HomeAutomationViewModel {
             """)
         case .requiresConfirmation(let draft):
             sections.append("Confirmation required for \(draft.intent).")
+        case .automationDrafted(let plan), .automationRequiresConfirmation(let plan):
+            sections.append(Self.describeAutomationPlan(plan))
         case .needsClarification(let question):
             sections.append("Clarification: \(question)")
         case .unsupported(let reason):
@@ -339,6 +343,35 @@ final class HomeAutomationViewModel {
         let value = step.valueFormula ?? step.value ?? ""
         let attribute = step.attribute.map { " [\($0)]" } ?? ""
         return "\(step.type): \(step.deviceName) -> \(step.capability).\(step.command)(\(value))\(attribute)"
+    }
+
+    private static func describeAutomationPlan(_ plan: HomeAutomationCreationPlan) -> String {
+        var sections: [String] = []
+        sections.append("""
+        Automation:
+        Name: \(plan.name)
+        Trigger: \(plan.ruleDraft.trigger?.displayString ?? "none")
+        Actions:
+        \(plan.resolvedActions.map(describeAutomationAction).joined(separator: "\n"))
+        Requires Confirmation: \(plan.requiresConfirmation)
+        """)
+        if let reason = plan.unsupportedCompilationReason {
+            sections.append("""
+            SmartThings:
+            Unsupported: \(reason)
+            """)
+        } else if let json = plan.smartThingsRuleJSON {
+            sections.append("""
+            SmartThings JSON:
+            \(json)
+            """)
+        }
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func describeAutomationAction(_ action: HomeAutomationResolvedAction) -> String {
+        let device = action.device?.displayName ?? action.draft.targetDeviceID ?? "unresolved"
+        return "- \(action.originalText): \(device) -> \(action.draft.capability ?? "none").\(action.draft.command ?? "none")"
     }
 
 }

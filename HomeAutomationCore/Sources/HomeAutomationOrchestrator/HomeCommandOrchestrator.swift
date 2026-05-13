@@ -25,11 +25,17 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let metricsCollector: OrchestratorMetricsCollector
     private let conversationMemory: ConversationMemory
     private let circuitBreakers: CircuitBreakerRegistry
+    private let deviceRegistry: MockHomeDeviceRegistry
+    private let operationDetector: HomeOperationDetectionService
+    private let automationParser: AutomationPatternParser
+    private let conditionOperandResolver: AutomationConditionOperandResolver
+    private let smartThingsCompiler: SmartThingsRuleCompiler
 
     public init(
         registry: AgentRegistry,
         planner: AgentPlanner,
         policy: OrchestratorPolicyEngine,
+        deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
@@ -37,9 +43,14 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.registry = registry
         self.planner = planner
         self.policy = policy
+        self.deviceRegistry = deviceRegistry
         self.metricsCollector = metricsCollector
         self.conversationMemory = conversationMemory
         self.circuitBreakers = circuitBreakers
+        self.operationDetector = HomeOperationDetectionService()
+        self.automationParser = AutomationPatternParser()
+        self.conditionOperandResolver = AutomationConditionOperandResolver(registry: deviceRegistry)
+        self.smartThingsCompiler = SmartThingsRuleCompiler()
     }
 
     public convenience init(
@@ -65,6 +76,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             ),
             planner: AgentPlanner(policy: policy),
             policy: policy,
+            deviceRegistry: deviceRegistry,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
             circuitBreakers: circuitBreakers
@@ -161,10 +173,83 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 await eventBus.publish(inputEvent)
                 continuation.yield(.event(inputEvent))
 
-                logger.debug("Generating execution plan.")
                 var metrics = OrchestratorMetrics(command: trimmedText)
-                let plan = planner.plan(for: trimmedText, context: await contextStore.snapshot())
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
+
+                let operation = operationDetector.detect(trimmedText)
+                let operationEvent = OrchestratorPipelineEvent(
+                    runID: runID,
+                    stage: "operationDetection",
+                    agentID: "operationDetection",
+                    status: .completed,
+                    detail: "\(operation.operation.rawValue) confidence=\(String(format: "%.2f", operation.confidence))"
+                )
+                await eventBus.publish(operationEvent)
+                continuation.yield(.event(operationEvent))
+
+                if operation.operation == .automationCreation {
+                    let started = Date()
+                    let result = await resolveAutomationCreation(
+                        text: trimmedText,
+                        operation: operation,
+                        eventBus: eventBus,
+                        runID: runID
+                    )
+                    metrics.finishedAt = Date()
+                    metrics.outcome = Self.outcomeName(for: result.resolution)
+                    metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(started)
+                    metrics.circuitStates = await circuitBreakers.allStatusStrings()
+                    await metricsCollector.store(metrics)
+
+                    let outcomeEvent = OrchestratorPipelineEvent(
+                        runID: runID,
+                        stage: "outcome",
+                        status: .completed,
+                        detail: result.resolution.displaySummary
+                    )
+                    await eventBus.publish(outcomeEvent)
+                    continuation.yield(.event(outcomeEvent))
+                    continuation.yield(.result(result))
+                    eventForwarder.cancel()
+                    continuation.finish()
+                    return
+                }
+
+                if operation.operation != .executeDeviceCommand {
+                    let result = HomeAutomationResolverResult(
+                        state: Self.makeOperationState(for: trimmedText, operation: operation),
+                        retrievedCandidates: [],
+                        aggregation: HomeCandidateAggregationResult(
+                            finalCandidateIDs: [],
+                            needsClarification: false,
+                            confidence: operation.confidence
+                        ),
+                        hydratedCandidates: [],
+                        draft: nil,
+                        resolution: .unsupported("\(operation.operation.rawValue) is not implemented yet.")
+                    )
+                    metrics.finishedAt = Date()
+                    metrics.outcome = Self.outcomeName(for: result.resolution)
+                    metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(metrics.startedAt)
+                    metrics.circuitStates = await circuitBreakers.allStatusStrings()
+                    await metricsCollector.store(metrics)
+
+                    let outcomeEvent = OrchestratorPipelineEvent(
+                        runID: runID,
+                        stage: "outcome",
+                        status: .completed,
+                        detail: result.resolution.displaySummary
+                    )
+                    await eventBus.publish(outcomeEvent)
+                    continuation.yield(.event(outcomeEvent))
+                    continuation.yield(.result(result))
+                    eventForwarder.cancel()
+                    continuation.finish()
+                    return
+                }
+
+                logger.debug("Generating execution plan.")
+                let plan = planner.plan(for: trimmedText, context: await contextStore.snapshot())
                 
                 logger.debug("Initializing AgentScheduler for runID: \(runID, privacy: .public)")
                 let scheduler = AgentScheduler(
@@ -240,6 +325,244 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         await circuitBreakers.allStatusStrings()
     }
 
+    private func resolveAutomationCreation(
+        text: String,
+        operation: HomeOperationDetectionResult,
+        eventBus: AgentEventBus,
+        runID: UUID
+    ) async -> HomeAutomationResolverResult {
+        let state = Self.makeOperationState(for: text, operation: operation)
+        guard var ruleDraft = automationParser.parse(text) else {
+            return HomeAutomationResolverResult(
+                state: state,
+                retrievedCandidates: [],
+                aggregation: HomeCandidateAggregationResult(
+                    finalCandidateIDs: [],
+                    needsClarification: false,
+                    confidence: operation.confidence
+                ),
+                hydratedCandidates: [],
+                draft: nil,
+                resolution: .unsupported("I could not extract a supported automation trigger and action from this command.")
+            )
+        }
+
+        await eventBus.publish(
+            OrchestratorPipelineEvent(
+                runID: runID,
+                stage: "automationDraft",
+                agentID: "automationDraft",
+                status: .completed,
+                detail: "\(ruleDraft.actionDescriptions.count) action(s), trigger=\(ruleDraft.trigger?.displayString ?? "none")"
+            )
+        )
+
+        let resolvedCondition = await conditionOperandResolver.resolve(ruleDraft.condition)
+        ruleDraft = HomeAutomationRuleDraft(
+            name: ruleDraft.name,
+            domain: ruleDraft.domain,
+            operation: ruleDraft.operation,
+            intent: ruleDraft.intent,
+            trigger: ruleDraft.trigger,
+            condition: resolvedCondition,
+            actionDescriptions: ruleDraft.actionDescriptions,
+            confidence: ruleDraft.confidence
+        )
+
+        var resolvedActions: [HomeAutomationResolvedAction] = []
+        var retrievedCandidates: [HomeCandidateRecord] = []
+        var hydratedCandidates: [HomeCandidateRecord] = []
+        var selectedIDs: [String] = []
+        var firstDraft: HomeCommandDraft?
+        var requiresConfirmation = false
+
+        for (index, actionText) in ruleDraft.actionDescriptions.enumerated() {
+            await eventBus.publish(
+                OrchestratorPipelineEvent(
+                    runID: runID,
+                    stage: "automationActionResolution",
+                    agentID: "automationActionResolution",
+                    status: .running,
+                    detail: actionText
+                )
+            )
+            let actionResult = await resolveAutomationAction(
+                text: actionText,
+                eventBus: eventBus,
+                runID: runID
+            )
+            retrievedCandidates.append(contentsOf: actionResult.retrievedCandidates)
+            hydratedCandidates.append(contentsOf: actionResult.hydratedCandidates)
+            selectedIDs.append(contentsOf: actionResult.aggregation.finalCandidateIDs)
+            firstDraft = firstDraft ?? actionResult.draft
+
+            if case .needsClarification(let question) = actionResult.resolution {
+                return HomeAutomationResolverResult(
+                    state: state,
+                    retrievedCandidates: retrievedCandidates,
+                    aggregation: HomeCandidateAggregationResult(
+                        finalCandidateIDs: selectedIDs,
+                        needsClarification: true,
+                        clarificationQuestion: question,
+                        confidence: actionResult.aggregation.confidence
+                    ),
+                    hydratedCandidates: hydratedCandidates,
+                    draft: firstDraft,
+                    resolution: .needsClarification("For automation action \(index + 1): \(question)")
+                )
+            }
+            if case .unsupported(let reason) = actionResult.resolution {
+                return HomeAutomationResolverResult(
+                    state: state,
+                    retrievedCandidates: retrievedCandidates,
+                    aggregation: HomeCandidateAggregationResult(
+                        finalCandidateIDs: selectedIDs,
+                        needsClarification: false,
+                        confidence: actionResult.aggregation.confidence
+                    ),
+                    hydratedCandidates: hydratedCandidates,
+                    draft: firstDraft,
+                    resolution: .unsupported("For automation action \(index + 1): \(reason)")
+                )
+            }
+
+            guard let draft = actionResult.draft else {
+                return HomeAutomationResolverResult(
+                    state: state,
+                    retrievedCandidates: retrievedCandidates,
+                    aggregation: HomeCandidateAggregationResult(
+                        finalCandidateIDs: selectedIDs,
+                        needsClarification: false,
+                        confidence: actionResult.aggregation.confidence
+                    ),
+                    hydratedCandidates: hydratedCandidates,
+                    draft: firstDraft,
+                    resolution: .unsupported("For automation action \(index + 1): no command draft was produced.")
+                )
+            }
+
+            if case .requiresConfirmation = actionResult.resolution {
+                requiresConfirmation = true
+            }
+            if case .readyToExecute(let plan) = actionResult.resolution, plan.requiresConfirmation {
+                requiresConfirmation = true
+            }
+
+            let selectedDevice = draft.targetDeviceID.flatMap { id in
+                actionResult.hydratedCandidates.first { $0.id == id } ??
+                    actionResult.retrievedCandidates.first { $0.id == id }
+            }
+            resolvedActions.append(
+                HomeAutomationResolvedAction(
+                    originalText: actionText,
+                    draft: draft,
+                    device: selectedDevice,
+                    confidence: draft.confidence
+                )
+            )
+        }
+
+        await eventBus.publish(
+            OrchestratorPipelineEvent(
+                runID: runID,
+                stage: "automationActionResolution",
+                agentID: "automationActionResolution",
+                status: .completed,
+                detail: "\(resolvedActions.count) action(s) resolved"
+            )
+        )
+
+        var plan = HomeAutomationCreationPlan(
+            name: ruleDraft.name,
+            ruleDraft: ruleDraft,
+            resolvedActions: resolvedActions,
+            smartThingsRuleJSON: nil,
+            requiresConfirmation: requiresConfirmation,
+            unsupportedCompilationReason: nil
+        )
+
+        let compileDetail: String
+        do {
+            let document = try smartThingsCompiler.compile(plan)
+            plan = HomeAutomationCreationPlan(
+                name: plan.name,
+                ruleDraft: plan.ruleDraft,
+                resolvedActions: plan.resolvedActions,
+                smartThingsRuleJSON: document.jsonString,
+                requiresConfirmation: plan.requiresConfirmation,
+                unsupportedCompilationReason: nil
+            )
+            compileDetail = "compiled"
+        } catch {
+            plan = HomeAutomationCreationPlan(
+                name: plan.name,
+                ruleDraft: plan.ruleDraft,
+                resolvedActions: plan.resolvedActions,
+                smartThingsRuleJSON: nil,
+                requiresConfirmation: plan.requiresConfirmation,
+                unsupportedCompilationReason: error.localizedDescription
+            )
+            compileDetail = error.localizedDescription
+        }
+
+        await eventBus.publish(
+            OrchestratorPipelineEvent(
+                runID: runID,
+                stage: "smartThingsCompilation",
+                agentID: "smartThingsCompilation",
+                status: plan.smartThingsRuleJSON == nil ? .skipped : .completed,
+                detail: compileDetail
+            )
+        )
+
+        let aggregation = HomeCandidateAggregationResult(
+            finalCandidateIDs: stableUnique(selectedIDs),
+            needsClarification: false,
+            confidence: resolvedActions.map(\.confidence).min() ?? ruleDraft.confidence
+        )
+        return HomeAutomationResolverResult(
+            state: state,
+            retrievedCandidates: stableUnique(retrievedCandidates),
+            aggregation: aggregation,
+            hydratedCandidates: stableUnique(hydratedCandidates),
+            draft: firstDraft,
+            resolution: requiresConfirmation ? .automationRequiresConfirmation(plan) : .automationDrafted(plan)
+        )
+    }
+
+    private func resolveAutomationAction(
+        text: String,
+        eventBus: AgentEventBus,
+        runID: UUID
+    ) async -> HomeAutomationResolverResult {
+        let request = CommandRequest(text: text, executeLowRiskCommands: false)
+        let contextStore = ResolutionContextStore(request: request)
+        let plan = planner.plan(for: text, context: await contextStore.snapshot())
+        let scheduler = AgentScheduler(
+            registry: registry,
+            contextStore: contextStore,
+            eventBus: eventBus,
+            policy: policy,
+            circuitBreakers: circuitBreakers,
+            runID: runID
+        )
+        let exit = await scheduler.execute(plan)
+        let ctx = await contextStore.snapshot()
+        let resolution = ctx.resolution ?? Self.resolution(from: exit)
+        return HomeAutomationResolverResult(
+            state: ctx.resolutionState ?? Self.makeFallbackState(for: text),
+            retrievedCandidates: ctx.retrievedCandidates,
+            aggregation: ctx.aggregation ?? HomeCandidateAggregationResult(
+                finalCandidateIDs: ctx.selectedCandidateIDs,
+                needsClarification: false,
+                confidence: 0
+            ),
+            hydratedCandidates: ctx.hydratedCandidates,
+            draft: ctx.draft,
+            resolution: resolution
+        )
+    }
+
     private static func resolution(from exit: AgentRunResult?) -> HomeCommandResolution {
         guard let exit else {
             return .unsupported("No resolution produced")
@@ -264,6 +587,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             return "executed"
         case .requiresConfirmation:
             return "requiresConfirmation"
+        case .automationDrafted:
+            return "automationDrafted"
+        case .automationRequiresConfirmation:
+            return "automationRequiresConfirmation"
         case .needsClarification:
             return "needsClarification"
         case .unsupported:
@@ -317,5 +644,62 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 confidence: 0.4
             )
         )
+    }
+
+    private static func makeOperationState(
+        for text: String,
+        operation: HomeOperationDetectionResult
+    ) -> HomeResolutionState {
+        HomeResolutionState(
+            rawText: text,
+            language: HomeLanguageDetectionResult(
+                languageCode: "en",
+                isMixedLanguage: false,
+                confidence: 0.75,
+                unsupportedLanguageLikely: false
+            ),
+            domain: HomeDomainClassificationResult(
+                domain: operation.domain,
+                confidence: operation.confidence
+            ),
+            intent: HomeIntentFamilyResult(
+                topFamilies: operation.operation == .automationCreation ? [.createAutomation] : [.unsupported],
+                confidence: operation.confidence
+            ),
+            deviceType: HomeDeviceTypeResult(deviceTypes: [], confidence: 0.4),
+            slots: HomeSlotExtractionResult(
+                rooms: [],
+                deviceNicknames: [],
+                values: [],
+                modes: [],
+                confidence: 0.4
+            ),
+            risk: HomeRiskClassificationResult(
+                riskLevel: .low,
+                requiresConfirmation: false,
+                reason: operation.reason,
+                confidence: operation.confidence
+            )
+        )
+    }
+
+    private func stableUnique(_ devices: [HomeCandidateRecord]) -> [HomeCandidateRecord] {
+        var seen = Set<String>()
+        var result: [HomeCandidateRecord] = []
+        for device in devices where !seen.contains(device.id) {
+            seen.insert(device.id)
+            result.append(device)
+        }
+        return result
+    }
+
+    private func stableUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where !seen.contains(value) {
+            seen.insert(value)
+            result.append(value)
+        }
+        return result
     }
 }

@@ -212,6 +212,8 @@ public struct AgentScheduler: Sendable {
         switch resolution {
         case .needsClarification, .unsupported, .requiresConfirmation, .executed:
             return true
+        case .automationDrafted, .automationRequiresConfirmation:
+            return true
         case .readyToExecute:
             return agentID == .ruleFallback || agentID == .bixbyFallback
         }

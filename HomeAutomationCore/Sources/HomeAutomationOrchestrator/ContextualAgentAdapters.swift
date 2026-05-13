@@ -492,6 +492,8 @@ public enum DefaultAgentRegistryFactory {
         let families = context.intent?.topFamilies ?? context.resolutionState?.intent.topFamilies ?? []
         for family in families {
             switch family {
+            case .createAutomation:
+                break
             case .power:
                 values.insert("switch")
             case .temperature:
