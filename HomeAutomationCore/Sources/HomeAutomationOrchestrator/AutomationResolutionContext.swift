@@ -2,44 +2,6 @@ import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
 
-public enum AutomationValidationSeverity: String, Sendable, Hashable, Codable {
-    case warning
-    case error
-}
-
-public struct AutomationValidationIssue: Sendable, Hashable, Codable {
-    public let code: String
-    public let message: String
-    public let severity: AutomationValidationSeverity
-
-    public init(
-        code: String,
-        message: String,
-        severity: AutomationValidationSeverity
-    ) {
-        self.code = code
-        self.message = message
-        self.severity = severity
-    }
-}
-
-public struct AutomationValidationResult: Sendable, Hashable, Codable {
-    public let issues: [AutomationValidationIssue]
-    public let requiresConfirmation: Bool
-
-    public init(
-        issues: [AutomationValidationIssue] = [],
-        requiresConfirmation: Bool = false
-    ) {
-        self.issues = issues
-        self.requiresConfirmation = requiresConfirmation
-    }
-
-    public var isValid: Bool {
-        !issues.contains { $0.severity == .error }
-    }
-}
-
 public enum AutomationCreationResolution: Sendable, Hashable, Codable {
     case drafted(HomeAutomationCreationPlan)
     case requiresConfirmation(HomeAutomationCreationPlan)

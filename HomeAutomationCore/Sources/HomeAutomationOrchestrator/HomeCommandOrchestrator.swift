@@ -35,9 +35,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let circuitBreakers: CircuitBreakerRegistry
     private let deviceRegistry: MockHomeDeviceRegistry
     private let operationDetector: HomeOperationDetectionService
-    private let automationDraftAgent: AutomationDraftAgent
-    private let conditionOperandResolver: AutomationConditionOperandResolver
-    private let smartThingsCompiler: SmartThingsRuleCompiler
+    private let automationCreationResolver: AutomationCreationResolver
 
     public init(
         registry: AgentRegistry,
@@ -60,9 +58,20 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.conversationMemory = conversationMemory
         self.circuitBreakers = circuitBreakers
         self.operationDetector = HomeOperationDetectionService()
-        self.automationDraftAgent = automationDraftAgent
-        self.conditionOperandResolver = AutomationConditionOperandResolver(registry: deviceRegistry)
-        self.smartThingsCompiler = SmartThingsRuleCompiler()
+
+        let actionResolver = AutomationActionResolver(
+            registry: registry,
+            planner: planner,
+            graphPlanner: GraphPlanner(policy: policy),
+            policy: policy,
+            runtimeMode: runtimeMode,
+            circuitBreakers: circuitBreakers
+        )
+        self.automationCreationResolver = AutomationCreationResolver(
+            automationDraftAgent: automationDraftAgent,
+            actionResolver: actionResolver,
+            conditionOperandResolver: AutomationConditionOperandResolver(registry: deviceRegistry)
+        )
     }
 
     public convenience init(
@@ -352,258 +361,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> HomeAutomationResolverResult {
-        let state = Self.makeOperationState(for: text, operation: operation)
-        let draftOutput: AutomationDraftOutput
-        do {
-            draftOutput = try await automationDraftAgent.run(
-                AutomationDraftInput(text: text, operation: operation),
-                context: ResolutionContext(
-                    request: CommandRequest(text: text, executeLowRiskCommands: false)
-                )
-            )
-        } catch {
-            return HomeAutomationResolverResult(
-                state: state,
-                retrievedCandidates: [],
-                aggregation: HomeCandidateAggregationResult(
-                    finalCandidateIDs: [],
-                    needsClarification: false,
-                    confidence: operation.confidence
-                ),
-                hydratedCandidates: [],
-                draft: nil,
-                resolution: .unsupported(error.localizedDescription)
-            )
-        }
-
-        let ruleDraft: HomeAutomationRuleDraft
-        do {
-            ruleDraft = try draftOutput.makeRuleDraft()
-        } catch {
-            return HomeAutomationResolverResult(
-                state: state,
-                retrievedCandidates: [],
-                aggregation: HomeCandidateAggregationResult(
-                    finalCandidateIDs: [],
-                    needsClarification: false,
-                    confidence: operation.confidence
-                ),
-                hydratedCandidates: [],
-                draft: nil,
-                resolution: .unsupported(error.localizedDescription)
-            )
-        }
-
-        await eventBus.publish(
-            OrchestratorPipelineEvent(
-                runID: runID,
-                stage: "automationDraft",
-                agentID: "automationDraft",
-                status: .completed,
-                detail: "\(ruleDraft.actionDescriptions.count) action(s), trigger=\(ruleDraft.trigger?.displayString ?? "none")"
-            )
-        )
-
-        let resolvedCondition = await conditionOperandResolver.resolve(ruleDraft.condition)
-        let resolvedRuleDraft = HomeAutomationRuleDraft(
-            name: ruleDraft.name,
-            domain: ruleDraft.domain,
-            operation: ruleDraft.operation,
-            intent: ruleDraft.intent,
-            trigger: ruleDraft.trigger,
-            condition: resolvedCondition,
-            actionDescriptions: ruleDraft.actionDescriptions,
-            confidence: ruleDraft.confidence
-        )
-
-        var resolvedActions: [HomeAutomationResolvedAction] = []
-        var retrievedCandidates: [HomeCandidateRecord] = []
-        var hydratedCandidates: [HomeCandidateRecord] = []
-        var selectedIDs: [String] = []
-        var firstDraft: HomeCommandDraft?
-        var requiresConfirmation = false
-
-        for (index, actionText) in resolvedRuleDraft.actionDescriptions.enumerated() {
-            await eventBus.publish(
-                OrchestratorPipelineEvent(
-                    runID: runID,
-                    stage: "automationActionResolution",
-                    agentID: "automationActionResolution",
-                    status: .running,
-                    detail: actionText
-                )
-            )
-            let actionResult = await resolveAutomationAction(
-                text: actionText,
-                eventBus: eventBus,
-                runID: runID
-            )
-            retrievedCandidates.append(contentsOf: actionResult.retrievedCandidates)
-            hydratedCandidates.append(contentsOf: actionResult.hydratedCandidates)
-            selectedIDs.append(contentsOf: actionResult.aggregation.finalCandidateIDs)
-            firstDraft = firstDraft ?? actionResult.draft
-
-            if case .needsClarification(let question) = actionResult.resolution {
-                return HomeAutomationResolverResult(
-                    state: state,
-                    retrievedCandidates: retrievedCandidates,
-                    aggregation: HomeCandidateAggregationResult(
-                        finalCandidateIDs: selectedIDs,
-                        needsClarification: true,
-                        clarificationQuestion: question,
-                        confidence: actionResult.aggregation.confidence
-                    ),
-                    hydratedCandidates: hydratedCandidates,
-                    draft: firstDraft,
-                    resolution: .needsClarification("For automation action \(index + 1): \(question)")
-                )
-            }
-            if case .unsupported(let reason) = actionResult.resolution {
-                return HomeAutomationResolverResult(
-                    state: state,
-                    retrievedCandidates: retrievedCandidates,
-                    aggregation: HomeCandidateAggregationResult(
-                        finalCandidateIDs: selectedIDs,
-                        needsClarification: false,
-                        confidence: actionResult.aggregation.confidence
-                    ),
-                    hydratedCandidates: hydratedCandidates,
-                    draft: firstDraft,
-                    resolution: .unsupported("For automation action \(index + 1): \(reason)")
-                )
-            }
-
-            guard let draft = actionResult.draft else {
-                return HomeAutomationResolverResult(
-                    state: state,
-                    retrievedCandidates: retrievedCandidates,
-                    aggregation: HomeCandidateAggregationResult(
-                        finalCandidateIDs: selectedIDs,
-                        needsClarification: false,
-                        confidence: actionResult.aggregation.confidence
-                    ),
-                    hydratedCandidates: hydratedCandidates,
-                    draft: firstDraft,
-                    resolution: .unsupported("For automation action \(index + 1): no command draft was produced.")
-                )
-            }
-
-            if case .requiresConfirmation = actionResult.resolution {
-                requiresConfirmation = true
-            }
-            if case .readyToExecute(let plan) = actionResult.resolution, plan.requiresConfirmation {
-                requiresConfirmation = true
-            }
-
-            let selectedDevice = draft.targetDeviceID.flatMap { id in
-                actionResult.hydratedCandidates.first { $0.id == id } ??
-                    actionResult.retrievedCandidates.first { $0.id == id }
-            }
-            resolvedActions.append(
-                HomeAutomationResolvedAction(
-                    originalText: actionText,
-                    draft: draft,
-                    device: selectedDevice,
-                    confidence: draft.confidence
-                )
-            )
-        }
-
-        await eventBus.publish(
-            OrchestratorPipelineEvent(
-                runID: runID,
-                stage: "automationActionResolution",
-                agentID: "automationActionResolution",
-                status: .completed,
-                detail: "\(resolvedActions.count) action(s) resolved"
-            )
-        )
-
-        var plan = HomeAutomationCreationPlan(
-            name: ruleDraft.name,
-            ruleDraft: resolvedRuleDraft,
-            resolvedActions: resolvedActions,
-            smartThingsRuleJSON: nil,
-            requiresConfirmation: requiresConfirmation,
-            unsupportedCompilationReason: nil
-        )
-
-        let compileDetail: String
-        do {
-            let document = try smartThingsCompiler.compile(plan)
-            plan = HomeAutomationCreationPlan(
-                name: plan.name,
-                ruleDraft: plan.ruleDraft,
-                resolvedActions: plan.resolvedActions,
-                smartThingsRuleJSON: document.jsonString,
-                requiresConfirmation: plan.requiresConfirmation,
-                unsupportedCompilationReason: nil
-            )
-            compileDetail = "compiled"
-        } catch {
-            plan = HomeAutomationCreationPlan(
-                name: plan.name,
-                ruleDraft: plan.ruleDraft,
-                resolvedActions: plan.resolvedActions,
-                smartThingsRuleJSON: nil,
-                requiresConfirmation: plan.requiresConfirmation,
-                unsupportedCompilationReason: error.localizedDescription
-            )
-            compileDetail = error.localizedDescription
-        }
-
-        await eventBus.publish(
-            OrchestratorPipelineEvent(
-                runID: runID,
-                stage: "smartThingsCompilation",
-                agentID: "smartThingsCompilation",
-                status: plan.smartThingsRuleJSON == nil ? .skipped : .completed,
-                detail: compileDetail
-            )
-        )
-
-        let aggregation = HomeCandidateAggregationResult(
-            finalCandidateIDs: stableUnique(selectedIDs),
-            needsClarification: false,
-            confidence: resolvedActions.map(\.confidence).min() ?? ruleDraft.confidence
-        )
-        return HomeAutomationResolverResult(
-            state: state,
-            retrievedCandidates: stableUnique(retrievedCandidates),
-            aggregation: aggregation,
-            hydratedCandidates: stableUnique(hydratedCandidates),
-            draft: firstDraft,
-            resolution: requiresConfirmation ? .automationRequiresConfirmation(plan) : .automationDrafted(plan)
-        )
-    }
-
-    private func resolveAutomationAction(
-        text: String,
-        eventBus: AgentEventBus,
-        runID: UUID
-    ) async -> HomeAutomationResolverResult {
-        let request = CommandRequest(text: text, executeLowRiskCommands: false)
-        let contextStore = ResolutionContextStore(request: request)
-        let execution = await executeDirectCommandPipeline(
+        await automationCreationResolver.resolve(
             text: text,
-            contextStore: contextStore,
+            operation: operation,
             eventBus: eventBus,
             runID: runID
-        )
-        let exit = execution.exit
-        let ctx = await contextStore.snapshot()
-        let resolution = ctx.resolution ?? Self.resolution(from: exit)
-        return HomeAutomationResolverResult(
-            state: ctx.resolutionState ?? Self.makeFallbackState(for: text),
-            retrievedCandidates: ctx.retrievedCandidates,
-            aggregation: ctx.aggregation ?? HomeCandidateAggregationResult(
-                finalCandidateIDs: ctx.selectedCandidateIDs,
-                needsClarification: false,
-                confidence: 0
-            ),
-            hydratedCandidates: ctx.hydratedCandidates,
-            draft: ctx.draft,
-            resolution: resolution
         )
     }
 

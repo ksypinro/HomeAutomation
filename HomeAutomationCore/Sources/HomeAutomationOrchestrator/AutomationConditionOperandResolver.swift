@@ -80,7 +80,11 @@ public struct AutomationConditionOperandResolver: Sendable {
             }
             return lhs.1 > rhs.1
         }
-        return scored.first?.0
+        guard let first = scored.first else { return nil }
+        if scored.dropFirst().first?.1 == first.1 {
+            return nil
+        }
+        return first.0
     }
 
     private func score(_ device: HomeCandidateRecord, query: String) -> Int {
