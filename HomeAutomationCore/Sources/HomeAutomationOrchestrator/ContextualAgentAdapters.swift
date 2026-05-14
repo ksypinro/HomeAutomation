@@ -146,7 +146,10 @@ public enum DefaultAgentRegistryFactory {
             ),
             ContextualHomeAgent(
                 agent: AutomationDraftAgent(
-                    worker: AutomationDraftWorkerSession(foundationModelAvailability: foundationModelAvailability)
+                    worker: AutomationDraftWorkerSession(
+                        foundationModelAvailability: foundationModelAvailability,
+                        contextRetriever: contextRetriever
+                    )
                 ),
                 makeInput: { context in
                     AutomationDraftInput(

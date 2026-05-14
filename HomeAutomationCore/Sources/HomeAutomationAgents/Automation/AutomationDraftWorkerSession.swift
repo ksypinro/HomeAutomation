@@ -1,6 +1,7 @@
 import Foundation
 import FoundationModels
 import HomeAutomationCore
+import HomeAutomationRAG
 import os
 
 public struct AutomationDraftWorkerSession: Sendable {
@@ -8,6 +9,7 @@ public struct AutomationDraftWorkerSession: Sendable {
     private let foundationModelAvailability: @Sendable () -> Bool
     private let deterministicConfidenceThreshold: Double
     private let parser: AutomationPatternParser
+    private let contextRetriever: ContextRetriever?
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.AutomationDraftWorkerSession")
 
     public init(
@@ -16,12 +18,14 @@ public struct AutomationDraftWorkerSession: Sendable {
             SystemLanguageModel.default.isAvailable
         },
         deterministicConfidenceThreshold: Double = 0.88,
-        parser: AutomationPatternParser = AutomationPatternParser()
+        parser: AutomationPatternParser = AutomationPatternParser(),
+        contextRetriever: ContextRetriever? = nil
     ) {
         self.draft = draft
         self.foundationModelAvailability = foundationModelAvailability
         self.deterministicConfidenceThreshold = deterministicConfidenceThreshold
         self.parser = parser
+        self.contextRetriever = contextRetriever
     }
 
     public func createDraft(_ input: AutomationDraftInput) async throws -> AutomationDraftOutput {
@@ -32,6 +36,7 @@ public struct AutomationDraftWorkerSession: Sendable {
         }
 
         logger.debug("[Input] text: \(commandText, privacy: .public)")
+        let normalizedInput = AutomationDraftInput(text: commandText, operation: input.operation)
 
         if let draft {
             let result = try await draft(input)
@@ -43,7 +48,8 @@ public struct AutomationDraftWorkerSession: Sendable {
         let deterministic = parser.parse(commandText)
         if let deterministic,
            deterministic.confidence >= deterministicConfidenceThreshold,
-           deterministic.unsupportedFragments.isEmpty {
+           deterministic.unsupportedFragments.isEmpty,
+           !AutomationRAGPolicy.shouldRetrieve(for: normalizedInput, draftOutput: deterministic) {
             logger.info("[DeterministicParser] High-confidence automation draft produced.")
             return deterministic
         }
@@ -69,6 +75,7 @@ public struct AutomationDraftWorkerSession: Sendable {
         7. Put uncertain recurrence such as holidays or weekday schedules in unsupportedFragments.
         8. Treat "everyday", "every day", and "daily" as repeatRule "everyDay".
         9. Confidence must be between 0.0 and 1.0.
+        10. If the prompt includes relevant SmartThings automation knowledge, use it only as extraction guidance; the user automation command remains the source of truth.
 
         Examples:
         User: Turn on AC everyday at 7 AM
@@ -81,14 +88,19 @@ public struct AutomationDraftWorkerSession: Sendable {
         User: Turn on AC every day at 7 AM if bedroom window is closed and motion is detected
         Output condition: and([bedroom window equals closed, motion equals active])
         """
+        let promptText = await AgentRAGSupport.automationInput(
+            normalizedInput,
+            draftOutput: deterministic,
+            contextRetriever: contextRetriever
+        )
 
         logger.debug("[FoundationModelInput] System Instructions: \(instructions, privacy: .public)")
-        logger.debug("[FoundationModelInput] Prompt: \(commandText, privacy: .public)")
+        logger.debug("[FoundationModelInput] Prompt: \(promptText, privacy: .public)")
 
         let session = LanguageModelSession(instructions: Instructions(instructions))
         do {
             let result = try await session.respond(
-                to: Prompt(commandText),
+                to: Prompt(promptText),
                 generating: AutomationDraftOutput.self
             ).content
             try validate(result)

@@ -33,7 +33,8 @@ public struct KnowledgeIndexingResult: Sendable, Hashable {
 ///
 /// The version string is computed by `RAGIndexVersion.compute(...)` and encodes
 /// the knowledge-base schema version, Bixby command count, dataset example count,
-/// and device count. Any change to those numbers invalidates the cache automatically.
+/// automation knowledge count, and device count. Any change to those numbers
+/// invalidates the cache automatically.
 public actor KnowledgeIndexer {
     private let chunker: DocumentChunker
     private let embeddingProvider: any EmbeddingProviding
@@ -96,10 +97,12 @@ public actor KnowledgeIndexer {
         let deduplicated = Self.deduplicatedDevices(devices + catalogDevices)
 
         // Compute the version tag for this knowledge-base state.
+        let automationKnowledgeCount = chunker.automationChunks().count
         let version = RAGIndexVersion.compute(
             knowledgeBaseSchemaVersion: HomeAutomationKnowledgeBase.shared.schemaVersion,
             bixbyCommandCount: HomeBixbyCommandCatalog.commands.count,
             datasetCommandCount: HomeAutomationKnowledgeBase.generatedDatasetCommandCount(),
+            automationKnowledgeCount: automationKnowledgeCount,
             deviceCount: deduplicated.count
         )
 

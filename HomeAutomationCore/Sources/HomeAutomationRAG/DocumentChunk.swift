@@ -53,6 +53,10 @@ public enum KnowledgeSource: String, Sendable, Hashable, Codable, CaseIterable {
     case nlDataset
     case bixbyCommand
     case device
+    case automationPattern
+    case automationRuleExample
+    case automationConditionOperator
+    case smartThingsRuleSchema
 }
 
 public struct ScoredChunk: Sendable, Hashable {

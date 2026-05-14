@@ -47,12 +47,24 @@ public struct HybridRetrievalStrategy: Sendable {
     }
 
     private func keywordSearch(_ query: StructuredRetrievalQuery) async -> [ScoredChunk] {
-        let terms = query.keywordTerms.isEmpty ? [query.rawText] : query.keywordTerms + [query.rawText]
+        let terms = keywordTerms(for: query)
         return await bm25Index.search(
             terms: terms,
             topK: query.topK,
             filter: query.metadataFilter
         )
+    }
+
+    private func keywordTerms(for query: StructuredRetrievalQuery) -> [String] {
+        var terms = query.keywordTerms
+        if let operation = query.operation {
+            terms.append(operation.rawValue)
+        }
+        terms.append(contentsOf: query.automationConcepts)
+        terms.append(contentsOf: query.conditionOperators)
+        terms.append(contentsOf: query.repeatHints)
+        terms.append(query.rawText)
+        return stableUnique(terms)
     }
 
     private func reciprocalRankFusion(
@@ -89,5 +101,18 @@ public struct HybridRetrievalStrategy: Sendable {
             }
             .prefix(max(0, topK))
             .map { $0 }
+    }
+
+    private func stableUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = trimmed.lowercased()
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(trimmed)
+        }
+        return result
     }
 }

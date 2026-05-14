@@ -339,6 +339,8 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
                 if let action = scored.chunk.metadata["action"] {
                     commands.insert(action)
                 }
+            case .automationPattern, .automationRuleExample, .automationConditionOperator, .smartThingsRuleSchema:
+                continue
             }
         }
 

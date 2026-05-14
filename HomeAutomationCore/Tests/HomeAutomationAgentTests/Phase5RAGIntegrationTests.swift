@@ -208,6 +208,35 @@ struct Phase5RAGIntegrationTests {
     }
 
     @Test
+    func retrievalJudgeCanReportAutomationChunkSources() async throws {
+        let retriever = await Self.retriever(chunks: DocumentChunker().smartThingsRuleSchemaChunks())
+        var context = Self.context(text: "SmartThings every specific command schema")
+        context.retrievalReports = [
+            KnowledgeRetrievalReport(
+                agentID: AgentID.automationDraft.rawValue,
+                source: KnowledgeSource.smartThingsRuleSchema.rawValue,
+                strategy: "hybrid",
+                query: "SmartThings every specific command schema",
+                returnedCount: 0,
+                acceptedCount: 0,
+                averageScore: 0,
+                maxScore: 0,
+                minScore: 0.01
+            )
+        ]
+        let agent = RetrievalJudgeAgent(contextRetriever: retriever, foundationModelAvailability: { true })
+
+        let output = try await agent.run(
+            RetrievalJudgeInput(text: "SmartThings every specific command schema"),
+            context: context
+        )
+
+        #expect(output.snippets.first?.metadata["source"] == "automationRAG")
+        #expect(output.snippets.first?.metadata["chunkSource"] == KnowledgeSource.smartThingsRuleSchema.rawValue)
+        #expect(output.reports.first?.source == KnowledgeSource.smartThingsRuleSchema.rawValue)
+    }
+
+    @Test
     func nluAgentPrependsRAGFewShotExamples() async throws {
         let example = try #require(HomeAutomationKnowledgeBase.generatedDatasetCommands().first)
         let retriever = await Self.retriever(chunks: [

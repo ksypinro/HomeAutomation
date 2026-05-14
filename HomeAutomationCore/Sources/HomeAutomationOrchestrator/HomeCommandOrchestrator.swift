@@ -104,7 +104,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             conversationMemory: conversationMemory,
             circuitBreakers: circuitBreakers,
             automationDraftAgent: AutomationDraftAgent(
-                worker: AutomationDraftWorkerSession(foundationModelAvailability: foundationModelAvailability)
+                worker: AutomationDraftWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability,
+                    contextRetriever: contextRetriever
+                )
             )
         )
     }

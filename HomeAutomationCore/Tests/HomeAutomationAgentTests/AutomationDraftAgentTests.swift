@@ -65,6 +65,49 @@ struct AutomationDraftAgentTests {
     }
 
     @Test
+    func simpleDailyScheduleDoesNotNeedAutomationRAG() throws {
+        let input = AutomationDraftInput(
+            text: "Turn on AC every day at 7 AM",
+            operation: HomeOperationDetectionResult(
+                domain: .homeAutomation,
+                operation: .automationCreation,
+                confidence: 0.98,
+                reason: "schedule automation"
+            )
+        )
+        let output = try #require(AutomationPatternParser().parse(input.text))
+
+        let decision = AutomationRAGPolicy.decision(for: input, draftOutput: output)
+
+        #expect(!decision.shouldRetrieve)
+        #expect(decision.reasons.isEmpty)
+    }
+
+    @Test
+    func complexConditionNeedsAutomationRAG() throws {
+        let input = AutomationDraftInput(
+            text: "Turn on AC every day at 7 AM if bedroom window is closed and motion is detected",
+            operation: HomeOperationDetectionResult(
+                domain: .homeAutomation,
+                operation: .automationCreation,
+                confidence: 0.98,
+                reason: "schedule automation"
+            )
+        )
+        let output = try #require(AutomationPatternParser().parse(input.text))
+
+        let decision = AutomationRAGPolicy.decision(for: input, draftOutput: output)
+        let query = AutomationRAGPolicy.retrievalQuery(for: input, draftOutput: output)
+
+        #expect(decision.shouldRetrieve)
+        #expect(decision.reasons.contains("deviceAttributeCondition"))
+        #expect(query.operation == .automationCreation)
+        #expect(query.automationConcepts.contains("compoundCondition"))
+        #expect(query.conditionOperators.contains("and"))
+        #expect(query.repeatHints.contains("everyDay"))
+    }
+
+    @Test
     func parserPreservesOrConditionShape() throws {
         let output = try #require(
             AutomationPatternParser().parse(
