@@ -68,6 +68,12 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "HomeAutomationCoreTests",
+            dependencies: [
+                "HomeAutomationCore"
+            ]
+        ),
+        .testTarget(
             name: "HomeAutomationOrchestratorTests",
             dependencies: [
                 "HomeAutomationAgents",

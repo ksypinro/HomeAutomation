@@ -96,6 +96,43 @@ public struct OrchestratorCandidateMetrics: Sendable, Codable, Equatable {
     }
 }
 
+public struct OrchestratorAutomationMetrics: Sendable, Codable, Equatable {
+    public var operation: String?
+    public var runtimeMode: String?
+    public var graphID: String?
+    public var automationActionCount: Int
+    public var automationConditionCount: Int
+    public var automationCompilerTarget: String?
+    public var automationCompilationSupported: Bool
+    public var automationRequiresConfirmation: Bool
+    public var graphNodeStatuses: [String: String]
+    public var selectedAgents: [String: String]
+
+    public init(
+        operation: String? = nil,
+        runtimeMode: String? = nil,
+        graphID: String? = nil,
+        automationActionCount: Int = 0,
+        automationConditionCount: Int = 0,
+        automationCompilerTarget: String? = nil,
+        automationCompilationSupported: Bool = false,
+        automationRequiresConfirmation: Bool = false,
+        graphNodeStatuses: [String: String] = [:],
+        selectedAgents: [String: String] = [:]
+    ) {
+        self.operation = operation
+        self.runtimeMode = runtimeMode
+        self.graphID = graphID
+        self.automationActionCount = automationActionCount
+        self.automationConditionCount = automationConditionCount
+        self.automationCompilerTarget = automationCompilerTarget
+        self.automationCompilationSupported = automationCompilationSupported
+        self.automationRequiresConfirmation = automationRequiresConfirmation
+        self.graphNodeStatuses = graphNodeStatuses
+        self.selectedAgents = selectedAgents
+    }
+}
+
 public struct RetrievalQualityMetrics: Sendable, Codable, Equatable {
     public var strategyNames: [String]
     public var averageScore: Double
@@ -188,6 +225,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var contextMetrics: OrchestratorContextMetrics
     public var safetyMetrics: OrchestratorSafetyMetrics
     public var candidateMetrics: OrchestratorCandidateMetrics
+    public var automationMetrics: OrchestratorAutomationMetrics
     public var foundationModelUsage: FoundationModelUsageMetrics
     public var retrievalQuality: RetrievalQualityMetrics
 
@@ -205,6 +243,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.contextMetrics = OrchestratorContextMetrics()
         self.safetyMetrics = OrchestratorSafetyMetrics()
         self.candidateMetrics = OrchestratorCandidateMetrics()
+        self.automationMetrics = OrchestratorAutomationMetrics()
         self.foundationModelUsage = FoundationModelUsageMetrics()
         self.retrievalQuality = RetrievalQualityMetrics()
     }
@@ -263,6 +302,95 @@ public struct OrchestratorMetrics: Sendable, Codable {
         )
         retrievalQuality = Self.retrievalQualityMetrics(context: context, agentStatuses: agentStatuses)
         captureFoundationModelFields(context: context)
+    }
+
+    public mutating func captureAutomationFields(
+        operation: HomeOperationDetectionResult,
+        runtimeMode: OrchestratorRuntimeMode,
+        graph: OrchestrationGraph,
+        result: HomeAutomationResolverResult
+    ) {
+        let plan = Self.automationPlan(from: result.resolution)
+        let statuses = Self.automationGraphStatuses(graph: graph, result: result)
+        let selectedAgents = graph.nodes.reduce(into: [String: String]()) { partial, node in
+            partial[node.id] = node.id
+        }
+
+        automationMetrics = OrchestratorAutomationMetrics(
+            operation: operation.operation.rawValue,
+            runtimeMode: runtimeMode.rawValue,
+            graphID: graph.id,
+            automationActionCount: plan?.resolvedActions.count ?? 0,
+            automationConditionCount: plan?.ruleDraft.condition.map(Self.conditionCount) ?? 0,
+            automationCompilerTarget: "SmartThingsRulesV1",
+            automationCompilationSupported: plan?.smartThingsRuleJSON != nil,
+            automationRequiresConfirmation: plan?.requiresConfirmation ?? {
+                if case .automationRequiresConfirmation = result.resolution { return true }
+                return false
+            }(),
+            graphNodeStatuses: statuses.mapValues(\.rawValue),
+            selectedAgents: selectedAgents
+        )
+        graphRun = GraphRunMetrics(
+            graphID: graph.id,
+            goal: graph.goal,
+            finishedAt: finishedAt ?? Date(),
+            nodeStatuses: statuses,
+            selectedAgents: selectedAgents,
+            skippedNodeIDs: statuses.filter { $0.value == .skipped }.map(\.key).sorted(),
+            nodeDurations: [:]
+        )
+    }
+
+    private static func automationPlan(from resolution: HomeCommandResolution) -> HomeAutomationCreationPlan? {
+        switch resolution {
+        case .automationDrafted(let plan), .automationRequiresConfirmation(let plan):
+            return plan
+        case .readyToExecute, .executed, .requiresConfirmation, .needsClarification, .unsupported:
+            return nil
+        }
+    }
+
+    private static func automationGraphStatuses(
+        graph: OrchestrationGraph,
+        result: HomeAutomationResolverResult
+    ) -> [String: GraphNodeRunStatus] {
+        var statuses = graph.nodes.reduce(into: [String: GraphNodeRunStatus]()) { partial, node in
+            partial[node.id] = .skipped
+        }
+        statuses[AgentID.operationDetection.rawValue] = .completed
+
+        switch result.resolution {
+        case .automationDrafted(let plan), .automationRequiresConfirmation(let plan):
+            statuses[AgentID.automationDraft.rawValue] = .completed
+            statuses[AgentID.automationConditionOperandResolution.rawValue] = .completed
+            statuses[AgentID.automationActionResolution.rawValue] = .completed
+            statuses[AgentID.automationValidation.rawValue] = .completed
+            statuses[AgentID.smartThingsCompilation.rawValue] = plan.smartThingsRuleJSON == nil ? .skipped : .completed
+            statuses[AgentID.automationResultAssembly.rawValue] = .completed
+        case .needsClarification:
+            statuses[AgentID.automationDraft.rawValue] = .completed
+            statuses[AgentID.automationConditionOperandResolution.rawValue] = .completed
+            statuses[AgentID.automationActionResolution.rawValue] = result.aggregation.needsClarification ? .failed : .completed
+            statuses[AgentID.automationValidation.rawValue] = .failed
+        case .unsupported:
+            statuses[AgentID.automationDraft.rawValue] = .failed
+        case .readyToExecute, .executed, .requiresConfirmation:
+            break
+        }
+
+        return statuses
+    }
+
+    private static func conditionCount(_ condition: HomeAutomationCondition) -> Int {
+        switch condition {
+        case .and(let children), .or(let children):
+            return children.map(conditionCount).reduce(1, +)
+        case .not(let child):
+            return 1 + conditionCount(child)
+        case .comparison:
+            return 1
+        }
     }
 
     private static func confidenceByAgent(context: ResolutionContext) -> [String: Double] {

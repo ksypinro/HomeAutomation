@@ -21,4 +21,8 @@ public enum ResolutionContextPatchKey {
     public static let executionPlan = "executionPlan"
     public static let resolution = "resolution"
     public static let automationDraft = "automationDraft"
+    public static let automationResolvedActions = "automationResolvedActions"
+    public static let automationValidation = "automationValidation"
+    public static let smartThingsRule = "smartThingsRule"
+    public static let automationPlan = "automationPlan"
 }

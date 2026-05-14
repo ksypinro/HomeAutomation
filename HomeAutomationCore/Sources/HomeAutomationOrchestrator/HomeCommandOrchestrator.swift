@@ -217,6 +217,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
                 if operation.operation == .automationCreation {
                     let started = Date()
+                    let automationGraph = graphPlanner.plan(
+                        for: trimmedText,
+                        context: await contextStore.snapshot(),
+                        operation: operation.operation
+                    ).graph
                     let result = await resolveAutomationCreation(
                         text: trimmedText,
                         operation: operation,
@@ -227,6 +232,12 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     metrics.outcome = Self.outcomeName(for: result.resolution)
                     metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(started)
                     metrics.circuitStates = await circuitBreakers.allStatusStrings()
+                    metrics.captureAutomationFields(
+                        operation: operation,
+                        runtimeMode: runtimeMode,
+                        graph: automationGraph,
+                        result: result
+                    )
                     await metricsCollector.store(metrics)
 
                     let outcomeEvent = OrchestratorPipelineEvent(
@@ -236,9 +247,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         detail: result.resolution.displaySummary
                     )
                     await eventBus.publish(outcomeEvent)
-                    continuation.yield(.event(outcomeEvent))
+                    await eventBus.finish()
+                    await eventForwarder.value
                     continuation.yield(.result(result))
-                    eventForwarder.cancel()
                     continuation.finish()
                     return
                 }

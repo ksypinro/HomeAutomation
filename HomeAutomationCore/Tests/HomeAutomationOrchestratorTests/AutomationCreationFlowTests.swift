@@ -60,6 +60,62 @@ struct AutomationCreationFlowTests {
     }
 
     @Test
+    func automationCreationStreamEmitsPhaseNineEvents() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        var stages: [String] = []
+        var result: HomeAutomationResolverResult?
+
+        for try await update in orchestrator.resolveStream(
+            "Turn on bedroom AC everyday at 7 AM if the entry contact sensor is closed",
+            executeLowRiskCommands: true
+        ) {
+            switch update {
+            case .event(let event):
+                stages.append(event.stage)
+            case .result(let output):
+                result = output
+            }
+        }
+
+        guard case .automationDrafted(let plan) = result?.resolution else {
+            Issue.record("Expected automation draft")
+            return
+        }
+        #expect(stages.contains("operationDetection"))
+        #expect(stages.contains("automationDraft"))
+        #expect(stages.contains("automationActionResolution"))
+        #expect(stages.contains("automationConditionOperandResolution"))
+        #expect(stages.contains("automationValidation"))
+        #expect(stages.contains("smartThingsCompilation"))
+        #expect(stages.contains("automationResultAssembly"))
+        #expect(plan.smartThingsRuleJSON?.contains(#""trigger" : "Never""#) == true)
+    }
+
+    @Test
+    func highRiskAutomationRequiresConfirmation() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        let result = try await orchestrator.resolve(
+            "Unlock front door every day at 7 AM",
+            executeLowRiskCommands: true
+        )
+
+        guard case .automationRequiresConfirmation(let plan) = result.resolution else {
+            Issue.record("Expected high-risk automation confirmation, got \(result.resolution.displaySummary)")
+            return
+        }
+        #expect(plan.requiresConfirmation)
+        #expect(plan.resolvedActions.first?.draft.capability == "lock")
+        #expect(plan.resolvedActions.first?.draft.command == "unlock")
+    }
+
+    @Test
     func weekdayScheduleIsParsedButSmartThingsCompilationIsUnsupported() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),

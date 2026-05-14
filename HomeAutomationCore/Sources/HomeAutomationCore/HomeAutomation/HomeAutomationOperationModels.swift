@@ -37,18 +37,22 @@ public struct HomeOperationDetectionResult: Sendable, Hashable, Codable {
 public struct SmartThingsRuleDocument: Sendable, Hashable, Codable {
     public let name: String
     public let jsonString: String
+    public let payload: SmartThingsRulePayload?
 
-    public init(name: String, jsonString: String) {
+    public init(name: String, jsonString: String, payload: SmartThingsRulePayload? = nil) {
         self.name = name
         self.jsonString = jsonString
+        self.payload = payload
     }
 }
 
 public enum SmartThingsRuleCompileError: Error, Sendable, Hashable, LocalizedError {
     case unsupportedSchedule(HomeAutomationRepeatRule)
     case unresolvedAction(String)
+    case unresolvedConditionOperand(String)
     case unsupportedTrigger(String)
     case unsupportedCondition(String)
+    case unsafeRule(String)
 
     public var errorDescription: String? {
         switch self {
@@ -56,10 +60,14 @@ public enum SmartThingsRuleCompileError: Error, Sendable, Hashable, LocalizedErr
             return "SmartThings Rules v1 compilation does not support schedule: \(repeatRule.displayString)"
         case .unresolvedAction(let action):
             return "Automation action is unresolved: \(action)"
+        case .unresolvedConditionOperand(let operand):
+            return "Automation condition operand is unresolved: \(operand)"
         case .unsupportedTrigger(let reason):
             return "Unsupported trigger: \(reason)"
         case .unsupportedCondition(let reason):
             return "Unsupported condition: \(reason)"
+        case .unsafeRule(let reason):
+            return "Unsafe automation rule: \(reason)"
         }
     }
 }

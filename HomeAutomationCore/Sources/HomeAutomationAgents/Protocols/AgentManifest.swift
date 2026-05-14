@@ -79,7 +79,12 @@ public enum AgentManifestDefaults {
                 .routineExecution,
                 .unsupported
             ]
-        case .automationDraft, .automationValidation:
+        case .automationDraft,
+             .automationActionResolution,
+             .automationConditionOperandResolution,
+             .automationValidation,
+             .smartThingsCompilation,
+             .automationResultAssembly:
             return [.automationCreation]
         default:
             return [.executeDeviceCommand]
@@ -118,8 +123,16 @@ public enum AgentManifestDefaults {
             return ["request.text"]
         case .automationDraft:
             return ["request.text", "operation"]
+        case .automationActionResolution:
+            return ["automationDraft"]
+        case .automationConditionOperandResolution:
+            return ["automationDraft"]
         case .automationValidation:
             return ["automationDraft", "automationResolvedActions"]
+        case .smartThingsCompilation:
+            return ["automationDraft", "automationResolvedActions", "automationValidation"]
+        case .automationResultAssembly:
+            return ["automationDraft", "automationResolvedActions", "smartThingsRule"]
         default:
             return []
         }
@@ -171,8 +184,16 @@ public enum AgentManifestDefaults {
             return ["operation"]
         case .automationDraft:
             return ["automationDraft"]
+        case .automationActionResolution:
+            return ["automationResolvedActions"]
+        case .automationConditionOperandResolution:
+            return ["automationDraft"]
         case .automationValidation:
             return ["automationValidation", "resolution"]
+        case .smartThingsCompilation:
+            return ["smartThingsRule"]
+        case .automationResultAssembly:
+            return ["resolution"]
         default:
             return []
         }
@@ -208,7 +229,12 @@ public enum AgentManifestDefaults {
         switch id {
         case .operationDetection:
             return 100
-        case .automationDraft, .automationValidation:
+        case .automationDraft,
+             .automationActionResolution,
+             .automationConditionOperandResolution,
+             .automationValidation,
+             .smartThingsCompilation,
+             .automationResultAssembly:
             return 90
         case .safetyValidation, .parameterValidation, .confirmationPolicy, .executionPlanning:
             return 80

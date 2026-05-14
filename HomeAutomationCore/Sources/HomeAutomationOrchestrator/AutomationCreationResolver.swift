@@ -88,6 +88,15 @@ public struct AutomationCreationResolver: Sendable {
             actionDescriptions: ruleDraft.actionDescriptions,
             confidence: ruleDraft.confidence
         )
+        await eventBus.publish(
+            OrchestratorPipelineEvent(
+                runID: runID,
+                stage: "automationConditionOperandResolution",
+                agentID: "automationConditionOperandResolution",
+                status: .completed,
+                detail: "\(Self.conditionCount(resolvedCondition)) condition node(s)"
+            )
+        )
 
         // Step 3: Resolve each action description through the direct-command pipeline.
         let actionResults = await actionResolver.resolveAll(
@@ -378,7 +387,7 @@ public struct AutomationCreationResolver: Sendable {
             ? .automationRequiresConfirmation(plan)
             : .automationDrafted(plan)
 
-        return HomeAutomationResolverResult(
+        let result = HomeAutomationResolverResult(
             state: state,
             retrievedCandidates: Self.stableUniqueDevices(retrievedCandidates),
             aggregation: aggregation,
@@ -386,6 +395,18 @@ public struct AutomationCreationResolver: Sendable {
             draft: firstDraft,
             resolution: resolution
         )
+
+        await eventBus.publish(
+            OrchestratorPipelineEvent(
+                runID: runID,
+                stage: "automationResultAssembly",
+                agentID: "automationResultAssembly",
+                status: .completed,
+                detail: result.resolution.displaySummary
+            )
+        )
+
+        return result
     }
 
     // MARK: - Result Helpers
@@ -553,5 +574,17 @@ public struct AutomationCreationResolver: Sendable {
             result.append(device)
         }
         return result
+    }
+
+    private static func conditionCount(_ condition: HomeAutomationCondition?) -> Int {
+        guard let condition else { return 0 }
+        switch condition {
+        case .and(let children), .or(let children):
+            return children.map(conditionCount).reduce(1, +)
+        case .not(let child):
+            return 1 + conditionCount(child)
+        case .comparison:
+            return 1
+        }
     }
 }

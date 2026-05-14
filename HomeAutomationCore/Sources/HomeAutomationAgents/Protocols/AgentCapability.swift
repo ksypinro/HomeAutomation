@@ -37,6 +37,8 @@ public extension AgentID {
 
     // Draft
     static let automationDraft = AgentID("automationDraft")
+    static let automationActionResolution = AgentID("automationActionResolution")
+    static let automationConditionOperandResolution = AgentID("automationConditionOperandResolution")
     static let instructionComposer = AgentID("instructionComposer")
     static let draftGeneration = AgentID("draftGeneration")
     static let draftRepair = AgentID("draftRepair")
@@ -50,6 +52,7 @@ public extension AgentID {
     // Execution
     static let executionPlanning = AgentID("executionPlanning")
     static let mockExecution = AgentID("mockExecution")
+    static let smartThingsCompilation = AgentID("smartThingsCompilation")
 
     // Fallback
     static let ruleFallback = AgentID("ruleFallback")
@@ -57,6 +60,7 @@ public extension AgentID {
     static let unsupportedCommand = AgentID("unsupportedCommand")
 
     // Response
+    static let automationResultAssembly = AgentID("automationResultAssembly")
     static let clarification = AgentID("clarification")
     static let resultSummary = AgentID("resultSummary")
 }

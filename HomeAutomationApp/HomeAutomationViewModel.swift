@@ -64,6 +64,9 @@ final class HomeAutomationViewModel {
 
     let sampleCommands = [
         "Turn on the living room ceiling light",
+        "Turn on bedroom AC everyday at 7 AM",
+        "Turn on bedroom AC and turn off the bedroom lamp every day at 7 AM",
+        "Turn on bedroom AC everyday at 7 AM if the entry contact sensor is closed",
         "Set the bedroom lamp to 40 percent",
         "Set the bedroom AC fan mode to auto",
         "Make the bedroom AC cooler by 2 degrees",
@@ -349,8 +352,11 @@ final class HomeAutomationViewModel {
         var sections: [String] = []
         sections.append("""
         Automation:
+        Operation: automationCreation
         Name: \(plan.name)
         Trigger: \(plan.ruleDraft.trigger?.displayString ?? "none")
+        Conditions:
+        \(plan.ruleDraft.condition.map(describeAutomationCondition) ?? "- none")
         Actions:
         \(plan.resolvedActions.map(describeAutomationAction).joined(separator: "\n"))
         Requires Confirmation: \(plan.requiresConfirmation)
@@ -362,8 +368,16 @@ final class HomeAutomationViewModel {
             """)
         } else if let json = plan.smartThingsRuleJSON {
             sections.append("""
+            SmartThings:
+            compiled
+
             SmartThings JSON:
             \(json)
+            """)
+        } else {
+            sections.append("""
+            SmartThings:
+            not compiled
             """)
         }
         return sections.joined(separator: "\n\n")
@@ -372,6 +386,41 @@ final class HomeAutomationViewModel {
     private static func describeAutomationAction(_ action: HomeAutomationResolvedAction) -> String {
         let device = action.device?.displayName ?? action.draft.targetDeviceID ?? "unresolved"
         return "- \(action.originalText): \(device) -> \(action.draft.capability ?? "none").\(action.draft.command ?? "none")"
+    }
+
+    private static func describeAutomationCondition(_ condition: HomeAutomationCondition) -> String {
+        describeAutomationCondition(condition, depth: 0)
+    }
+
+    private static func describeAutomationCondition(_ condition: HomeAutomationCondition, depth: Int) -> String {
+        let prefix = String(repeating: "  ", count: depth) + "- "
+        switch condition {
+        case .and(let children):
+            return ([prefix + "all"] + children.map { describeAutomationCondition($0, depth: depth + 1) }).joined(separator: "\n")
+        case .or(let children):
+            return ([prefix + "any"] + children.map { describeAutomationCondition($0, depth: depth + 1) }).joined(separator: "\n")
+        case .not(let child):
+            return ([prefix + "not"] + [describeAutomationCondition(child, depth: depth + 1)]).joined(separator: "\n")
+        case .comparison(let comparison):
+            return "\(prefix)\(describeOperand(comparison.left)) \(comparison.operatorName.rawValue) \(describeOperand(comparison.right))"
+        }
+    }
+
+    private static func describeOperand(_ operand: HomeAutomationConditionOperand) -> String {
+        switch operand {
+        case .deviceAttribute(let description, let deviceID, let capability, let attribute):
+            let resolved = [deviceID, capability, attribute].compactMap { $0 }.joined(separator: ".")
+            return resolved.isEmpty ? description : "\(description) (\(resolved))"
+        case .literalString(let value):
+            return value
+        case .literalNumber(let value, let unit):
+            let number = value.rounded() == value ? String(Int(value)) : String(value)
+            return [number, unit].compactMap { $0 }.joined(separator: " ")
+        case .locationMode(let value):
+            return "location \(value)"
+        case .unsupported(let rawValue):
+            return rawValue
+        }
     }
 
 }

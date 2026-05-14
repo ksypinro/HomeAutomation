@@ -68,6 +68,31 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func graphPlannerExposesAutomationCreationGraph() {
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { false })
+        let planner = GraphPlanner(policy: policy)
+        let context = ResolutionContext(
+            request: CommandRequest(text: "Turn on AC everyday at 7 AM", executeLowRiskCommands: false)
+        )
+
+        let plan = planner.plan(for: context.request.text, context: context, operation: .automationCreation)
+        let graph = plan.graph
+
+        #expect(graph.id == "automation-creation-graph")
+        #expect(graph.goal == .automationCreation)
+        #expect(GraphValidator().validate(graph).isEmpty)
+        #expect(graph.nodes.map(\.id) == [
+            AgentID.operationDetection.rawValue,
+            AgentID.automationDraft.rawValue,
+            AgentID.automationConditionOperandResolution.rawValue,
+            AgentID.automationActionResolution.rawValue,
+            AgentID.automationValidation.rawValue,
+            AgentID.smartThingsCompilation.rawValue,
+            AgentID.automationResultAssembly.rawValue
+        ])
+    }
+
+    @Test
     func defaultRegistryContainsAllPhaseThreeAgents() {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
 
@@ -161,6 +186,27 @@ struct OrchestratorInfrastructureTests {
         #expect(metrics.foundationModelUsage.modelAvailabilityStatus == "unavailable")
         #expect(metrics.foundationModelUsage.modelCallCount == 0)
         #expect(metrics.foundationModelUsage.skippedModelCallCount > 0)
+    }
+
+    @Test
+    func automationMetricsIncludePhaseNineFields() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        _ = try await orchestrator.resolve("Turn on bedroom AC everyday at 7 AM", executeLowRiskCommands: true)
+        let metricsJSON = try #require(await orchestrator.lastMetricsJSON())
+        let metrics = try JSONDecoder().decode(OrchestratorMetrics.self, from: Data(metricsJSON.utf8))
+
+        #expect(metrics.automationMetrics.operation == HomeAutomationOperationKind.automationCreation.rawValue)
+        #expect(metrics.automationMetrics.runtimeMode == OrchestratorRuntimeMode.legacy.rawValue)
+        #expect(metrics.automationMetrics.graphID == "automation-creation-graph")
+        #expect(metrics.automationMetrics.automationActionCount == 1)
+        #expect(metrics.automationMetrics.automationCompilerTarget == "SmartThingsRulesV1")
+        #expect(metrics.automationMetrics.automationCompilationSupported)
+        #expect(metrics.automationMetrics.graphNodeStatuses[AgentID.smartThingsCompilation.rawValue] == GraphNodeRunStatus.completed.rawValue)
+        #expect(metrics.graphRun?.graphID == "automation-creation-graph")
     }
 
     @Test

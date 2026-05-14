@@ -47,6 +47,7 @@ public actor AgentEventBus {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AgentEventBus")
     private var events: [OrchestratorPipelineEvent] = []
     private var continuations: [AsyncStream<OrchestratorPipelineEvent>.Continuation] = []
+    private var isFinished = false
 
     public init() {}
 
@@ -54,6 +55,7 @@ public actor AgentEventBus {
     ///
     /// - Parameter event: The `OrchestratorPipelineEvent` to broadcast.
     public func publish(_ event: OrchestratorPipelineEvent) {
+        guard !isFinished else { return }
         logger.debug("Publishing event for runID: \(event.runID, privacy: .public), stage: \(event.stage, privacy: .public), status: \(event.status.rawValue, privacy: .public)")
         events.append(event)
         for continuation in continuations {
@@ -71,6 +73,10 @@ public actor AgentEventBus {
             for event in replayEvents {
                 continuation.yield(event)
             }
+            if isFinished {
+                continuation.finish()
+                return
+            }
             addContinuation(continuation)
         }
     }
@@ -79,6 +85,17 @@ public actor AgentEventBus {
     public func reset() {
         logger.debug("Resetting event bus. Clearing \(self.events.count, privacy: .public) events and \(self.continuations.count, privacy: .public) active continuations.")
         events = []
+        continuations = []
+        isFinished = false
+    }
+
+    /// Finishes active event streams after all previously published events have been yielded.
+    public func finish() {
+        isFinished = true
+        logger.debug("Finishing \(self.continuations.count, privacy: .public) active event stream(s).")
+        for continuation in continuations {
+            continuation.finish()
+        }
         continuations = []
     }
 

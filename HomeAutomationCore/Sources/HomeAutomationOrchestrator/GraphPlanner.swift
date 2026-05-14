@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationAgents
+import HomeAutomationCore
 import OSLog
 
 public struct GraphExecutionPlan: Sendable, Hashable {
@@ -29,6 +30,17 @@ public struct GraphPlanner: Sendable {
         }
 
         return GraphExecutionPlan(graph: Self.directCommandGraph())
+    }
+
+    public func plan(
+        for text: String,
+        context: ResolutionContext,
+        operation: HomeAutomationOperationKind
+    ) -> GraphExecutionPlan {
+        if operation == .automationCreation {
+            return GraphExecutionPlan(graph: Self.automationCreationGraph())
+        }
+        return plan(for: text, context: context)
     }
 
     public static func directCommandGraph() -> OrchestrationGraph {
@@ -109,9 +121,37 @@ public struct GraphPlanner: Sendable {
         )
     }
 
+    public static func automationCreationGraph() -> OrchestrationGraph {
+        let stages: [(id: AgentID, policy: NodeExecutionPolicy)] = [
+            (.operationDetection, .required),
+            (.automationDraft, .required),
+            (.automationConditionOperandResolution, .required),
+            (.automationActionResolution, .required),
+            (.automationValidation, .safetyGate),
+            (.smartThingsCompilation, .required),
+            (.automationResultAssembly, .required)
+        ]
+
+        return OrchestrationGraph(
+            id: "automation-creation-graph",
+            goal: .automationCreation,
+            nodes: stages.map { stage in
+                GraphNode(
+                    id: stage.id.rawValue,
+                    requirement: .byID(stage.id),
+                    executionPolicy: stage.policy
+                )
+            },
+            edges: zip(stages, stages.dropFirst()).map { lhs, rhs in
+                GraphEdge(from: lhs.id.rawValue, to: rhs.id.rawValue)
+            },
+            entryNodeIDs: [AgentID.operationDetection.rawValue]
+        )
+    }
+
     private static func executionPolicy(for id: AgentID) -> NodeExecutionPolicy {
         switch id {
-        case .safetyValidation, .parameterValidation, .confirmationPolicy:
+        case .automationValidation, .safetyValidation, .parameterValidation, .confirmationPolicy:
             return .safetyGate
         default:
             return .required

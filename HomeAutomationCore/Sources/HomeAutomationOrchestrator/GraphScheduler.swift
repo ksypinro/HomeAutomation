@@ -453,6 +453,12 @@ public struct GraphScheduler: Sendable {
             return context.executionPlan != nil
         case ResolutionContextPatchKey.resolution:
             return context.resolution != nil
+        case ResolutionContextPatchKey.automationDraft,
+             ResolutionContextPatchKey.automationResolvedActions,
+             ResolutionContextPatchKey.automationValidation,
+             ResolutionContextPatchKey.smartThingsRule,
+             ResolutionContextPatchKey.automationPlan:
+            return false
         default:
             return false
         }
