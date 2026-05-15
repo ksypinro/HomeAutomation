@@ -3,6 +3,8 @@ import Foundation
 public enum IntentCapabilityMap {
     public static func capabilities(for intent: HomeAutomationIntentFamily) -> [String] {
         switch intent {
+        case .createAutomation:
+            return []
         case .power:
             return ["switch", "button"]
         case .temperature:

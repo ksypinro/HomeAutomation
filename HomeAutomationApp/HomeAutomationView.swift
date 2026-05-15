@@ -41,7 +41,7 @@ struct HomeAutomationView: View {
             Label("Home Automation", systemImage: "house.and.flag")
                 .font(.largeTitle.weight(.semibold))
 
-            Text("Resolve smart-home commands with the legacy multi-stage Foundation Models pipeline, map them to capability-based commands, and execute low-risk actions locally.")
+            Text("Resolve smart-home commands with the graph-based multi-agent pipeline, map them to capability-based commands, and execute low-risk actions locally.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -135,8 +135,8 @@ struct HomeAutomationView: View {
                             ProgressView()
                                 .controlSize(.small)
                             Text(currentPipelineStage)
-                                .font(.callout.weight(.semibold))
-                                .lineLimit(1)
+                                .font(.caption.weight(.semibold))
+                                //.lineLimit(1)
                             Spacer()
                         }
                         .padding(10)
@@ -150,8 +150,8 @@ struct HomeAutomationView: View {
                                 Image(systemName: iconName(for: event.status))
                                     .foregroundStyle(iconColor(for: event.status))
                                 Text(event.title)
-                                    .font(.callout.weight(.semibold))
-                                    .lineLimit(1)
+                                    .font(.caption.weight(.semibold))
+                                    //.lineLimit(1)
                             }
 
                             Text(event.detail.isEmpty ? event.status.rawValue : event.detail)

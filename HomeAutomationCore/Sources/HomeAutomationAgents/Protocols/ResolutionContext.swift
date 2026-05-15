@@ -4,6 +4,7 @@ import HomeAutomationCore
 /// Immutable snapshot of resolution state. Agents read this value and emit patches.
 public struct ResolutionContext: Sendable {
     public let request: CommandRequest
+    public var operation: HomeOperationDetectionResult?
     public var language: HomeLanguageDetectionResult?
     public var domain: HomeDomainClassificationResult?
     public var intent: HomeIntentFamilyResult?
@@ -22,6 +23,7 @@ public struct ResolutionContext: Sendable {
     public var draft: HomeCommandDraft?
     public var executionPlan: HomeAutomationExecutionPlan?
     public var resolution: HomeCommandResolution?
+    public var scopedValues: [ContextScope: [String: AnySendableValue]]
     public var errors: [AgentFailure]
     public var trace: [AgentTraceEntry]
 
@@ -33,8 +35,31 @@ public struct ResolutionContext: Sendable {
         self.knowledgeSnippets = []
         self.retrievalReports = []
         self.memoryHints = []
+        self.scopedValues = [:]
         self.errors = []
         self.trace = []
+    }
+
+    public func scopedValue<Value: Sendable>(
+        for key: ScopedContextKey<Value>
+    ) -> Value? {
+        scopedValues[key.scope]?[key.name]?.get(Value.self)
+    }
+
+    public mutating func setScopedValue<Value: Sendable>(
+        _ value: Value,
+        for key: ScopedContextKey<Value>
+    ) {
+        scopedValues[key.scope, default: [:]][key.name] = AnySendableValue(value)
+    }
+
+    public mutating func mergeScopedValues(
+        _ values: [String: AnySendableValue],
+        in scope: ContextScope
+    ) {
+        for (key, value) in values {
+            scopedValues[scope, default: [:]][key] = value
+        }
     }
 }
 
@@ -117,11 +142,17 @@ public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
 public struct CommandRequest: Sendable {
     public let text: String
     public let executeLowRiskCommands: Bool
+    public let automationCreationOptions: SmartThingsRuleCreationOptions
     public let timestamp: Date
 
-    public init(text: String, executeLowRiskCommands: Bool) {
+    public init(
+        text: String,
+        executeLowRiskCommands: Bool,
+        automationCreationOptions: SmartThingsRuleCreationOptions = .dryRun
+    ) {
         self.text = text
         self.executeLowRiskCommands = executeLowRiskCommands
+        self.automationCreationOptions = automationCreationOptions
         self.timestamp = Date()
     }
 }

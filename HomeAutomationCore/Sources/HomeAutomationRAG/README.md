@@ -13,6 +13,7 @@ flowchart TB
         Dataset["Generated NL Dataset"]
         Bixby["Bixby Command Catalog"]
         Devices["Mock Device Records"]
+        Automation["Automation Patterns and SmartThings Rule Schema"]
     end
 
     Chunker["DocumentChunker"]
@@ -50,10 +51,12 @@ flowchart LR
     A --> C["Generated command example chunks"]
     D["HomeBixbyCommandCatalog"] --> E["Bixby command chunks"]
     F["MockHomeDeviceRegistry"] --> G["Device chunks"]
+    H0["Curated automation knowledge"] --> I0["Automation chunks"]
     B --> H["KnowledgeIndexer"]
     C --> H
     E --> H
     G --> H
+    I0 --> H
     H --> I["Embedding provider prepares semantic corpus"]
     I --> J["VectorStore indexes semanticContent"]
     H --> K["BM25Index indexes content + semanticContent + metadata"]
@@ -77,7 +80,7 @@ flowchart TD
 | Component | Role |
 | --- | --- |
 | `DocumentChunk` | Identifiable unit of retrievable knowledge. It stores full display `content`, clean embeddable `semanticContent`, source, and metadata. |
-| `KnowledgeSource` | Enum that identifies chunk origin: capability, natural-language dataset, Bixby command, or device. |
+| `KnowledgeSource` | Enum that identifies chunk origin: capability, natural-language dataset, Bixby command, device, automation pattern, automation rule example, automation condition operator, or SmartThings rule schema. |
 | `ScoredChunk` | Result wrapper containing a chunk and similarity score. |
 | `MetadataFilter` | Optional source, exact metadata, and multi-value metadata constraints for retrieval. |
 | `DocumentChunker` | Converts capabilities, generated examples, Bixby commands, and device records into chunk lists. |
@@ -106,6 +109,7 @@ flowchart TD
 | Generated command dataset | One chunk per example | Language, device type, capability, command, risk, expected values | NLU agents, `CommandExampleAgent`, `RetrievalJudgeAgent`, instruction composition |
 | Bixby command catalog | One chunk per Bixby command | Source capability, action, method, access level, related device types | `BixbyKnowledgeAgent`, `BixbyFallbackAgent`, `RetrievalJudgeAgent` |
 | Device registry | One chunk per device/routine | Device ID, room, type, capabilities, risk | `CandidateRetrievalAgent` |
+| Automation knowledge | Curated patterns, rule examples, condition operators, and SmartThings schema notes | Operation, concepts, condition operators, repeat hints, schema keys | `AutomationDraftWorkerSession`, `RetrievalJudgeAgent` |
 
 ## Retrieval Invariants
 

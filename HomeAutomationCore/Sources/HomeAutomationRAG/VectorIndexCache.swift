@@ -162,6 +162,7 @@ public actor VectorIndexCache {
 /// - The `HomeAutomationKnowledgeBase` schema version
 /// - The Bixby catalog command count
 /// - The generated dataset command count
+/// - The curated automation knowledge chunk count
 /// - The device registry device count
 ///
 /// This keeps version computation fast (no hashing of content) while still being
@@ -173,8 +174,9 @@ public enum RAGIndexVersion {
         knowledgeBaseSchemaVersion: String,
         bixbyCommandCount: Int,
         datasetCommandCount: Int,
+        automationKnowledgeCount: Int = 0,
         deviceCount: Int
     ) -> String {
-        "\(semanticIndexVersion)-\(knowledgeBaseSchemaVersion)-b\(bixbyCommandCount)-d\(datasetCommandCount)-v\(deviceCount)"
+        "\(semanticIndexVersion)-\(knowledgeBaseSchemaVersion)-b\(bixbyCommandCount)-d\(datasetCommandCount)-a\(automationKnowledgeCount)-v\(deviceCount)"
     }
 }

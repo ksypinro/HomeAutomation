@@ -126,6 +126,20 @@ struct RAGTests {
     }
 
     @Test
+    func documentChunkerEmitsAutomationKnowledgeSources() {
+        let chunks = DocumentChunker().automationChunks()
+        let sources = Set(chunks.map(\.source))
+
+        #expect(sources.contains(.automationPattern))
+        #expect(sources.contains(.automationRuleExample))
+        #expect(sources.contains(.automationConditionOperator))
+        #expect(sources.contains(.smartThingsRuleSchema))
+        #expect(chunks.allSatisfy { $0.metadata["operation"] == HomeAutomationOperationKind.automationCreation.rawValue })
+        #expect(chunks.contains { $0.metadata["conditionOperators"]?.contains("between") == true })
+        #expect(chunks.contains { $0.metadata["schemaKeys"]?.contains("specific") == true })
+    }
+
+    @Test
     func documentChunkDecodingDefaultsMissingSemanticContent() throws {
         let data = try #require("""
         {"id":"legacy","content":"legacy content","source":"device","metadata":{}}
@@ -241,6 +255,67 @@ struct RAGTests {
         )
 
         #expect(results.first?.chunk.id == "capability:switchLevel")
+    }
+
+    @Test
+    func complexAutomationRetrievalUsesAutomationChunksAndMetadataFilter() async {
+        let chunks = DocumentChunker().automationChunks() + [
+            DocumentChunk(
+                id: "nl:direct-switch",
+                content: "Natural language example turn on the lamp",
+                semanticContent: "turn on the lamp",
+                source: .nlDataset,
+                metadata: ["exampleId": "direct-switch", "deviceType": "light"]
+            )
+        ]
+        let indexer = KnowledgeIndexer()
+        _ = await indexer.index(chunks: chunks)
+        let retriever = await indexer.makeRetriever()
+
+        let results = await retriever.retrieve(
+            StructuredRetrievalQuery(
+                rawText: "Turn on AC every day at 7 AM if bedroom window is closed and motion is detected",
+                keywordTerms: ["if", "and", "equals", "deviceAttribute", "everyDay"],
+                metadataFilter: MetadataFilter(
+                    requiredTags: ["operation": HomeAutomationOperationKind.automationCreation.rawValue]
+                ),
+                operation: .automationCreation,
+                automationConcepts: ["schedule", "compoundCondition", "deviceAttribute"],
+                conditionOperators: ["and", "equals"],
+                repeatHints: ["everyDay"],
+                strategy: .hybrid(alpha: 0.35),
+                topK: 4
+            )
+        )
+        let sources = Set(results.map(\.chunk.source))
+
+        #expect(!results.isEmpty)
+        #expect(!sources.contains(.nlDataset))
+        #expect(sources.contains(.automationRuleExample) || sources.contains(.automationConditionOperator))
+    }
+
+    @Test
+    func directCommandRAGFilteringIsUnchangedByAutomationChunks() async {
+        let chunks = [
+            DocumentChunk(
+                id: "nl:lamp-power",
+                content: "Natural language example turn on the living room lamp",
+                semanticContent: "turn on the living room lamp",
+                source: .nlDataset,
+                metadata: ["exampleId": "lamp-power", "deviceType": "light", "capability": "switch", "command": "on"]
+            )
+        ] + DocumentChunker().automationChunks()
+        let indexer = KnowledgeIndexer()
+        _ = await indexer.index(chunks: chunks)
+        let retriever = await indexer.makeRetriever()
+
+        let results = await retriever.retrieve(
+            "turn on the living room lamp",
+            topK: 1,
+            filter: MetadataFilter(source: .nlDataset)
+        )
+
+        #expect(results.first?.chunk.id == "nl:lamp-power")
     }
 
     @Test
@@ -453,22 +528,33 @@ struct RAGTests {
             knowledgeBaseSchemaVersion: "1.0",
             bixbyCommandCount: 200,
             datasetCommandCount: 500,
+            automationKnowledgeCount: 10,
             deviceCount: 20
         )
         let v2 = RAGIndexVersion.compute(
             knowledgeBaseSchemaVersion: "1.0",
             bixbyCommandCount: 200,
             datasetCommandCount: 500,
+            automationKnowledgeCount: 10,
             deviceCount: 21  // one more device
         )
         let v3 = RAGIndexVersion.compute(
             knowledgeBaseSchemaVersion: "2.0",  // schema bump
             bixbyCommandCount: 200,
             datasetCommandCount: 500,
+            automationKnowledgeCount: 10,
+            deviceCount: 20
+        )
+        let v4 = RAGIndexVersion.compute(
+            knowledgeBaseSchemaVersion: "1.0",
+            bixbyCommandCount: 200,
+            datasetCommandCount: 500,
+            automationKnowledgeCount: 11,
             deviceCount: 20
         )
         #expect(v1 != v2)
         #expect(v1 != v3)
+        #expect(v1 != v4)
         #expect(v2 != v3)
         #expect(v1.contains(RAGIndexVersion.semanticIndexVersion))
     }

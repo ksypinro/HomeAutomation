@@ -4,11 +4,17 @@ import Foundation
 public struct ResolutionContextPatch: Sendable {
     public let agentID: AgentID
     public let updates: [String: AnySendableValue]
+    public let scopedUpdates: [ContextScope: [String: AnySendableValue]]
     public let timestamp: Date
 
-    public init(agentID: AgentID, updates: [String: AnySendableValue] = [:]) {
+    public init(
+        agentID: AgentID,
+        updates: [String: AnySendableValue] = [:],
+        scopedUpdates: [ContextScope: [String: AnySendableValue]] = [:]
+    ) {
         self.agentID = agentID
         self.updates = updates
+        self.scopedUpdates = scopedUpdates
         self.timestamp = Date()
     }
 }

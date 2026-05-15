@@ -60,7 +60,14 @@ public struct OrchestratorPolicyEngine: Sendable {
 
     /// Defines which agents are critical safety validators that must never be skipped.
     public func isMandatorySafetyGate(_ agentID: AgentID) -> Bool {
-        [.safetyValidation, .parameterValidation, .confirmationPolicy, .executionPlanning, .mockExecution].contains(agentID)
+        [
+            .automationValidation,
+            .safetyValidation,
+            .parameterValidation,
+            .confirmationPolicy,
+            .executionPlanning,
+            .mockExecution
+        ].contains(agentID)
     }
 
     public func failClosedResult(for agentID: AgentID, reason: String) -> AgentRunResult {
@@ -78,6 +85,8 @@ public struct OrchestratorPolicyEngine: Sendable {
         logger.warning("Failing closed for mandatory gate: \(agentID.rawValue, privacy: .public) due to: \(reason, privacy: .public)")
         let resolution: HomeCommandResolution
         switch agentID {
+        case .automationValidation:
+            resolution = .unsupported("Automation validation blocked: \(reason)")
         case .safetyValidation:
             if let draft = context.draft {
                 resolution = .requiresConfirmation(draft)

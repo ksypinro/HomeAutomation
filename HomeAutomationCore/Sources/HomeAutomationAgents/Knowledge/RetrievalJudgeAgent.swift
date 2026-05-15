@@ -150,6 +150,11 @@ public struct RetrievalJudgeAgent: HomeAgent {
                 source: source,
                 requiredTagValues: hints.deviceTypes.isEmpty ? [:] : ["deviceType": hints.deviceTypes]
             )
+        case .automationPattern, .automationRuleExample, .automationConditionOperator, .smartThingsRuleSchema:
+            return MetadataFilter(
+                source: source,
+                requiredTags: ["operation": HomeAutomationOperationKind.automationCreation.rawValue]
+            )
         }
     }
 
@@ -208,6 +213,19 @@ public struct RetrievalJudgeAgent: HomeAgent {
             }
         case .device:
             return []
+        case .automationPattern, .automationRuleExample, .automationConditionOperator, .smartThingsRuleSchema:
+            return chunks.map { scored in
+                KnowledgeSnippet(
+                    sourceID: scored.chunk.id,
+                    content: scored.chunk.content,
+                    score: Double(scored.score),
+                    metadata: [
+                        "source": "automationRAG",
+                        "chunkSource": scored.chunk.source.rawValue,
+                        "retrievalJudge": "true"
+                    ]
+                )
+            }
         }
     }
 

@@ -425,6 +425,15 @@ public extension MockHomeDeviceRegistry {
             riskLevel: .medium
         ),
         makeDevice(
+            id: "bedroom_temperature_sensor",
+            displayName: "Temperature Sensor",
+            deviceType: "temperatureSensor",
+            room: "bedroom",
+            capabilities: ["temperatureMeasurement", "battery"],
+            currentState: ["temperature": "25", "battery": "93"],
+            metadata: ["aliases": "temperature sensor,temp sensor,room temperature sensor"]
+        ),
+        makeDevice(
             id: "hallway_thermostat",
             displayName: "Hallway Thermostat",
             deviceType: "thermostat",

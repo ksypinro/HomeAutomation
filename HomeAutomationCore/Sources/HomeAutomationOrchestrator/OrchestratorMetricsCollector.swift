@@ -96,11 +96,80 @@ public struct OrchestratorCandidateMetrics: Sendable, Codable, Equatable {
     }
 }
 
+public struct OrchestratorAutomationMetrics: Sendable, Codable, Equatable {
+    public var operation: String?
+    public var runtimeMode: String?
+    public var graphID: String?
+    public var automationActionCount: Int
+    public var automationConditionCount: Int
+    public var automationCompilerTarget: String?
+    public var automationCompilationSupported: Bool
+    public var automationRequiresConfirmation: Bool
+    public var automationBackendStatus: String?
+    public var automationBackendRuleID: String?
+    public var automationBackendLocationID: String?
+    public var graphNodeStatuses: [String: String]
+    public var selectedAgents: [String: String]
+
+    public init(
+        operation: String? = nil,
+        runtimeMode: String? = nil,
+        graphID: String? = nil,
+        automationActionCount: Int = 0,
+        automationConditionCount: Int = 0,
+        automationCompilerTarget: String? = nil,
+        automationCompilationSupported: Bool = false,
+        automationRequiresConfirmation: Bool = false,
+        automationBackendStatus: String? = nil,
+        automationBackendRuleID: String? = nil,
+        automationBackendLocationID: String? = nil,
+        graphNodeStatuses: [String: String] = [:],
+        selectedAgents: [String: String] = [:]
+    ) {
+        self.operation = operation
+        self.runtimeMode = runtimeMode
+        self.graphID = graphID
+        self.automationActionCount = automationActionCount
+        self.automationConditionCount = automationConditionCount
+        self.automationCompilerTarget = automationCompilerTarget
+        self.automationCompilationSupported = automationCompilationSupported
+        self.automationRequiresConfirmation = automationRequiresConfirmation
+        self.automationBackendStatus = automationBackendStatus
+        self.automationBackendRuleID = automationBackendRuleID
+        self.automationBackendLocationID = automationBackendLocationID
+        self.graphNodeStatuses = graphNodeStatuses
+        self.selectedAgents = selectedAgents
+    }
+}
+
+public struct RetrievalSourceQualityMetrics: Sendable, Codable, Equatable {
+    public var returnedCount: Int
+    public var acceptedCount: Int
+    public var averageScore: Double
+    public var maxScore: Double
+    public var lowConfidenceCount: Int
+
+    public init(
+        returnedCount: Int = 0,
+        acceptedCount: Int = 0,
+        averageScore: Double = 0,
+        maxScore: Double = 0,
+        lowConfidenceCount: Int = 0
+    ) {
+        self.returnedCount = returnedCount
+        self.acceptedCount = acceptedCount
+        self.averageScore = averageScore
+        self.maxScore = maxScore
+        self.lowConfidenceCount = lowConfidenceCount
+    }
+}
+
 public struct RetrievalQualityMetrics: Sendable, Codable, Equatable {
     public var strategyNames: [String]
     public var averageScore: Double
     public var maxScore: Double
     public var lowScoreSourceCount: Int
+    public var sourceMetrics: [String: RetrievalSourceQualityMetrics]
     public var judgeInvoked: Bool
     public var judgeSkipped: Bool
     public var retryCount: Int
@@ -111,6 +180,7 @@ public struct RetrievalQualityMetrics: Sendable, Codable, Equatable {
         averageScore: Double = 0,
         maxScore: Double = 0,
         lowScoreSourceCount: Int = 0,
+        sourceMetrics: [String: RetrievalSourceQualityMetrics] = [:],
         judgeInvoked: Bool = false,
         judgeSkipped: Bool = false,
         retryCount: Int = 0,
@@ -120,6 +190,7 @@ public struct RetrievalQualityMetrics: Sendable, Codable, Equatable {
         self.averageScore = averageScore
         self.maxScore = maxScore
         self.lowScoreSourceCount = lowScoreSourceCount
+        self.sourceMetrics = sourceMetrics
         self.judgeInvoked = judgeInvoked
         self.judgeSkipped = judgeSkipped
         self.retryCount = retryCount
@@ -184,9 +255,11 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var stageDurations: [String: Double]
     public var agentStatuses: [String: String]
     public var agentConfidence: [String: Double]
+    public var graphRun: GraphRunMetrics?
     public var contextMetrics: OrchestratorContextMetrics
     public var safetyMetrics: OrchestratorSafetyMetrics
     public var candidateMetrics: OrchestratorCandidateMetrics
+    public var automationMetrics: OrchestratorAutomationMetrics
     public var foundationModelUsage: FoundationModelUsageMetrics
     public var retrievalQuality: RetrievalQualityMetrics
 
@@ -200,9 +273,11 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.stageDurations = [:]
         self.agentStatuses = [:]
         self.agentConfidence = [:]
+        self.graphRun = nil
         self.contextMetrics = OrchestratorContextMetrics()
         self.safetyMetrics = OrchestratorSafetyMetrics()
         self.candidateMetrics = OrchestratorCandidateMetrics()
+        self.automationMetrics = OrchestratorAutomationMetrics()
         self.foundationModelUsage = FoundationModelUsageMetrics()
         self.retrievalQuality = RetrievalQualityMetrics()
     }
@@ -263,6 +338,102 @@ public struct OrchestratorMetrics: Sendable, Codable {
         captureFoundationModelFields(context: context)
     }
 
+    public mutating func captureAutomationFields(
+        operation: HomeOperationDetectionResult,
+        runtimeMode: OrchestratorRuntimeMode,
+        graph: OrchestrationGraph,
+        result: HomeAutomationResolverResult,
+        graphRun: GraphRunMetrics? = nil
+    ) {
+        let plan = Self.automationPlan(from: result.resolution)
+        let statuses = graphRun?.nodeStatuses ?? Self.automationGraphStatuses(graph: graph, result: result)
+        let selectedAgents = graphRun?.selectedAgents ?? graph.nodes.reduce(into: [String: String]()) { partial, node in
+            partial[node.id] = node.id
+        }
+
+        automationMetrics = OrchestratorAutomationMetrics(
+            operation: operation.operation.rawValue,
+            runtimeMode: runtimeMode.rawValue,
+            graphID: graph.id,
+            automationActionCount: plan?.resolvedActions.count ?? 0,
+            automationConditionCount: plan?.ruleDraft.condition.map(Self.conditionCount) ?? 0,
+            automationCompilerTarget: "SmartThingsRulesV1",
+            automationCompilationSupported: plan?.smartThingsRuleJSON != nil,
+            automationRequiresConfirmation: plan?.requiresConfirmation ?? {
+                if case .automationRequiresConfirmation = result.resolution { return true }
+                return false
+            }(),
+            automationBackendStatus: plan?.backendResponse?.status.rawValue,
+            automationBackendRuleID: plan?.backendResponse?.ruleID,
+            automationBackendLocationID: plan?.backendResponse?.locationID,
+            graphNodeStatuses: statuses.mapValues(\.rawValue),
+            selectedAgents: selectedAgents
+        )
+        self.graphRun = graphRun ?? GraphRunMetrics(
+            graphID: graph.id,
+            goal: graph.goal,
+            finishedAt: finishedAt ?? Date(),
+            nodeStatuses: statuses,
+            selectedAgents: selectedAgents,
+            skippedNodeIDs: statuses.filter { $0.value == .skipped }.map(\.key).sorted(),
+            nodeDurations: [:]
+        )
+    }
+
+    private static func automationPlan(from resolution: HomeCommandResolution) -> HomeAutomationCreationPlan? {
+        switch resolution {
+        case .automationDrafted(let plan), .automationRequiresConfirmation(let plan):
+            return plan
+        case .readyToExecute, .executed, .requiresConfirmation, .needsClarification, .unsupported:
+            return nil
+        }
+    }
+
+    private static func automationGraphStatuses(
+        graph: OrchestrationGraph,
+        result: HomeAutomationResolverResult
+    ) -> [String: GraphNodeRunStatus] {
+        var statuses = graph.nodes.reduce(into: [String: GraphNodeRunStatus]()) { partial, node in
+            partial[node.id] = .skipped
+        }
+        statuses[AgentID.operationDetection.rawValue] = .completed
+
+        switch result.resolution {
+        case .automationDrafted(let plan), .automationRequiresConfirmation(let plan):
+            statuses[AgentID.automationDraft.rawValue] = .completed
+            statuses[AgentID.automationConditionOperandResolution.rawValue] = .completed
+            statuses[AgentID.automationActionResolution.rawValue] = .completed
+            statuses[AgentID.automationValidation.rawValue] = .completed
+            statuses[AgentID.smartThingsCompilation.rawValue] = plan.smartThingsRuleJSON == nil ? .skipped : .completed
+            statuses[AgentID.smartThingsRuleCreation.rawValue] = plan.backendResponse?.status == .created ? .completed : .skipped
+            statuses[AgentID.automationResultAssembly.rawValue] = .completed
+        case .needsClarification:
+            statuses[AgentID.automationDraft.rawValue] = .completed
+            statuses[AgentID.automationConditionOperandResolution.rawValue] = .completed
+            statuses[AgentID.automationActionResolution.rawValue] = result.aggregation.needsClarification ? .failed : .completed
+            statuses[AgentID.automationValidation.rawValue] = .failed
+        case .unsupported:
+            statuses[AgentID.automationDraft.rawValue] = .failed
+        case .readyToExecute, .executed, .requiresConfirmation:
+            break
+        }
+
+        return statuses
+    }
+
+    private static func conditionCount(_ condition: HomeAutomationCondition) -> Int {
+        switch condition {
+        case .and(let children), .or(let children):
+            return children.map(conditionCount).reduce(1, +)
+        case .not(let child):
+            return 1 + conditionCount(child)
+        case .changes(let child):
+            return 1 + conditionCount(child)
+        case .comparison:
+            return 1
+        }
+    }
+
     private static func confidenceByAgent(context: ResolutionContext) -> [String: Double] {
         var values: [String: Double] = [:]
         if let language = context.language ?? context.resolutionState?.language {
@@ -304,11 +475,29 @@ public struct OrchestratorMetrics: Sendable, Codable {
                 partial.append(strategy)
             }
         }
+        let sourceMetrics = Dictionary(grouping: reports, by: \.source).mapValues { sourceReports in
+            let returnedCount = sourceReports.map(\.returnedCount).reduce(0, +)
+            let acceptedCount = sourceReports.map(\.acceptedCount).reduce(0, +)
+            let weightedScoreTotal = sourceReports.reduce(0) { total, report in
+                total + (report.averageScore * Double(report.returnedCount))
+            }
+            let averageScore = returnedCount == 0 ? 0 : weightedScoreTotal / Double(returnedCount)
+            return RetrievalSourceQualityMetrics(
+                returnedCount: returnedCount,
+                acceptedCount: acceptedCount,
+                averageScore: averageScore,
+                maxScore: sourceReports.map(\.maxScore).max() ?? 0,
+                lowConfidenceCount: sourceReports.filter {
+                    $0.returnedCount == 0 || $0.maxScore < $0.minScore || $0.averageScore < 0.01
+                }.count
+            )
+        }
         return RetrievalQualityMetrics(
             strategyNames: strategies,
             averageScore: average,
             maxScore: reports.map(\.maxScore).max() ?? 0,
             lowScoreSourceCount: reports.filter { $0.returnedCount == 0 || $0.maxScore < $0.minScore || $0.averageScore < 0.01 }.count,
+            sourceMetrics: sourceMetrics,
             judgeInvoked: agentStatuses[AgentID.retrievalJudge.rawValue] != nil,
             judgeSkipped: reports.contains { $0.agentID == AgentID.retrievalJudge.rawValue && $0.strategy.contains("skipped") },
             retryCount: reports.map(\.retryCount).reduce(0, +),

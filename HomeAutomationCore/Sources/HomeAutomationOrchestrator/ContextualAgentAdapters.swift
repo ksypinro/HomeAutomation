@@ -14,6 +14,34 @@ private struct AgentContextInputError: LocalizedError, Sendable {
     }
 }
 
+private final class AgentRegistryBox: @unchecked Sendable {
+    var registry: AgentRegistry?
+}
+
+public struct OperationDetectionAgent: HomeAgent {
+    public typealias Input = String
+    public typealias Output = HomeOperationDetectionResult
+
+    public let id = AgentID.operationDetection
+    public let capabilities: Set<AgentCapability> = [.operationDetection]
+    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    private let detector: HomeOperationDetectionService
+
+    public init(detector: HomeOperationDetectionService = HomeOperationDetectionService()) {
+        self.detector = detector
+    }
+
+    public func run(
+        _ input: String,
+        context: ResolutionContext
+    ) async throws -> HomeOperationDetectionResult {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? context.request.text
+            : input
+        return detector.detect(text)
+    }
+}
+
 /// A generic wrapper that adapts an agent's specific input/output types into the unified `ResolutionContext`.
 ///
 /// This allows the orchestrator to treat all agents uniformly (`AnyHomeAgent`), while still
@@ -26,6 +54,7 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
 
     public var id: AgentID { agent.id }
     public var capabilities: Set<AgentCapability> { agent.capabilities }
+    public var manifest: AgentManifest { agent.manifest }
     public var timeoutNanoseconds: UInt64 { agent.timeoutNanoseconds }
 
     public init(
@@ -74,7 +103,8 @@ public enum DefaultAgentRegistryFactory {
         contextRetriever: ContextRetriever? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
-        }
+        },
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) -> AgentRegistry {
         let candidateResolver = HomeCandidateResolverSupport(
             foundationModelAvailability: foundationModelAvailability
@@ -93,8 +123,14 @@ public enum DefaultAgentRegistryFactory {
         )
         let bixbyMapper = AgentBixbyFallbackMapper()
         let executor = AgentPlanExecutor(registry: registry)
+        let registryBox = AgentRegistryBox()
 
         let agents: [any AnyHomeAgent] = [
+            ContextualHomeAgent(
+                agent: OperationDetectionAgent(),
+                makeInput: { $0.request.text },
+                makePatch: { output, _ in patch(.operationDetection, [ResolutionContextPatchKey.operation: output]) }
+            ),
             ContextualHomeAgent(
                 agent: LanguageAgent(
                     worker: LanguageAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
@@ -142,6 +178,138 @@ public enum DefaultAgentRegistryFactory {
                 ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk: output]) }
+            ),
+            ContextualHomeAgent(
+                agent: AutomationDraftExtractionAgent(
+                    draftAgent: AutomationDraftAgent(
+                        worker: AutomationDraftWorkerSession(
+                            foundationModelAvailability: foundationModelAvailability,
+                            contextRetriever: contextRetriever
+                        )
+                    )
+                ),
+                makeInput: { context in
+                    AutomationDraftInput(
+                        text: context.request.text,
+                        operation: context.operation ?? HomeOperationDetectionService().detect(context.request.text)
+                    )
+                },
+                makePatch: { output, _ in
+                    ResolutionContextPatch(
+                        agentID: .automationDraft,
+                        updates: [
+                            ResolutionContextPatchKey.retrievalReports: AnySendableValue(output.retrievalReports)
+                        ],
+                        scopedUpdates: [
+                            .root: [
+                                ScopedContextKeys.automationRuleDraft().name: AnySendableValue(output.ruleDraft)
+                            ]
+                        ]
+                    )
+                }
+            ),
+            ContextualHomeAgent(
+                agent: AutomationConditionOperandResolutionAgent(
+                    resolver: AutomationConditionOperandResolver(registry: registry)
+                ),
+                makeInput: { context in
+                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
+                        throw AgentContextInputError(agentID: .automationConditionOperandResolution, message: "Missing automation draft")
+                    }
+                    return draft
+                },
+                makePatch: { output, _ in
+                    automationConditionPatch(output)
+                }
+            ),
+            ContextualHomeAgent(
+                agent: AutomationActionResolutionAgent(
+                    resolverProvider: {
+                        guard let agentRegistry = registryBox.registry else {
+                            return nil
+                        }
+                        return AutomationActionResolver(
+                            registry: agentRegistry,
+                            planner: AgentPlanner(
+                                policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+                            ),
+                            graphPlanner: GraphPlanner(
+                                policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+                            ),
+                            policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability),
+                            runtimeMode: .graph
+                        )
+                    }
+                ),
+                makeInput: { context in
+                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
+                        throw AgentContextInputError(agentID: .automationActionResolution, message: "Missing automation draft")
+                    }
+                    return draft.actionDescriptions
+                },
+                makePatch: automationActionPatch
+            ),
+            ContextualHomeAgent(
+                agent: AutomationValidationAgent(),
+                makeInput: { context in
+                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
+                        throw AgentContextInputError(agentID: .automationValidation, message: "Missing automation draft")
+                    }
+                    let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate)
+                    return AutomationValidationInput(
+                        ruleDraft: draft,
+                        resolvedActions: aggregate?.resolvedActions ?? []
+                    )
+                },
+                makePatch: { output, _ in
+                    scopedPatch(
+                        .automationValidation,
+                        scope: .root,
+                        [
+                            ScopedContextKeys.validation().name: output
+                        ]
+                    )
+                }
+            ),
+            ContextualHomeAgent(
+                agent: SmartThingsCompilationAgent(),
+                makeInput: { context in
+                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
+                        throw AgentContextInputError(agentID: .smartThingsCompilation, message: "Missing automation draft")
+                    }
+                    guard let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate) else {
+                        throw AgentContextInputError(agentID: .smartThingsCompilation, message: "Missing resolved automation actions")
+                    }
+                    return SmartThingsCompilationInput(
+                        ruleDraft: draft,
+                        resolvedActions: aggregate.resolvedActions,
+                        requiresConfirmation: aggregate.requiresConfirmation,
+                        validation: context.scopedValue(for: ScopedContextKeys.validation())
+                    )
+                },
+                makePatch: smartThingsCompilationPatch
+            ),
+            ContextualHomeAgent(
+                agent: SmartThingsRuleCreationAgent(creator: smartThingsRuleCreator),
+                makeInput: { context in
+                    guard let compilation = context.scopedValue(for: AutomationRuntimeContextKeys.smartThingsCompilation) else {
+                        throw AgentContextInputError(agentID: .smartThingsRuleCreation, message: "Missing SmartThings compilation output")
+                    }
+                    return SmartThingsRuleCreationInput(
+                        plan: compilation.plan,
+                        document: compilation.document,
+                        validation: context.scopedValue(for: ScopedContextKeys.validation()),
+                        options: context.request.automationCreationOptions
+                    )
+                },
+                makePatch: smartThingsRuleCreationPatch
+            ),
+            ContextualHomeAgent(
+                agent: AutomationResultAssemblyAgent(),
+                makeInput: { $0 },
+                makePatch: { output, _ in
+                    patch(.automationResultAssembly, [ResolutionContextPatchKey.resolverResult: output])
+                }
             ),
             ContextualHomeAgent(
                 agent: CapabilityKnowledgeAgent(contextRetriever: contextRetriever),
@@ -394,7 +562,9 @@ public enum DefaultAgentRegistryFactory {
             )
         ]
 
-        return AgentRegistry(agents: agents)
+        let finalRegistry = AgentRegistry(agents: agents)
+        registryBox.registry = finalRegistry
+        return finalRegistry
     }
 
     private static func patch(_ agentID: AgentID, _ values: [String: any Sendable]) -> ResolutionContextPatch {
@@ -413,6 +583,117 @@ public enum DefaultAgentRegistryFactory {
             [
                 ResolutionContextPatchKey.knowledgeSnippets: output.snippets,
                 ResolutionContextPatchKey.retrievalReports: output.reports
+            ]
+        )
+    }
+
+    private static func scopedPatch(
+        _ agentID: AgentID,
+        scope: ContextScope,
+        _ values: [String: any Sendable]
+    ) -> ResolutionContextPatch {
+        ResolutionContextPatch(
+            agentID: agentID,
+            scopedUpdates: [
+                scope: values.mapValues { AnySendableValue($0) }
+            ]
+        )
+    }
+
+    private static func automationConditionPatch(
+        _ output: AutomationConditionResolutionOutput
+    ) -> ResolutionContextPatch {
+        var scopedUpdates: [ContextScope: [String: AnySendableValue]] = [
+            .root: [
+                ScopedContextKeys.automationRuleDraft().name: AnySendableValue(output.ruleDraft),
+                AutomationRuntimeContextKeys.conditionOperandResolutionRecords.name: AnySendableValue(output.records)
+            ]
+        ]
+
+        for record in output.records {
+            let scope = ContextScope.condition(record.id)
+            scopedUpdates[scope] = [
+                AutomationRuntimeContextKeys.conditionOperandResolution(in: scope).name: AnySendableValue(record)
+            ]
+        }
+
+        return ResolutionContextPatch(
+            agentID: .automationConditionOperandResolution,
+            scopedUpdates: scopedUpdates
+        )
+    }
+
+    private static func automationActionPatch(
+        _ output: AutomationActionResolutionAggregate,
+        _ context: ResolutionContext
+    ) -> ResolutionContextPatch {
+        var scopedUpdates: [ContextScope: [String: AnySendableValue]] = [
+            .root: [
+                AutomationRuntimeContextKeys.actionResolutionAggregate.name: AnySendableValue(output),
+                ResolutionContextPatchKey.automationResolvedActions: AnySendableValue(output.resolvedActions)
+            ]
+        ]
+
+        for (index, result) in output.results.enumerated() {
+            let scope = ContextScope.action("a\(index + 1)")
+            var values: [String: AnySendableValue] = [
+                "resolution": AnySendableValue(result.resolution)
+            ]
+            if let draft = result.draft {
+                values[ScopedContextKeys.commandDraft(in: scope).name] = AnySendableValue(draft)
+            }
+            if let resolvedAction = result.resolvedAction {
+                values[ScopedContextKeys.resolvedAction(in: scope).name] = AnySendableValue(resolvedAction)
+            }
+            scopedUpdates[scope] = values
+        }
+
+        return ResolutionContextPatch(
+            agentID: .automationActionResolution,
+            scopedUpdates: scopedUpdates
+        )
+    }
+
+    private static func smartThingsCompilationPatch(
+        _ output: SmartThingsCompilationOutput,
+        _ context: ResolutionContext
+    ) -> ResolutionContextPatch {
+        var backendValues: [String: AnySendableValue] = [
+            AutomationRuntimeContextKeys.smartThingsCompilation.name: AnySendableValue(output)
+        ]
+        if let document = output.document {
+            backendValues[ScopedContextKeys.smartThingsRule().name] = AnySendableValue(document)
+        }
+
+        return ResolutionContextPatch(
+            agentID: .smartThingsCompilation,
+            scopedUpdates: [
+                .root: [
+                    ScopedContextKeys.automationPlan().name: AnySendableValue(output.plan)
+                ],
+                .backend("smartthings"): backendValues
+            ]
+        )
+    }
+
+    private static func smartThingsRuleCreationPatch(
+        _ output: SmartThingsRuleCreationOutput,
+        _ context: ResolutionContext
+    ) -> ResolutionContextPatch {
+        var backendValues: [String: AnySendableValue] = [
+            AutomationRuntimeContextKeys.smartThingsRuleCreation.name: AnySendableValue(output)
+        ]
+        if let receipt = output.receipt {
+            backendValues[ScopedContextKeys.smartThingsRuleCreation().name] = AnySendableValue(receipt)
+        }
+
+        return ResolutionContextPatch(
+            agentID: .smartThingsRuleCreation,
+            scopedUpdates: [
+                .root: [
+                    ScopedContextKeys.automationPlan().name: AnySendableValue(output.plan)
+                ],
+                .backend("smartthings"): backendValues
             ]
         )
     }
@@ -492,6 +773,8 @@ public enum DefaultAgentRegistryFactory {
         let families = context.intent?.topFamilies ?? context.resolutionState?.intent.topFamilies ?? []
         for family in families {
             switch family {
+            case .createAutomation:
+                break
             case .power:
                 values.insert("switch")
             case .temperature:

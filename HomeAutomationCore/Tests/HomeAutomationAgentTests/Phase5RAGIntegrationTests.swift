@@ -208,6 +208,63 @@ struct Phase5RAGIntegrationTests {
     }
 
     @Test
+    func retrievalJudgeCanReportAutomationChunkSources() async throws {
+        let retriever = await Self.retriever(chunks: DocumentChunker().smartThingsRuleSchemaChunks())
+        var context = Self.context(text: "SmartThings every specific command schema")
+        context.retrievalReports = [
+            KnowledgeRetrievalReport(
+                agentID: AgentID.automationDraft.rawValue,
+                source: KnowledgeSource.smartThingsRuleSchema.rawValue,
+                strategy: "hybrid",
+                query: "SmartThings every specific command schema",
+                returnedCount: 0,
+                acceptedCount: 0,
+                averageScore: 0,
+                maxScore: 0,
+                minScore: 0.01
+            )
+        ]
+        let agent = RetrievalJudgeAgent(contextRetriever: retriever, foundationModelAvailability: { true })
+
+        let output = try await agent.run(
+            RetrievalJudgeInput(text: "SmartThings every specific command schema"),
+            context: context
+        )
+
+        #expect(output.snippets.first?.metadata["source"] == "automationRAG")
+        #expect(output.snippets.first?.metadata["chunkSource"] == KnowledgeSource.smartThingsRuleSchema.rawValue)
+        #expect(output.reports.first?.source == KnowledgeSource.smartThingsRuleSchema.rawValue)
+    }
+
+    @Test
+    func automationDraftReportsSplitAutomationRAGSources() async throws {
+        let retriever = await Self.retriever(chunks: DocumentChunker().automationChunks())
+        let worker = AutomationDraftWorkerSession(
+            foundationModelAvailability: { false },
+            contextRetriever: retriever
+        )
+        let agent = AutomationDraftAgent(worker: worker)
+        let input = AutomationDraftInput(
+            text: "Turn on AC every day at 7 AM if bedroom window is closed and motion is detected",
+            operation: HomeOperationDetectionResult(
+                domain: .homeAutomation,
+                operation: .automationCreation,
+                confidence: 0.98,
+                reason: "schedule automation"
+            )
+        )
+
+        let output = try await agent.runWithDiagnostics(input, context: Self.context(text: input.text))
+        let sources = Set(output.retrievalReports.map(\.source))
+
+        #expect(output.draft.actionDescriptions == ["Turn on AC"])
+        #expect(sources.contains(KnowledgeSource.automationConditionOperator.rawValue))
+        #expect(sources.contains(KnowledgeSource.smartThingsRuleSchema.rawValue))
+        #expect(!sources.contains(KnowledgeSource.nlDataset.rawValue))
+        #expect(output.retrievalReports.allSatisfy { $0.filterHints["subproblem"]?.isEmpty == false })
+    }
+
+    @Test
     func nluAgentPrependsRAGFewShotExamples() async throws {
         let example = try #require(HomeAutomationKnowledgeBase.generatedDatasetCommands().first)
         let retriever = await Self.retriever(chunks: [

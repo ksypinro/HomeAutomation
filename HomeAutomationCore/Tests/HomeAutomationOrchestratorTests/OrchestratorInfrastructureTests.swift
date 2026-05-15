@@ -68,10 +68,102 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func graphPlannerExposesAutomationCreationGraph() {
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { false })
+        let planner = GraphPlanner(policy: policy)
+        let context = ResolutionContext(
+            request: CommandRequest(text: "Turn on AC everyday at 7 AM", executeLowRiskCommands: false)
+        )
+
+        let plan = planner.plan(for: context.request.text, context: context, operation: .automationCreation)
+        let graph = plan.graph
+
+        #expect(graph.id == "automation-creation-graph")
+        #expect(graph.goal == .automationCreation)
+        #expect(GraphValidator().validate(graph).isEmpty)
+        #expect(graph.nodes.map(\.id) == [
+            AgentID.operationDetection.rawValue,
+            AgentID.automationDraft.rawValue,
+            AgentID.automationConditionOperandResolution.rawValue,
+            AgentID.automationActionResolution.rawValue,
+            AgentID.automationValidation.rawValue,
+            AgentID.smartThingsCompilation.rawValue,
+            AgentID.smartThingsRuleCreation.rawValue,
+            AgentID.automationResultAssembly.rawValue
+        ])
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)))
+        #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationActionResolution.rawValue)))
+    }
+
+    @Test
+    func runtimeConfigurationDefaultsToGraphAndCanRollbackToLegacy() {
+        let defaultConfiguration = OrchestratorRuntimeConfiguration.resolving(environment: [:])
+        let rollbackConfiguration = OrchestratorRuntimeConfiguration.resolving(
+            environment: [
+                OrchestratorRuntimeConfiguration.environmentVariableName: OrchestratorRuntimeMode.legacy.rawValue
+            ]
+        )
+        let invalidConfiguration = OrchestratorRuntimeConfiguration.resolving(
+            environment: [
+                OrchestratorRuntimeConfiguration.environmentVariableName: "not-a-runtime"
+            ]
+        )
+
+        #expect(defaultConfiguration.runtimeMode == .graph)
+        #expect(rollbackConfiguration.runtimeMode == .legacy)
+        #expect(invalidConfiguration.runtimeMode == .graph)
+    }
+
+    @Test
+    func orchestratorDefaultRuntimeUsesGraph() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        _ = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        let metrics = try #require(await orchestrator.lastMetrics())
+
+        #expect(metrics.graphRun?.graphID == "direct-command-fallback-graph")
+    }
+
+    @Test
+    func legacyRuntimeCanBeExplicitlySelectedAsRollback() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            runtimeMode: .legacy
+        )
+
+        let result = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        let metrics = try #require(await orchestrator.lastMetrics())
+
+        guard case .readyToExecute = result.resolution else {
+            Issue.record("Expected legacy rollback runtime to keep direct commands working.")
+            return
+        }
+        #expect(metrics.graphRun == nil)
+        #expect(metrics.agentStatuses[AgentID.ruleFallback.rawValue] == "success")
+    }
+
+    @Test
     func defaultRegistryContainsAllPhaseThreeAgents() {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
 
         for id in [
+            AgentID.operationDetection,
+            .automationDraft,
+            .automationConditionOperandResolution,
+            .automationActionResolution,
+            .automationValidation,
+            .smartThingsCompilation,
+            .smartThingsRuleCreation,
+            .automationResultAssembly,
             AgentID.language,
             .domain,
             .intentFamily,
@@ -102,6 +194,28 @@ struct OrchestratorInfrastructureTests {
         ] {
             #expect(registry.agent(for: id) != nil)
         }
+    }
+
+    @Test
+    func defaultRegistrySatisfiesAutomationCreationGraph() {
+        let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let graph = GraphPlanner.automationCreationGraph()
+
+        #expect(GraphValidator().validate(graph, registry: registry).isEmpty)
+        for node in graph.nodes {
+            guard case .byID(let id) = node.requirement else {
+                Issue.record("Automation graph should use concrete agent IDs.")
+                continue
+            }
+            let agent = registry.agent(for: id)
+            let manifest = registry.manifest(for: id)
+            #expect(agent != nil)
+            #expect(manifest?.supportedOperations.contains(.automationCreation) == true)
+        }
+        #expect(registry.manifest(for: .automationActionResolution)?.produces.contains(ResolutionContextPatchKey.automationResolvedActions) == true)
+        #expect(registry.manifest(for: .smartThingsCompilation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
+        #expect(registry.manifest(for: .smartThingsRuleCreation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
+        #expect(registry.manifest(for: .automationResultAssembly)?.produces.contains(ResolutionContextPatchKey.resolverResult) == true)
     }
 
 
@@ -139,6 +253,27 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func orchestratorStreamDoesNotDuplicateEventIDs() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        var eventIDs: [String] = []
+
+        for try await update in orchestrator.resolveStream(
+            "Turn on the bedroom lamp",
+            executeLowRiskCommands: false
+        ) {
+            if case .event(let event) = update {
+                eventIDs.append(event.id)
+            }
+        }
+
+        #expect(!eventIDs.isEmpty)
+        #expect(Set(eventIDs).count == eventIDs.count)
+    }
+
+    @Test
     func orchestratorMetricsIncludePhaseSevenEvaluationFields() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
@@ -161,6 +296,27 @@ struct OrchestratorInfrastructureTests {
         #expect(metrics.foundationModelUsage.modelAvailabilityStatus == "unavailable")
         #expect(metrics.foundationModelUsage.modelCallCount == 0)
         #expect(metrics.foundationModelUsage.skippedModelCallCount > 0)
+    }
+
+    @Test
+    func automationMetricsIncludePhaseNineFields() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        _ = try await orchestrator.resolve("Turn on bedroom AC everyday at 7 AM", executeLowRiskCommands: true)
+        let metricsJSON = try #require(await orchestrator.lastMetricsJSON())
+        let metrics = try JSONDecoder().decode(OrchestratorMetrics.self, from: Data(metricsJSON.utf8))
+
+        #expect(metrics.automationMetrics.operation == HomeAutomationOperationKind.automationCreation.rawValue)
+        #expect(metrics.automationMetrics.runtimeMode == OrchestratorRuntimeMode.graph.rawValue)
+        #expect(metrics.automationMetrics.graphID == "automation-creation-graph")
+        #expect(metrics.automationMetrics.automationActionCount == 1)
+        #expect(metrics.automationMetrics.automationCompilerTarget == "SmartThingsRulesV1")
+        #expect(metrics.automationMetrics.automationCompilationSupported)
+        #expect(metrics.automationMetrics.graphNodeStatuses[AgentID.smartThingsCompilation.rawValue] == GraphNodeRunStatus.completed.rawValue)
+        #expect(metrics.graphRun?.graphID == "automation-creation-graph")
     }
 
     @Test
