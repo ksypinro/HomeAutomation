@@ -148,6 +148,8 @@ struct OrchestratorInfrastructureTests {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
 
         for id in [
+            AgentID.operationDetection,
+            .automationDraft,
             AgentID.language,
             .domain,
             .intentFamily,

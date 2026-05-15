@@ -14,6 +14,30 @@ private struct AgentContextInputError: LocalizedError, Sendable {
     }
 }
 
+public struct OperationDetectionAgent: HomeAgent {
+    public typealias Input = String
+    public typealias Output = HomeOperationDetectionResult
+
+    public let id = AgentID.operationDetection
+    public let capabilities: Set<AgentCapability> = [.operationDetection]
+    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    private let detector: HomeOperationDetectionService
+
+    public init(detector: HomeOperationDetectionService = HomeOperationDetectionService()) {
+        self.detector = detector
+    }
+
+    public func run(
+        _ input: String,
+        context: ResolutionContext
+    ) async throws -> HomeOperationDetectionResult {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? context.request.text
+            : input
+        return detector.detect(text)
+    }
+}
+
 /// A generic wrapper that adapts an agent's specific input/output types into the unified `ResolutionContext`.
 ///
 /// This allows the orchestrator to treat all agents uniformly (`AnyHomeAgent`), while still
@@ -97,6 +121,11 @@ public enum DefaultAgentRegistryFactory {
 
         let agents: [any AnyHomeAgent] = [
             ContextualHomeAgent(
+                agent: OperationDetectionAgent(),
+                makeInput: { $0.request.text },
+                makePatch: { output, _ in patch(.operationDetection, [ResolutionContextPatchKey.operation: output]) }
+            ),
+            ContextualHomeAgent(
                 agent: LanguageAgent(
                     worker: LanguageAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
                     contextRetriever: contextRetriever
@@ -154,7 +183,7 @@ public enum DefaultAgentRegistryFactory {
                 makeInput: { context in
                     AutomationDraftInput(
                         text: context.request.text,
-                        operation: HomeOperationDetectionService().detect(context.request.text)
+                        operation: context.operation ?? HomeOperationDetectionService().detect(context.request.text)
                     )
                 },
                 makePatch: { output, _ in

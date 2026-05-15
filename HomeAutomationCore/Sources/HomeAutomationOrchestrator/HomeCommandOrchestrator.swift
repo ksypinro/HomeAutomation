@@ -207,13 +207,17 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
 
-                let operation = operationDetector.detect(trimmedText)
+                let detectedOperation = operationDetector.detect(trimmedText)
+                let operation = Self.supportedOperation(from: detectedOperation)
                 let operationEvent = OrchestratorPipelineEvent(
                     runID: runID,
                     stage: "operationDetection",
                     agentID: "operationDetection",
                     status: .completed,
-                    detail: "\(operation.operation.rawValue) confidence=\(String(format: "%.2f", operation.confidence))"
+                    detail: Self.operationEventDetail(
+                        detected: detectedOperation,
+                        routed: operation
+                    )
                 )
                 await eventBus.publish(operationEvent)
                 continuation.yield(.event(operationEvent))
@@ -268,7 +272,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         ),
                         hydratedCandidates: [],
                         draft: nil,
-                        resolution: .unsupported("\(operation.operation.rawValue) is not implemented yet.")
+                        resolution: .unsupported(operation.reason)
                     )
                     metrics.finishedAt = Date()
                     metrics.outcome = Self.outcomeName(for: result.resolution)
@@ -482,6 +486,37 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             wasConfirmed: wasConfirmed,
             riskLevel: selectedDevice?.riskLevel ?? result.state.risk.riskLevel
         )
+    }
+
+    private static func supportedOperation(
+        from detected: HomeOperationDetectionResult
+    ) -> HomeOperationDetectionResult {
+        switch detected.operation {
+        case .executeDeviceCommand, .automationCreation, .unsupported:
+            return detected
+        case .automationUpdate,
+             .automationDeletion,
+             .automationQuery,
+             .sceneCreation,
+             .routineExecution:
+            return HomeOperationDetectionResult(
+                domain: detected.domain,
+                operation: .unsupported,
+                confidence: detected.confidence,
+                reason: "\(detected.operation.rawValue) is outside the supported scope. Only automation creation is currently supported."
+            )
+        }
+    }
+
+    private static func operationEventDetail(
+        detected: HomeOperationDetectionResult,
+        routed: HomeOperationDetectionResult
+    ) -> String {
+        let confidence = String(format: "%.2f", routed.confidence)
+        guard detected.operation != routed.operation else {
+            return "\(routed.operation.rawValue) confidence=\(confidence)"
+        }
+        return "\(routed.operation.rawValue) confidence=\(confidence) detected=\(detected.operation.rawValue)"
     }
 
     private static func makeFallbackState(for text: String) -> HomeResolutionState {

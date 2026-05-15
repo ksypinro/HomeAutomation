@@ -3,6 +3,7 @@ import Foundation
 /// String constants used as dictionary keys when agents patch the `ResolutionContext`.
 public enum ResolutionContextPatchKey {
     public static let resolverResult = "resolverResult"
+    public static let operation = "operation"
     public static let language = "language"
     public static let domain = "domain"
     public static let intent = "intent"

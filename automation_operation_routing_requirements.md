@@ -127,7 +127,7 @@ Current routing behavior:
 
 - `.executeDeviceCommand` runs the direct-command pipeline.
 - `.automationCreation` runs `AutomationCreationResolver`.
-- `.automationUpdate`, `.automationDeletion`, `.automationQuery`, `.sceneCreation`, and `.routineExecution` are recognized as operation kinds but currently return unsupported results.
+- `.automationUpdate`, `.automationDeletion`, `.automationQuery`, `.sceneCreation`, and `.routineExecution` are reserved enum cases only. They are out of scope for this plan and must return unsupported results.
 - `.unsupported` returns unsupported.
 
 Important review note: operation detection is currently a deterministic service, not a fully registered graph-executed agent in the default registry. The code has `AgentID.operationDetection`, `AgentCapability.operationDetection`, and manifest support, but the default runtime does not yet execute an `OperationDetectionAgent` node to choose between operation graphs.
@@ -235,9 +235,9 @@ Important review note: automation creation records an automation graph shape for
 | Area | Current status | Review |
 | --- | --- | --- |
 | Operation enum/result | Implemented | Uses `HomeAutomationOperationKind`, not the older planned `HomeAutomationOperationType` name. |
-| Deterministic operation detection | Implemented | Recognizes schedules, trigger words, automation keywords, update/delete/query keywords, and immediate command verbs. |
+| Deterministic operation detection | Implemented | Recognizes schedules, trigger words, automation keywords, and immediate command verbs. Non-creation automation operations are out of scope. |
 | Operation-detection agent | Partial | IDs, capability, and manifest support exist; default registry/runtime does not yet execute a dedicated operation detector agent. |
-| Operation-based routing | Implemented | Orchestrator routes direct commands vs automation creation. Future operations return unsupported. |
+| Operation-based routing | Implemented | Orchestrator routes direct commands vs automation creation. Non-creation automation operations return unsupported. |
 | Graph runtime default | Implemented | Direct command graph is default; legacy rollback remains available. |
 | Automation creation flow | Implemented service path | Functional, but not graph-native yet. |
 | Multiple actions | Partial | Model and sequential resolution exist; parallel/scoped graph fan-out is pending. |
@@ -246,7 +246,7 @@ Important review note: automation creation records an automation graph shape for
 | Schedule parsing | Partial | Daily, interval, and days-of-week parse. SmartThings compilation supports daily and interval only. |
 | Condition operand resolution | Partial | Deterministic resolver exists; agent/RAG-backed candidate resolution is pending. |
 | Action command reuse | Implemented | Embedded actions reuse the direct-command pipeline and do not execute device state changes. |
-| SmartThings compiler | Partial | Supports useful `every`, `if`, comparison, and command JSON. API create/update/delete/query calls are not implemented. |
+| SmartThings compiler | Partial | Supports useful `every`, `if`, comparison, and command JSON. SmartThings Rule creation API persistence is not implemented. |
 | Automation safety | Partial | High-risk commands require confirmation and too-frequent intervals can be blocked. Broader unattended risk policy is pending. |
 | Clarification | Partial | Unresolved actions/operands can ask questions. Ambiguous logical grouping needs explicit clarification support. |
 | Automation RAG | Implemented baseline | Curated automation chunks and gated retrieval exist; optimization and evaluation remain pending. |
@@ -258,18 +258,15 @@ Important review note: automation creation records an automation graph shape for
 
 The system must detect the operation requested by the user before choosing the rest of the pipeline.
 
-Required operations:
+Required operations for this plan:
 
 - `executeDeviceCommand`
 - `automationCreation`
-- `automationUpdate`
-- `automationDeletion`
-- `automationQuery`
-- `sceneCreation`
-- `routineExecution`
 - `unsupported`
 
-Current implementation uses `HomeOperationDetectionService`. The intended architecture should promote this into a graph-capable operation detection agent or a router node that can combine deterministic rules with model/RAG support for ambiguous commands.
+`automationUpdate`, `automationDeletion`, `automationQuery`, `sceneCreation`, and `routineExecution` may remain as reserved enum cases in code, but they are not implementation targets. If a user asks for them, the system should return an explicit unsupported result.
+
+Current implementation uses `HomeOperationDetectionService`. The intended architecture should promote this into a graph-capable operation detection agent or a router node that can combine deterministic rules with model/RAG support for ambiguous automation-creation commands.
 
 Examples:
 
@@ -278,9 +275,9 @@ Examples:
 | `Turn on the TV` | `executeDeviceCommand` |
 | `Turn on AC everyday at 7 AM` | `automationCreation` |
 | `When the door opens, turn on the hallway light` | `automationCreation` |
-| `Delete my morning AC automation` | `automationDeletion` |
-| `Disable the night light rule` | `automationUpdate` |
-| `What automations run at 7 AM?` | `automationQuery` |
+| `Delete my morning AC automation` | `unsupported` |
+| `Disable the night light rule` | `unsupported` |
+| `What automations run at 7 AM?` | `unsupported` |
 
 ### FR-002: Operation-Based Agent Routing
 
@@ -290,7 +287,7 @@ Required behavior:
 
 - `executeDeviceCommand` uses the direct-command graph.
 - `automationCreation` uses the automation creation graph.
-- Future operations use their own graphs or return an explicit unsupported result.
+- Every other operation returns an explicit unsupported result.
 
 Current implementation routes correctly but automation creation is not graph-executed yet.
 
@@ -554,17 +551,17 @@ Intended update:
 4. Implement compiler support for `between` and `changes`.
 5. Add location mode and presence operands only when validation can keep them safe.
 
-### Phase F: SmartThings Backend Integration
+### Phase F: SmartThings Rule Creation Backend
 
 1. Keep `SmartThingsRuleCompiler` isolated behind `HomeAutomationRuleCompiling`.
-2. Add a separate SmartThings Rules client protocol for create/update/delete/query.
+2. Add a separate SmartThings Rules client protocol for creating a rule only.
 3. Do not call the API from the parser or validation layers.
 4. Add dry-run mode that returns JSON only.
 5. Require explicit confirmation before creating high-risk persistent automations.
 
-### Phase G: Future Operation Families
+### Phase G: Explicitly De-Scope Other Automation Operations
 
-Add separate graph plans for:
+Do not implement graph plans for:
 
 - `automationUpdate`
 - `automationDeletion`
@@ -572,7 +569,7 @@ Add separate graph plans for:
 - `sceneCreation`
 - `routineExecution`
 
-Each operation should reuse shared pieces where appropriate, but must own its own graph and result assembly policy.
+The implementation should return clear unsupported results for these requests. This keeps the architecture focused on making automation creation correct, graph-native, and safe before expanding scope.
 
 ### Phase H: RAG Optimization
 
@@ -588,7 +585,7 @@ Each operation should reuse shared pieces where appropriate, but must own its ow
 1. Show operation, runtime, graph ID, action count, condition count, and compilation status in app diagnostics.
 2. Show unsupported compilation reason for parsed-but-not-compiled rules.
 3. Emit graph node statuses for automation creation after graph migration.
-4. Add tests for direct command regression, automation creation, unsupported future operations, and graph migration parity.
+4. Add tests for direct command regression, automation creation, unsupported non-creation operations, and graph migration parity.
 
 ## Test Matrix
 
@@ -597,8 +594,8 @@ Each operation should reuse shared pieces where appropriate, but must own its ow
 - `Turn on the TV` -> `executeDeviceCommand`
 - `Turn on AC everyday at 7 AM` -> `automationCreation`
 - `When the front door opens, turn on hallway light` -> `automationCreation`
-- `Delete morning AC automation` -> `automationDeletion`
-- `List automations` -> `automationQuery`
+- `Delete morning AC automation` -> `unsupported`
+- `List automations` -> `unsupported`
 - empty command -> `unsupported`
 
 ### Automation Drafting

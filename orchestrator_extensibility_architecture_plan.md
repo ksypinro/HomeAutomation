@@ -4,7 +4,7 @@
 
 The orchestrator has already moved from a single fixed phase pipeline toward a graph-capable runtime. Direct commands now default to the graph scheduler, while the legacy phase scheduler remains available as a rollback path.
 
-The next architectural challenge is different: make the orchestrator easy to extend for operation-specific workflows such as automation creation, automation update, automation deletion, automation query, scene creation, and routine execution.
+The next architectural challenge is narrower: make automation creation a first-class graph-native workflow while keeping immediate device commands stable.
 
 Current state in one sentence:
 
@@ -12,7 +12,12 @@ Current state in one sentence:
 Direct command orchestration is graph-default; automation creation is functional but still service-driven rather than fully graph-native.
 ```
 
-The intended direction is to keep the graph scheduler as the shared runtime and move each operation into its own operation graph, selected by an operation router.
+The intended direction is to keep the graph scheduler as the shared runtime and support two runtime paths only:
+
+- immediate device command execution
+- automation creation
+
+Automation update, deletion, query, scene creation, and routine execution are intentionally out of scope for this plan.
 
 ## Current Implementation Baseline
 
@@ -68,7 +73,7 @@ Current behavior:
 
 - `.executeDeviceCommand` -> direct-command graph or legacy scheduler.
 - `.automationCreation` -> `AutomationCreationResolver`.
-- other operation kinds -> unsupported response.
+- other operation kinds -> unsupported response and no graph execution.
 
 Review:
 
@@ -237,7 +242,7 @@ Review:
 
 - Policy now benefits from manifest `safetyRole`, but it is still partly ID-centric.
 - Retry policy is present in manifests, but graph scheduler does not yet use manifest retry policies for node retry.
-- Future operations need operation-specific policy hooks.
+- Automation creation needs operation-specific policy hooks for persistent unattended execution.
 
 ### Metrics
 
@@ -280,7 +285,7 @@ Review:
 - Conditions need scoped operand resolution and ambiguity handling.
 - Policy should read manifests and node metadata first, with ID-based compatibility as a fallback.
 - Outcomes should be operation-neutral internally.
-- Graph metrics should be the source of truth for every operation.
+- Graph metrics should be the source of truth for both supported runtime paths: direct commands and automation creation.
 
 ## Target Architecture
 
@@ -294,17 +299,14 @@ flowchart LR
     B --> C{"Operation"}
     C -->|"executeDeviceCommand"| D["Direct command graph"]
     C -->|"automationCreation"| E["Automation creation graph"]
-    C -->|"automationUpdate"| F["Automation update graph"]
-    C -->|"automationDeletion"| G["Automation deletion graph"]
-    C -->|"automationQuery"| H["Automation query graph"]
     C -->|"unsupported"| I["Unsupported graph"]
 ```
 
-The operation router can start deterministic and later add model/RAG support for ambiguous routing. The graph scheduler should not need changes when a new operation graph is added.
+The operation router can start deterministic and later add model/RAG support for ambiguous automation-creation routing. The graph scheduler should not need changes while automation creation moves from a service path into graph execution.
 
-### Operation Graph Registry
+### Automation-Focused Graph Catalog
 
-Add an operation graph registry that maps operation kinds to graph builders.
+Add a small graph catalog that maps only the supported runtime paths to graph builders.
 
 Target shape:
 
@@ -324,10 +326,10 @@ public struct OperationGraphCatalog: Sendable {
 
 Benefits:
 
-- Adding `automationQuery` does not require editing `GraphScheduler`.
-- Operation-specific graphs live beside their agents.
-- Tests can register fake operation graphs.
+- Direct command, fallback, unsupported, and automation creation graphs live behind one selection API.
+- Tests can register fake automation creation graphs.
 - The catalog becomes the seam between routing and execution.
+- Broader operation catalogs can be added later if the product scope changes, but they are not part of this plan.
 
 ### Manifest-Driven Planning
 
@@ -462,7 +464,7 @@ Keep `OrchestratorPolicyEngine` as a compatibility wrapper until all graph paths
 2. Introduce `OperationGraphCatalog`.
 3. Move direct command, fallback, unsupported, and automation creation graph construction behind providers.
 4. Keep `GraphPlanner` as a compatibility facade.
-5. Add tests proving a fake operation graph can be registered without modifying scheduler internals.
+5. Add tests proving a fake automation creation graph can be registered without modifying scheduler internals.
 
 ### Phase 14: Scoped Context Compatibility Layer
 
@@ -503,13 +505,13 @@ Keep `OrchestratorPolicyEngine` as a compatibility wrapper until all graph paths
 4. Apply manifest retry policies.
 5. Move mandatory gate detection toward manifest/node metadata.
 
-### Phase 18: SmartThings Operation Backends
+### Phase 18: SmartThings Rule Creation Backend
 
 1. Keep compilation isolated behind `HomeAutomationRuleCompiling`.
-2. Add a Rules API client protocol for create/update/delete/query.
+2. Add a Rules API client protocol for creating a SmartThings rule only.
 3. Add dry-run and confirmation-required modes.
-4. Add operation graphs for update, deletion, and query.
-5. Never let backend API writes occur before deterministic validation and user confirmation.
+4. Add API execution only behind automation validation and user confirmation.
+5. Keep update, deletion, query, scene, and routine operations unsupported.
 
 ### Phase 19: RAG Optimization and Evaluation
 
@@ -542,7 +544,7 @@ Keep `OrchestratorPolicyEngine` as a compatibility wrapper until all graph paths
 - direct command routes to direct graph
 - daily schedule routes to automation creation
 - device trigger routes to automation creation
-- update/delete/query operations return explicit unsupported until implemented
+- update/delete/query/scene/routine requests return explicit unsupported
 - operation detection can run as a graph node
 
 ### Automation Graph Tests
@@ -568,22 +570,23 @@ Keep `OrchestratorPolicyEngine` as a compatibility wrapper until all graph paths
 
 ## Acceptance Criteria
 
-The orchestrator architecture is future-compatible when:
+The orchestrator architecture is ready for automation creation when:
 
-1. The scheduler does not need code changes to add a new operation graph.
+1. The scheduler does not need special-case code to run automation creation.
 2. Operation detection is represented in runtime context and graph traces.
 3. Direct command behavior remains stable under graph default.
 4. Automation creation executes through graph nodes, not only a side service.
 5. Multiple automation actions use scoped context.
 6. Condition operands use scoped context and ambiguity-safe resolution.
 7. Policy is driven by graph goal, node policy, and agent manifests.
-8. Metrics report actual node statuses for every operation graph.
-9. SmartThings API persistence is behind a backend protocol and confirmation policy.
+8. Metrics report actual node statuses for direct command and automation creation graphs.
+9. SmartThings Rule creation is behind a backend protocol and confirmation policy.
 10. RAG assists extraction and schema grounding but never owns validation or safety decisions.
 
 ## Non-Goals
 
 - Do not remove the legacy scheduler until rollback is no longer useful.
+- Do not implement automation update, automation deletion, automation query, scene creation, or routine execution.
 - Do not merge SmartThings API calls into parsers, agents, or validation policy.
 - Do not force all public APIs to expose operation-specific result types immediately.
 - Do not use RAG or model output as the final authority for devices, capabilities, commands, or safety.

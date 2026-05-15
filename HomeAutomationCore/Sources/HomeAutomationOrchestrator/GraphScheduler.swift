@@ -421,6 +421,8 @@ public struct GraphScheduler: Sendable {
             return !context.request.text.isEmpty
         case ResolutionContextPatchKey.language:
             return context.language != nil
+        case ResolutionContextPatchKey.operation:
+            return context.operation != nil
         case ResolutionContextPatchKey.domain:
             return context.domain != nil
         case ResolutionContextPatchKey.intent:

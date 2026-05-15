@@ -17,6 +17,15 @@ struct AutomationCreationFlowTests {
     }
 
     @Test
+    func operationDetectionRecognizesOutOfScopeAutomationRequests() {
+        let detector = HomeOperationDetectionService()
+
+        #expect(detector.detect("Delete my morning automation").operation == .automationDeletion)
+        #expect(detector.detect("Disable the night light rule").operation == .automationUpdate)
+        #expect(detector.detect("List automations").operation == .automationQuery)
+    }
+
+    @Test
     func patternParserExtractsDailyScheduleAndAction() throws {
         let parser = AutomationPatternParser()
 
@@ -152,5 +161,29 @@ struct AutomationCreationFlowTests {
             return
         }
         #expect(result.draft?.targetDeviceID == "bedroom_lamp")
+    }
+
+    @Test
+    func nonCreationAutomationRequestsReturnUnsupported() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        let commands = [
+            "Delete my morning automation",
+            "Disable the night light rule",
+            "List automations"
+        ]
+
+        for command in commands {
+            let result = try await orchestrator.resolve(command, executeLowRiskCommands: false)
+
+            guard case .unsupported(let reason) = result.resolution else {
+                Issue.record("Expected unsupported for \(command), got \(result.resolution.displaySummary)")
+                continue
+            }
+            #expect(reason.contains("Only automation creation is currently supported"))
+            #expect(result.state.intent.topFamilies == [.unsupported])
+        }
     }
 }

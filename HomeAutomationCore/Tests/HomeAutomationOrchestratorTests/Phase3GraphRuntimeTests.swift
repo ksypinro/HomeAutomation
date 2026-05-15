@@ -42,6 +42,56 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
+    func operationGraphCatalogSelectsAutomationCreationFocusedGraphs() {
+        let context = ResolutionContext(
+            request: CommandRequest(text: "Turn on AC everyday at 7 AM", executeLowRiskCommands: false)
+        )
+        let unavailableCatalog = OperationGraphCatalog.defaultCatalog(
+            policy: OrchestratorPolicyEngine(isModelAvailable: { false })
+        )
+        let availableCatalog = OperationGraphCatalog.defaultCatalog(
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true })
+        )
+
+        #expect(unavailableCatalog.plan(for: .executeDeviceCommand, context: context).graph.id == "direct-command-fallback-graph")
+        #expect(unavailableCatalog.plan(for: .executeDeviceCommand, context: context).isFallbackOnly)
+        #expect(availableCatalog.plan(for: .executeDeviceCommand, context: context).graph.id == "direct-command-graph")
+        #expect(unavailableCatalog.plan(for: .automationCreation, context: context).graph.id == "automation-creation-graph")
+        #expect(unavailableCatalog.plan(for: .unsupported, context: context).graph.id == "unsupported-graph")
+
+        let outOfScopeOperations: [HomeAutomationOperationKind] = [
+            .automationUpdate,
+            .automationDeletion,
+            .automationQuery,
+            .sceneCreation,
+            .routineExecution
+        ]
+        for operation in outOfScopeOperations {
+            #expect(unavailableCatalog.plan(for: operation, context: context).graph.id == "unsupported-graph")
+        }
+    }
+
+    @Test
+    func graphPlannerRoutesOutOfScopeOperationsToUnsupportedGraph() {
+        let planner = GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { false }))
+        let context = ResolutionContext(
+            request: CommandRequest(text: "Delete my morning automation", executeLowRiskCommands: false)
+        )
+
+        let plan = planner.plan(
+            for: context.request.text,
+            context: context,
+            operation: .automationDeletion
+        )
+
+        #expect(!plan.isFallbackOnly)
+        #expect(plan.graph.id == "unsupported-graph")
+        #expect(plan.graph.goal == .unsupported)
+        #expect(plan.graph.nodes.map(\.id) == [AgentID.unsupportedCommand.rawValue])
+        #expect(GraphValidator().validate(plan.graph).isEmpty)
+    }
+
+    @Test
     func graphSchedulerResolvesAgentByCapability() async {
         let graph = OrchestrationGraph(
             id: "capability-resolution",

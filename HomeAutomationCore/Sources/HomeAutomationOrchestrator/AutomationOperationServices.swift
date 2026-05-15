@@ -15,13 +15,18 @@ public struct HomeOperationDetectionService: Sendable {
             )
         }
 
-        if containsAny(normalized, ["delete automation", "delete rule", "remove automation", "remove rule"]) {
+        let referencesAutomationObject = containsAny(
+            normalized,
+            ["automation", "automations", "rule", "rules"]
+        )
+        if referencesAutomationObject, containsAny(normalized, ["delete", "remove"]) {
             return result(.automationDeletion, confidence: 0.9, reason: "Deletion keyword matched")
         }
-        if containsAny(normalized, ["update automation", "update rule", "change automation", "change rule"]) {
+        if referencesAutomationObject, containsAny(normalized, ["update", "change", "edit", "disable", "enable"]) {
             return result(.automationUpdate, confidence: 0.86, reason: "Update keyword matched")
         }
-        if containsAny(normalized, ["show automations", "list automations", "what automations", "show rules", "list rules"]) {
+        if referencesAutomationObject,
+           containsAny(normalized, ["show", "list"]) || normalized.hasPrefix("what ") {
             return result(.automationQuery, confidence: 0.86, reason: "Automation query keyword matched")
         }
 

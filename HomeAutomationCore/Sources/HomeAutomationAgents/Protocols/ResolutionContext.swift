@@ -4,6 +4,7 @@ import HomeAutomationCore
 /// Immutable snapshot of resolution state. Agents read this value and emit patches.
 public struct ResolutionContext: Sendable {
     public let request: CommandRequest
+    public var operation: HomeOperationDetectionResult?
     public var language: HomeLanguageDetectionResult?
     public var domain: HomeDomainClassificationResult?
     public var intent: HomeIntentFamilyResult?

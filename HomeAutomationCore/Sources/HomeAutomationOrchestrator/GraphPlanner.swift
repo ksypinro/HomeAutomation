@@ -15,21 +15,19 @@ public struct GraphExecutionPlan: Sendable, Hashable {
 
 public struct GraphPlanner: Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "GraphPlanner")
-    private let policy: OrchestratorPolicyEngine
+    private let catalog: OperationGraphCatalog
 
     public init(policy: OrchestratorPolicyEngine) {
-        self.policy = policy
+        self.init(catalog: .defaultCatalog(policy: policy))
+    }
+
+    public init(catalog: OperationGraphCatalog) {
+        self.catalog = catalog
     }
 
     public func plan(for text: String, context: ResolutionContext) -> GraphExecutionPlan {
         logger.debug("Generating graph plan for text: '\(text, privacy: .private)'")
-
-        guard policy.shouldUseModels() else {
-            logger.warning("Models unavailable. Planning fallback graph.")
-            return GraphExecutionPlan(graph: Self.fallbackGraph(), isFallbackOnly: true)
-        }
-
-        return GraphExecutionPlan(graph: Self.directCommandGraph())
+        return catalog.plan(for: .executeDeviceCommand, context: context)
     }
 
     public func plan(
@@ -37,10 +35,8 @@ public struct GraphPlanner: Sendable {
         context: ResolutionContext,
         operation: HomeAutomationOperationKind
     ) -> GraphExecutionPlan {
-        if operation == .automationCreation {
-            return GraphExecutionPlan(graph: Self.automationCreationGraph())
-        }
-        return plan(for: text, context: context)
+        logger.debug("Generating graph plan for operation: \(operation.rawValue, privacy: .public)")
+        return catalog.plan(for: operation, context: context)
     }
 
     public static func directCommandGraph() -> OrchestrationGraph {
@@ -146,6 +142,22 @@ public struct GraphPlanner: Sendable {
                 GraphEdge(from: lhs.id.rawValue, to: rhs.id.rawValue)
             },
             entryNodeIDs: [AgentID.operationDetection.rawValue]
+        )
+    }
+
+    public static func unsupportedGraph() -> OrchestrationGraph {
+        OrchestrationGraph(
+            id: "unsupported-graph",
+            goal: .unsupported,
+            nodes: [
+                GraphNode(
+                    id: AgentID.unsupportedCommand.rawValue,
+                    requirement: .byID(.unsupportedCommand),
+                    executionPolicy: .required
+                )
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.unsupportedCommand.rawValue]
         )
     }
 

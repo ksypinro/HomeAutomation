@@ -1,3 +1,4 @@
+import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
 import HomeAutomationOrchestrator
@@ -74,6 +75,38 @@ struct Phase2GraphInfrastructureTests {
 
         #expect(registry.agents(for: .automationCreation).map(\.id) == [.operationDetection, .automationDraft])
         #expect(registry.agents(for: .executeDeviceCommand).map(\.id) == [.operationDetection, .language])
+    }
+
+    @Test
+    func graphSchedulerRunsOperationDetectionNodeAndWritesContext() async {
+        let graph = OrchestrationGraph(
+            id: "operation-detection-only",
+            goal: .automationCreation,
+            nodes: [
+                GraphNode(id: AgentID.operationDetection.rawValue, requirement: .byID(.operationDetection))
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.operationDetection.rawValue]
+        )
+        let contextStore = ResolutionContextStore(
+            request: CommandRequest(text: "Turn on AC everyday at 7 AM", executeLowRiskCommands: false)
+        )
+
+        let result = await GraphScheduler().execute(
+            graph,
+            registry: DefaultAgentRegistryFactory.make(foundationModelAvailability: { false }),
+            contextStore: contextStore,
+            eventBus: AgentEventBus(),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { false }),
+            circuitBreakers: CircuitBreakerRegistry(),
+            runID: UUID()
+        )
+
+        let context = await contextStore.snapshot()
+        #expect(result.exit == nil)
+        #expect(context.operation?.operation == .automationCreation)
+        #expect(context.trace.map(\.agentID) == [.operationDetection])
+        #expect(result.metrics.nodeStatuses[AgentID.operationDetection.rawValue] == .completed)
     }
 
     @Test

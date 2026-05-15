@@ -33,6 +33,9 @@ public actor ResolutionContextStore {
             context.draft = result.draft
             context.resolution = result.resolution
         }
+        if let value = patch.updates[ResolutionContextPatchKey.operation]?.get(HomeOperationDetectionResult.self) {
+            context.operation = value
+        }
         if let value = patch.updates[ResolutionContextPatchKey.language]?.get(HomeLanguageDetectionResult.self) {
             context.language = value
         }
@@ -92,6 +95,10 @@ public actor ResolutionContextStore {
     public func setLanguage(_ value: HomeLanguageDetectionResult) {
         logger.debug("Setting language: \(value.languageCode, privacy: .public)")
         context.language = value
+    }
+
+    public func setOperation(_ value: HomeOperationDetectionResult) {
+        context.operation = value
     }
 
     /// Sets the domain classification result.
