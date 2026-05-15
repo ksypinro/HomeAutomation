@@ -90,6 +90,11 @@ struct OrchestratorInfrastructureTests {
             AgentID.smartThingsCompilation.rawValue,
             AgentID.automationResultAssembly.rawValue
         ])
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationActionResolution.rawValue)))
     }
 
     @Test
@@ -150,6 +155,11 @@ struct OrchestratorInfrastructureTests {
         for id in [
             AgentID.operationDetection,
             .automationDraft,
+            .automationConditionOperandResolution,
+            .automationActionResolution,
+            .automationValidation,
+            .smartThingsCompilation,
+            .automationResultAssembly,
             AgentID.language,
             .domain,
             .intentFamily,
@@ -180,6 +190,27 @@ struct OrchestratorInfrastructureTests {
         ] {
             #expect(registry.agent(for: id) != nil)
         }
+    }
+
+    @Test
+    func defaultRegistrySatisfiesAutomationCreationGraph() {
+        let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let graph = GraphPlanner.automationCreationGraph()
+
+        #expect(GraphValidator().validate(graph, registry: registry).isEmpty)
+        for node in graph.nodes {
+            guard case .byID(let id) = node.requirement else {
+                Issue.record("Automation graph should use concrete agent IDs.")
+                continue
+            }
+            let agent = registry.agent(for: id)
+            let manifest = registry.manifest(for: id)
+            #expect(agent != nil)
+            #expect(manifest?.supportedOperations.contains(.automationCreation) == true)
+        }
+        #expect(registry.manifest(for: .automationActionResolution)?.produces.contains(ResolutionContextPatchKey.automationResolvedActions) == true)
+        #expect(registry.manifest(for: .smartThingsCompilation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
+        #expect(registry.manifest(for: .automationResultAssembly)?.produces.contains(ResolutionContextPatchKey.resolverResult) == true)
     }
 
 

@@ -138,9 +138,15 @@ public struct GraphPlanner: Sendable {
                     executionPolicy: stage.policy
                 )
             },
-            edges: zip(stages, stages.dropFirst()).map { lhs, rhs in
-                GraphEdge(from: lhs.id.rawValue, to: rhs.id.rawValue)
-            },
+            edges: [
+                GraphEdge(from: AgentID.operationDetection.rawValue, to: AgentID.automationDraft.rawValue),
+                GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue),
+                GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue),
+                GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue),
+                GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue),
+                GraphEdge(from: AgentID.automationValidation.rawValue, to: AgentID.smartThingsCompilation.rawValue),
+                GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.automationResultAssembly.rawValue)
+            ],
             entryNodeIDs: [AgentID.operationDetection.rawValue]
         )
     }

@@ -83,7 +83,10 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case draftGeneration
     case draftRepair
     case automationDrafting
+    case automationActionResolution
+    case automationConditionOperandResolution
     case automationValidation
+    case smartThingsCompilation
     case safetyValidation
     case parameterValidation
     case confirmationPolicy
@@ -92,6 +95,7 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case ruleFallback
     case bixbyFallback
     case unsupported
+    case automationResultAssembly
     case clarification
     case resultSummary
 }

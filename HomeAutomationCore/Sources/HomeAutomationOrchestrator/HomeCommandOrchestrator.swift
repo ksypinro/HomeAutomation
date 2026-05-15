@@ -19,6 +19,12 @@ private struct DirectCommandExecutionResult: Sendable {
     let graphRun: GraphRunMetrics?
 }
 
+private struct AutomationCreationExecutionResult: Sendable {
+    let result: HomeAutomationResolverResult
+    let graph: OrchestrationGraph
+    let graphRun: GraphRunMetrics?
+}
+
 /// The primary entry point for processing home automation natural language commands.
 ///
 /// `HomeCommandOrchestrator` coordinates the lifecycle of parsing user input, fetching RAG context,
@@ -224,26 +230,25 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
                 if operation.operation == .automationCreation {
                     let started = Date()
-                    let automationGraph = graphPlanner.plan(
-                        for: trimmedText,
-                        context: await contextStore.snapshot(),
-                        operation: operation.operation
-                    ).graph
-                    let result = await resolveAutomationCreation(
+                    let execution = await executeAutomationCreationPipeline(
                         text: trimmedText,
                         operation: operation,
+                        contextStore: contextStore,
                         eventBus: eventBus,
                         runID: runID
                     )
+                    let result = execution.result
                     metrics.finishedAt = Date()
+                    metrics.agentTraces = await contextStore.snapshot().trace
                     metrics.outcome = Self.outcomeName(for: result.resolution)
                     metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(started)
                     metrics.circuitStates = await circuitBreakers.allStatusStrings()
                     metrics.captureAutomationFields(
                         operation: operation,
                         runtimeMode: runtimeMode,
-                        graph: automationGraph,
-                        result: result
+                        graph: execution.graph,
+                        result: result,
+                        graphRun: execution.graphRun
                     )
                     await metricsCollector.store(metrics)
 
@@ -385,6 +390,110 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             eventBus: eventBus,
             runID: runID
         )
+    }
+
+    private func executeAutomationCreationPipeline(
+        text: String,
+        operation: HomeOperationDetectionResult,
+        contextStore: ResolutionContextStore,
+        eventBus: AgentEventBus,
+        runID: UUID
+    ) async -> AutomationCreationExecutionResult {
+        let graph = graphPlanner.plan(
+            for: text,
+            context: await contextStore.snapshot(),
+            operation: operation.operation
+        ).graph
+
+        switch runtimeMode {
+        case .legacy:
+            let result = await resolveAutomationCreation(
+                text: text,
+                operation: operation,
+                eventBus: eventBus,
+                runID: runID
+            )
+            return AutomationCreationExecutionResult(
+                result: result,
+                graph: graph,
+                graphRun: nil
+            )
+
+        case .graph:
+            let schedulerResult = await GraphScheduler().execute(
+                graph,
+                registry: registry,
+                contextStore: contextStore,
+                eventBus: eventBus,
+                policy: policy,
+                circuitBreakers: circuitBreakers,
+                runID: runID
+            )
+            let context = await contextStore.snapshot()
+            let graphRun = Self.automationFanOutGraphRun(
+                from: schedulerResult.metrics,
+                context: context
+            )
+
+            if let resolution = context.resolution,
+               let state = context.resolutionState {
+                let result = HomeAutomationResolverResult(
+                    state: state,
+                    retrievedCandidates: context.retrievedCandidates,
+                    aggregation: context.aggregation ?? HomeCandidateAggregationResult(
+                        finalCandidateIDs: context.selectedCandidateIDs,
+                        needsClarification: false,
+                        confidence: 0
+                    ),
+                    hydratedCandidates: context.hydratedCandidates,
+                    draft: context.draft,
+                    resolution: resolution
+                )
+                return AutomationCreationExecutionResult(
+                    result: result,
+                    graph: graph,
+                    graphRun: graphRun
+                )
+            }
+
+            logger.warning("Automation graph did not produce a final result. Falling back to service resolver.")
+            let fallbackResult = await resolveAutomationCreation(
+                text: text,
+                operation: operation,
+                eventBus: eventBus,
+                runID: runID
+            )
+            return AutomationCreationExecutionResult(
+                result: fallbackResult,
+                graph: graph,
+                graphRun: graphRun
+            )
+        }
+    }
+
+    private static func automationFanOutGraphRun(
+        from graphRun: GraphRunMetrics,
+        context: ResolutionContext
+    ) -> GraphRunMetrics {
+        var output = graphRun
+
+        if let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate) {
+            for (index, result) in aggregate.results.enumerated() {
+                let nodeID = "\(AgentID.automationActionResolution.rawValue):a\(index + 1)"
+                output.nodeStatuses[nodeID] = result.isResolved ? .completed : .failed
+                output.selectedAgents[nodeID] = AgentID.automationActionResolution.rawValue
+            }
+        }
+
+        if let records = context.scopedValue(for: AutomationRuntimeContextKeys.conditionOperandResolutionRecords) {
+            for record in records {
+                let nodeID = "\(AgentID.automationConditionOperandResolution.rawValue):\(record.id)"
+                output.nodeStatuses[nodeID] = record.isResolved ? .completed : .failed
+                output.selectedAgents[nodeID] = AgentID.automationConditionOperandResolution.rawValue
+            }
+        }
+
+        return output
     }
 
     private func executeDirectCommandPipeline(

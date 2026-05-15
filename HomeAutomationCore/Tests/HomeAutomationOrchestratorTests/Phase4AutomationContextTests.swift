@@ -195,6 +195,131 @@ struct Phase4AutomationContextTests {
     }
 
     @Test
+    func scopedContextPreservesRootDirectCommandFields() async {
+        let store = ResolutionContextStore(
+            request: CommandRequest(text: "Turn on the TV", executeLowRiskCommands: false)
+        )
+        let rootDraft = HomeCommandDraft(
+            intent: .turnOn,
+            targetDeviceID: "living_room_tv",
+            capability: "switch",
+            command: "on",
+            needsClarification: false,
+            requiresConfirmation: false,
+            confidence: 0.91
+        )
+        let scopedDraft = HomeCommandDraft(
+            intent: .turnOff,
+            targetDeviceID: "bedroom_lamp",
+            capability: "switch",
+            command: "off",
+            needsClarification: false,
+            requiresConfirmation: false,
+            confidence: 0.88
+        )
+        let language = HomeLanguageDetectionResult(
+            languageCode: "en",
+            isMixedLanguage: false,
+            confidence: 0.99,
+            unsupportedLanguageLikely: false
+        )
+        let key = ScopedContextKeys.commandDraft(in: .action("a1"))
+
+        await store.apply(
+            ResolutionContextPatch(
+                agentID: .language,
+                updates: [
+                    ResolutionContextPatchKey.language: AnySendableValue(language),
+                    ResolutionContextPatchKey.draft: AnySendableValue(rootDraft)
+                ],
+                scopedUpdates: [
+                    .action("a1"): [key.name: AnySendableValue(scopedDraft)]
+                ]
+            )
+        )
+
+        let snapshot = await store.snapshot()
+
+        #expect(snapshot.language == language)
+        #expect(snapshot.draft == rootDraft)
+        #expect(snapshot.scopedValue(for: key) == scopedDraft)
+    }
+
+    @Test
+    func actionScopesDoNotOverwriteEachOther() async {
+        let store = ResolutionContextStore(
+            request: CommandRequest(text: "Turn on lamp and turn off AC every day at 7 AM", executeLowRiskCommands: false)
+        )
+        let actionOne = HomeCommandDraft(
+            intent: .turnOn,
+            targetDeviceID: "bedroom_lamp",
+            capability: "switch",
+            command: "on",
+            needsClarification: false,
+            requiresConfirmation: false,
+            confidence: 0.93
+        )
+        let actionTwo = HomeCommandDraft(
+            intent: .turnOff,
+            targetDeviceID: "bedroom_ac",
+            capability: "switch",
+            command: "off",
+            needsClarification: false,
+            requiresConfirmation: false,
+            confidence: 0.9
+        )
+        let actionOneKey = ScopedContextKeys.commandDraft(in: .action("a1"))
+        let actionTwoKey = ScopedContextKeys.commandDraft(in: .action("a2"))
+
+        await store.apply(
+            ResolutionContextPatch(
+                agentID: .automationActionResolution,
+                scopedUpdates: [
+                    .action("a1"): [actionOneKey.name: AnySendableValue(actionOne)],
+                    .action("a2"): [actionTwoKey.name: AnySendableValue(actionTwo)]
+                ]
+            )
+        )
+
+        let snapshot = await store.snapshot()
+
+        #expect(snapshot.draft == nil)
+        #expect(snapshot.scopedValue(for: actionOneKey) == actionOne)
+        #expect(snapshot.scopedValue(for: actionTwoKey) == actionTwo)
+    }
+
+    @Test
+    func conditionScopesDoNotOverwriteEachOther() async {
+        let store = ResolutionContextStore(
+            request: CommandRequest(text: "Turn on light if door is closed or motion is active", executeLowRiskCommands: false)
+        )
+        let conditionOne = comparisonCondition(
+            description: "front door",
+            deviceID: "front_door_sensor",
+            capability: "contactSensor",
+            attribute: "contact",
+            value: "closed"
+        )
+        let conditionTwo = comparisonCondition(
+            description: "hallway motion",
+            deviceID: "hallway_motion",
+            capability: "motionSensor",
+            attribute: "motion",
+            value: "active"
+        )
+        let conditionOneKey = ScopedContextKeys.automationCondition(in: .condition("c1"))
+        let conditionTwoKey = ScopedContextKeys.automationCondition(in: .condition("c2"))
+
+        await store.setScopedValue(conditionOne, for: conditionOneKey)
+        await store.setScopedValue(conditionTwo, for: conditionTwoKey)
+
+        let snapshot = await store.snapshot()
+
+        #expect(snapshot.scopedValue(for: conditionOneKey) == conditionOne)
+        #expect(snapshot.scopedValue(for: conditionTwoKey) == conditionTwo)
+    }
+
+    @Test
     func directCommandResolutionContextIsNotExpandedWithAutomationOnlyFields() {
         let context = ResolutionContext(
             request: CommandRequest(text: "Turn on the TV", executeLowRiskCommands: false)
@@ -232,6 +357,27 @@ struct Phase4AutomationContextTests {
                 supportedCommands: [capability: [command]]
             ),
             confidence: 0.93
+        )
+    }
+
+    private func comparisonCondition(
+        description: String,
+        deviceID: String,
+        capability: String,
+        attribute: String,
+        value: String
+    ) -> HomeAutomationCondition {
+        .comparison(
+            HomeAutomationComparisonCondition(
+                left: .deviceAttribute(
+                    description: description,
+                    deviceID: deviceID,
+                    capability: capability,
+                    attribute: attribute
+                ),
+                operatorName: .equals,
+                right: .literalString(value)
+            )
         )
     }
 }

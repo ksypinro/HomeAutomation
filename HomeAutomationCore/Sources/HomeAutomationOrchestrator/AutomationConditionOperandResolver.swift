@@ -1,6 +1,59 @@
 import Foundation
 import HomeAutomationCore
 
+public struct AutomationConditionOperandResolutionRecord: Sendable, Hashable, Codable {
+    public let id: String
+    public let order: Int
+    public let path: String
+    public let description: String
+    public let input: HomeAutomationConditionOperand
+    public let output: HomeAutomationConditionOperand
+
+    public init(
+        id: String,
+        order: Int,
+        path: String,
+        description: String,
+        input: HomeAutomationConditionOperand,
+        output: HomeAutomationConditionOperand
+    ) {
+        self.id = id
+        self.order = order
+        self.path = path
+        self.description = description
+        self.input = input
+        self.output = output
+    }
+
+    public var isResolved: Bool {
+        switch output {
+        case .deviceAttribute(_, let deviceID, let capability, let attribute):
+            return Self.hasText(deviceID) && Self.hasText(capability) && Self.hasText(attribute)
+        case .literalString, .literalNumber, .locationMode:
+            return true
+        case .unsupported:
+            return false
+        }
+    }
+
+    private static func hasText(_ value: String?) -> Bool {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+}
+
+public struct AutomationConditionResolutionOutput: Sendable, Hashable, Codable {
+    public let ruleDraft: HomeAutomationRuleDraft
+    public let records: [AutomationConditionOperandResolutionRecord]
+
+    public init(
+        ruleDraft: HomeAutomationRuleDraft,
+        records: [AutomationConditionOperandResolutionRecord]
+    ) {
+        self.ruleDraft = ruleDraft
+        self.records = records
+    }
+}
+
 public struct AutomationConditionOperandResolver: Sendable {
     private let registry: MockHomeDeviceRegistry
 
@@ -11,30 +64,206 @@ public struct AutomationConditionOperandResolver: Sendable {
     public func resolve(_ condition: HomeAutomationCondition?) async -> HomeAutomationCondition? {
         guard let condition else { return nil }
         let devices = await registry.allDevices()
-        return resolve(condition, devices: devices)
+        let (resolvedRoots, _) = await resolveRoots(
+            [ConditionRoot(path: "condition", condition: condition)],
+            devices: devices
+        )
+        return resolvedRoots["condition"]
+    }
+
+    public func resolveDraft(_ draft: HomeAutomationRuleDraft) async -> AutomationConditionResolutionOutput {
+        let devices = await registry.allDevices()
+        var roots: [ConditionRoot] = []
+        if let condition = draft.condition {
+            roots.append(ConditionRoot(path: "condition", condition: condition))
+        }
+        if case .device(let trigger) = draft.trigger {
+            roots.append(ConditionRoot(path: "trigger.condition", condition: trigger.condition))
+        }
+
+        let (resolvedRoots, records) = await resolveRoots(roots, devices: devices)
+        let resolvedTrigger = resolvedTrigger(
+            draft.trigger,
+            resolvedTriggerCondition: resolvedRoots["trigger.condition"]
+        )
+        let resolvedDraft = HomeAutomationRuleDraft(
+            name: draft.name,
+            domain: draft.domain,
+            operation: draft.operation,
+            intent: draft.intent,
+            trigger: resolvedTrigger,
+            condition: resolvedRoots["condition"] ?? draft.condition,
+            actionDescriptions: draft.actionDescriptions,
+            confidence: draft.confidence
+        )
+        return AutomationConditionResolutionOutput(
+            ruleDraft: resolvedDraft,
+            records: records
+        )
+    }
+
+    private func resolveRoots(
+        _ roots: [ConditionRoot],
+        devices: [HomeCandidateRecord]
+    ) async -> ([String: HomeAutomationCondition], [AutomationConditionOperandResolutionRecord]) {
+        var workItems: [ConditionOperandWorkItem] = []
+        for root in roots {
+            collectWorkItems(
+                from: root.condition,
+                path: root.path,
+                workItems: &workItems
+            )
+        }
+
+        let records = await resolve(workItems: workItems, devices: devices)
+        let replacements = Dictionary(uniqueKeysWithValues: records.map { ($0.path, $0.output) })
+        let resolvedRoots = roots.reduce(into: [String: HomeAutomationCondition]()) { partial, root in
+            partial[root.path] = apply(replacements, to: root.condition, path: root.path)
+        }
+        return (resolvedRoots, records)
+    }
+
+    private func collectWorkItems(
+        from condition: HomeAutomationCondition,
+        path: String,
+        workItems: inout [ConditionOperandWorkItem]
+    ) {
+        switch condition {
+        case .and(let children), .or(let children):
+            for (index, child) in children.enumerated() {
+                collectWorkItems(
+                    from: child,
+                    path: "\(path).\(index)",
+                    workItems: &workItems
+                )
+            }
+        case .not(let child):
+            collectWorkItems(
+                from: child,
+                path: "\(path).not",
+                workItems: &workItems
+            )
+        case .comparison(let comparison):
+            collectWorkItem(
+                operand: comparison.left,
+                comparison: comparison,
+                path: "\(path).left",
+                workItems: &workItems
+            )
+            collectWorkItem(
+                operand: comparison.right,
+                comparison: comparison,
+                path: "\(path).right",
+                workItems: &workItems
+            )
+        }
+    }
+
+    private func collectWorkItem(
+        operand: HomeAutomationConditionOperand,
+        comparison: HomeAutomationComparisonCondition,
+        path: String,
+        workItems: inout [ConditionOperandWorkItem]
+    ) {
+        guard needsDeviceOperandResolution(operand) else { return }
+        let order = workItems.count
+        workItems.append(
+            ConditionOperandWorkItem(
+                id: "c\(order + 1)",
+                order: order,
+                path: path,
+                operand: operand,
+                comparison: comparison
+            )
+        )
     }
 
     private func resolve(
-        _ condition: HomeAutomationCondition,
+        workItems: [ConditionOperandWorkItem],
         devices: [HomeCandidateRecord]
+    ) async -> [AutomationConditionOperandResolutionRecord] {
+        guard !workItems.isEmpty else { return [] }
+
+        let records = await withTaskGroup(of: AutomationConditionOperandResolutionRecord.self) { group in
+            for item in workItems {
+                group.addTask {
+                    let output = self.resolve(
+                        item.operand,
+                        devices: devices,
+                        comparison: item.comparison
+                    )
+                    return AutomationConditionOperandResolutionRecord(
+                        id: item.id,
+                        order: item.order,
+                        path: item.path,
+                        description: item.description,
+                        input: item.operand,
+                        output: output
+                    )
+                }
+            }
+
+            var records: [AutomationConditionOperandResolutionRecord] = []
+            for await record in group {
+                records.append(record)
+            }
+            return records
+        }
+
+        return records.sorted { $0.order < $1.order }
+    }
+
+    private func apply(
+        _ replacements: [String: HomeAutomationConditionOperand],
+        to condition: HomeAutomationCondition,
+        path: String
     ) -> HomeAutomationCondition {
         switch condition {
         case .and(let children):
-            return .and(children.map { resolve($0, devices: devices) })
+            return .and(children.enumerated().map { index, child in
+                apply(replacements, to: child, path: "\(path).\(index)")
+            })
         case .or(let children):
-            return .or(children.map { resolve($0, devices: devices) })
+            return .or(children.enumerated().map { index, child in
+                apply(replacements, to: child, path: "\(path).\(index)")
+            })
         case .not(let child):
-            return .not(resolve(child, devices: devices))
+            return .not(apply(replacements, to: child, path: "\(path).not"))
         case .comparison(let comparison):
             return .comparison(
                 HomeAutomationComparisonCondition(
-                    left: resolve(comparison.left, devices: devices, comparison: comparison),
+                    left: replacements["\(path).left"] ?? comparison.left,
                     operatorName: comparison.operatorName,
-                    right: comparison.right,
+                    right: replacements["\(path).right"] ?? comparison.right,
                     triggerPolicy: comparison.triggerPolicy
                 )
             )
         }
+    }
+
+    private func resolvedTrigger(
+        _ trigger: HomeAutomationTrigger?,
+        resolvedTriggerCondition: HomeAutomationCondition?
+    ) -> HomeAutomationTrigger? {
+        guard let trigger else { return nil }
+        switch trigger {
+        case .schedule:
+            return trigger
+        case .device(let deviceTrigger):
+            return .device(
+                HomeAutomationDeviceTrigger(
+                    description: deviceTrigger.description,
+                    condition: resolvedTriggerCondition ?? deviceTrigger.condition
+                )
+            )
+        }
+    }
+
+    private func needsDeviceOperandResolution(_ operand: HomeAutomationConditionOperand) -> Bool {
+        guard case .deviceAttribute(_, let deviceID, let capability, let attribute) = operand else {
+            return false
+        }
+        return isEmpty(deviceID) || isEmpty(capability) || isEmpty(attribute)
     }
 
     private func resolve(
@@ -105,6 +334,7 @@ public struct AutomationConditionOperandResolver: Sendable {
             if device.capabilities.contains("contactSensor") { total += 4 }
             if device.capabilities.contains("garageDoorControl") { total += 4 }
             if device.capabilities.contains("doorControl") { total += 4 }
+            if device.capabilities.contains("windowShade") { total += 4 }
         }
         if query.contains("motion"), device.capabilities.contains("motionSensor") {
             total += 6
@@ -155,5 +385,33 @@ public struct AutomationConditionOperandResolver: Sendable {
             .replacingOccurrences(of: #"[^a-z0-9\s]+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isEmpty(_ value: String?) -> Bool {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+    }
+}
+
+private struct ConditionRoot: Sendable {
+    let path: String
+    let condition: HomeAutomationCondition
+}
+
+private struct ConditionOperandWorkItem: Sendable {
+    let id: String
+    let order: Int
+    let path: String
+    let operand: HomeAutomationConditionOperand
+    let comparison: HomeAutomationComparisonCondition
+
+    var description: String {
+        switch operand {
+        case .deviceAttribute(let description, _, _, _):
+            return description
+        case .literalString(let value), .locationMode(let value), .unsupported(let value):
+            return value
+        case .literalNumber(let value, let unit):
+            return unit.map { "\(value) \($0)" } ?? "\(value)"
+        }
     }
 }

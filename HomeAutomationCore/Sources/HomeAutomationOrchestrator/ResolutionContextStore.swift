@@ -88,6 +88,9 @@ public actor ResolutionContextStore {
         if let value = patch.updates[ResolutionContextPatchKey.resolution]?.get(HomeCommandResolution.self) {
             context.resolution = value
         }
+        for (scope, values) in patch.scopedUpdates {
+            context.mergeScopedValues(values, in: scope)
+        }
         refreshResolutionStateIfPossible()
     }
 
@@ -152,6 +155,20 @@ public actor ResolutionContextStore {
 
     public func setExecutionPlan(_ value: HomeAutomationExecutionPlan) {
         context.executionPlan = value
+    }
+
+    public func setScopedValue<Value: Sendable>(
+        _ value: Value,
+        for key: ScopedContextKey<Value>
+    ) {
+        logger.debug("Setting scoped context value \(key.name, privacy: .public) in \(key.scope.description, privacy: .public).")
+        context.setScopedValue(value, for: key)
+    }
+
+    public func scopedValue<Value: Sendable>(
+        for key: ScopedContextKey<Value>
+    ) -> Value? {
+        context.scopedValue(for: key)
     }
 
     /// Sets the command resolution outcome.

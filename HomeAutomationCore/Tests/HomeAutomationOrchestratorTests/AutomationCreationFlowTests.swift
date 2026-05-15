@@ -69,6 +69,99 @@ struct AutomationCreationFlowTests {
     }
 
     @Test
+    func graphNativeAutomationCreationMatchesLegacyServiceOutput() async throws {
+        let command = "Turn on bedroom AC everyday at 7 AM"
+        let graphOrchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            runtimeMode: .graph
+        )
+        let legacyOrchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            runtimeMode: .legacy
+        )
+
+        let graphResult = try await graphOrchestrator.resolve(command, executeLowRiskCommands: true)
+        let legacyResult = try await legacyOrchestrator.resolve(command, executeLowRiskCommands: true)
+
+        guard case .automationDrafted(let graphPlan) = graphResult.resolution,
+              case .automationDrafted(let legacyPlan) = legacyResult.resolution else {
+            Issue.record("Expected both graph and legacy automation paths to draft an automation.")
+            return
+        }
+
+        #expect(graphPlan.ruleDraft == legacyPlan.ruleDraft)
+        #expect(graphPlan.resolvedActions == legacyPlan.resolvedActions)
+        #expect(graphPlan.smartThingsRuleJSON == legacyPlan.smartThingsRuleJSON)
+        #expect(graphPlan.requiresConfirmation == legacyPlan.requiresConfirmation)
+        #expect(graphResult.aggregation.finalCandidateIDs == legacyResult.aggregation.finalCandidateIDs)
+        #expect(graphResult.draft == legacyResult.draft)
+    }
+
+    @Test
+    func graphNativeAutomationCreationRecordsActualGraphMetrics() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            runtimeMode: .graph
+        )
+
+        _ = try await orchestrator.resolve(
+            "Turn on bedroom AC everyday at 7 AM",
+            executeLowRiskCommands: true
+        )
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let graphRun = try #require(metrics.graphRun)
+
+        #expect(graphRun.graphID == "automation-creation-graph")
+        #expect(graphRun.nodeStatuses[AgentID.operationDetection.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationDraft.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationConditionOperandResolution.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationActionResolution.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationValidation.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.smartThingsCompilation.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationResultAssembly.rawValue] == .completed)
+        #expect(graphRun.nodeDurations.isEmpty == false)
+        #expect(metrics.automationMetrics.graphNodeStatuses == graphRun.nodeStatuses.mapValues(\.rawValue))
+    }
+
+    @Test
+    func graphNativeAutomationCreationAddsDynamicFanOutMetrics() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            runtimeMode: .graph
+        )
+
+        let result = try await orchestrator.resolve(
+            "Turn on bedroom AC and turn off kitchen strip light every day at 7 AM if entry contact sensor is closed and porch light is off",
+            executeLowRiskCommands: true
+        )
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected automation draft, got \(result.resolution.displaySummary)")
+            return
+        }
+        #expect(plan.resolvedActions.map(\.originalText) == [
+            "Turn on bedroom AC",
+            "Turn off kitchen strip light"
+        ])
+        #expect(plan.resolvedActions.map { $0.device?.id } == [
+            "bedroom_ac",
+            "kitchen_strip_light"
+        ])
+
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let graphRun = try #require(metrics.graphRun)
+        #expect(graphRun.nodeStatuses["automationActionResolution:a1"] == .completed)
+        #expect(graphRun.nodeStatuses["automationActionResolution:a2"] == .completed)
+        #expect(graphRun.nodeStatuses["automationConditionOperandResolution:c1"] == .completed)
+        #expect(graphRun.nodeStatuses["automationConditionOperandResolution:c2"] == .completed)
+        #expect(metrics.automationMetrics.graphNodeStatuses == graphRun.nodeStatuses.mapValues(\.rawValue))
+    }
+
+    @Test
     func automationCreationStreamEmitsPhaseNineEvents() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),

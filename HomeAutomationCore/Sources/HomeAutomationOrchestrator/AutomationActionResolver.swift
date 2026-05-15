@@ -161,9 +161,10 @@ public struct AutomationActionResolver: Sendable {
         )
     }
 
-    /// Resolves all action descriptions sequentially.
+    /// Resolves all action descriptions independently and returns them in input order.
     ///
-    /// Returns early with the partial results if any action needs clarification or is unsupported.
+    /// Each action runs through its own direct-command pipeline with an isolated context store,
+    /// so one action cannot overwrite another action's draft, candidates, or resolution.
     ///
     /// - Parameters:
     ///   - actionDescriptions: Natural language action descriptions.
@@ -177,28 +178,55 @@ public struct AutomationActionResolver: Sendable {
         runID: UUID
     ) async -> [AutomationActionResolutionResult] {
         logger.info("Resolving \(actionDescriptions.count, privacy: .public) automation action(s).")
-        var results: [AutomationActionResolutionResult] = []
-
-        for (index, actionText) in actionDescriptions.enumerated() {
+        guard !actionDescriptions.isEmpty else {
             await eventBus.publish(
                 OrchestratorPipelineEvent(
                     runID: runID,
                     stage: "automationActionResolution",
                     agentID: "automationActionResolution",
-                    status: .running,
-                    detail: "[\(index + 1)/\(actionDescriptions.count)] \(actionText)"
+                    status: .completed,
+                    detail: "0/0 action(s) resolved"
                 )
             )
-
-            let result = await resolve(actionText, eventBus: eventBus, runID: runID)
-            results.append(result)
-
-            // Stop early if this action cannot be resolved.
-            if result.needsClarification || result.isUnsupported || !result.isResolved {
-                logger.warning("Action \(index + 1, privacy: .public) could not be resolved. Stopping early.")
-                break
-            }
+            return []
         }
+
+        let indexedResults = await withTaskGroup(of: (Int, AutomationActionResolutionResult).self) { group in
+            for (index, actionText) in actionDescriptions.enumerated() {
+                group.addTask {
+                    let actionID = "a\(index + 1)"
+                    await eventBus.publish(
+                        OrchestratorPipelineEvent(
+                            runID: runID,
+                            stage: "automationActionResolution:\(actionID)",
+                            agentID: AgentID.automationActionResolution.rawValue,
+                            status: .running,
+                            detail: "[\(index + 1)/\(actionDescriptions.count)] \(actionText)"
+                        )
+                    )
+                    let result = await self.resolve(actionText, eventBus: eventBus, runID: runID)
+                    await eventBus.publish(
+                        OrchestratorPipelineEvent(
+                            runID: runID,
+                            stage: "automationActionResolution:\(actionID)",
+                            agentID: AgentID.automationActionResolution.rawValue,
+                            status: result.isResolved ? .completed : .failed,
+                            detail: result.resolution.displaySummary
+                        )
+                    )
+                    return (index, result)
+                }
+            }
+
+            var results: [(Int, AutomationActionResolutionResult)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        let orderedResults = indexedResults
+            .sorted { $0.0 < $1.0 }
+            .map(\.1)
 
         await eventBus.publish(
             OrchestratorPipelineEvent(
@@ -206,11 +234,11 @@ public struct AutomationActionResolver: Sendable {
                 stage: "automationActionResolution",
                 agentID: "automationActionResolution",
                 status: .completed,
-                detail: "\(results.filter(\.isResolved).count)/\(actionDescriptions.count) action(s) resolved"
+                detail: "\(orderedResults.filter(\.isResolved).count)/\(actionDescriptions.count) action(s) resolved"
             )
         )
 
-        return results
+        return orderedResults
     }
 
     // MARK: - Private

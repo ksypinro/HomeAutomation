@@ -23,6 +23,7 @@ public struct ResolutionContext: Sendable {
     public var draft: HomeCommandDraft?
     public var executionPlan: HomeAutomationExecutionPlan?
     public var resolution: HomeCommandResolution?
+    public var scopedValues: [ContextScope: [String: AnySendableValue]]
     public var errors: [AgentFailure]
     public var trace: [AgentTraceEntry]
 
@@ -34,8 +35,31 @@ public struct ResolutionContext: Sendable {
         self.knowledgeSnippets = []
         self.retrievalReports = []
         self.memoryHints = []
+        self.scopedValues = [:]
         self.errors = []
         self.trace = []
+    }
+
+    public func scopedValue<Value: Sendable>(
+        for key: ScopedContextKey<Value>
+    ) -> Value? {
+        scopedValues[key.scope]?[key.name]?.get(Value.self)
+    }
+
+    public mutating func setScopedValue<Value: Sendable>(
+        _ value: Value,
+        for key: ScopedContextKey<Value>
+    ) {
+        scopedValues[key.scope, default: [:]][key.name] = AnySendableValue(value)
+    }
+
+    public mutating func mergeScopedValues(
+        _ values: [String: AnySendableValue],
+        in scope: ContextScope
+    ) {
+        for (key, value) in values {
+            scopedValues[scope, default: [:]][key] = value
+        }
     }
 }
 

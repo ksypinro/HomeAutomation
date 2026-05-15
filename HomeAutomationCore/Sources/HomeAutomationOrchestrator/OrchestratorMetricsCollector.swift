@@ -308,11 +308,12 @@ public struct OrchestratorMetrics: Sendable, Codable {
         operation: HomeOperationDetectionResult,
         runtimeMode: OrchestratorRuntimeMode,
         graph: OrchestrationGraph,
-        result: HomeAutomationResolverResult
+        result: HomeAutomationResolverResult,
+        graphRun: GraphRunMetrics? = nil
     ) {
         let plan = Self.automationPlan(from: result.resolution)
-        let statuses = Self.automationGraphStatuses(graph: graph, result: result)
-        let selectedAgents = graph.nodes.reduce(into: [String: String]()) { partial, node in
+        let statuses = graphRun?.nodeStatuses ?? Self.automationGraphStatuses(graph: graph, result: result)
+        let selectedAgents = graphRun?.selectedAgents ?? graph.nodes.reduce(into: [String: String]()) { partial, node in
             partial[node.id] = node.id
         }
 
@@ -331,7 +332,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
             graphNodeStatuses: statuses.mapValues(\.rawValue),
             selectedAgents: selectedAgents
         )
-        graphRun = GraphRunMetrics(
+        self.graphRun = graphRun ?? GraphRunMetrics(
             graphID: graph.id,
             goal: graph.goal,
             finishedAt: finishedAt ?? Date(),

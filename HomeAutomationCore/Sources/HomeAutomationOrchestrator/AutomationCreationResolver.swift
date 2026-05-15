@@ -77,24 +77,15 @@ public struct AutomationCreationResolver: Sendable {
         )
 
         // Step 2: Resolve condition operands to device attributes.
-        let resolvedCondition = await conditionOperandResolver.resolve(ruleDraft.condition)
-        let resolvedRuleDraft = HomeAutomationRuleDraft(
-            name: ruleDraft.name,
-            domain: ruleDraft.domain,
-            operation: ruleDraft.operation,
-            intent: ruleDraft.intent,
-            trigger: ruleDraft.trigger,
-            condition: resolvedCondition,
-            actionDescriptions: ruleDraft.actionDescriptions,
-            confidence: ruleDraft.confidence
-        )
+        let conditionOutput = await conditionOperandResolver.resolveDraft(ruleDraft)
+        let resolvedRuleDraft = conditionOutput.ruleDraft
         await eventBus.publish(
             OrchestratorPipelineEvent(
                 runID: runID,
                 stage: "automationConditionOperandResolution",
                 agentID: "automationConditionOperandResolution",
                 status: .completed,
-                detail: "\(Self.conditionCount(resolvedCondition)) condition node(s)"
+                detail: "\(conditionOutput.records.count) condition operand(s), \(Self.conditionCount(resolvedRuleDraft.condition)) condition node(s)"
             )
         )
 

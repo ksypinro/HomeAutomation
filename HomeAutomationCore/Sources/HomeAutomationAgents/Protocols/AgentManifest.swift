@@ -128,11 +128,11 @@ public enum AgentManifestDefaults {
         case .automationConditionOperandResolution:
             return ["automationDraft"]
         case .automationValidation:
-            return ["automationDraft", "automationResolvedActions"]
+            return ["automationDraft", "automationResolvedActions", "automationConditionOperandResolutionRecords"]
         case .smartThingsCompilation:
             return ["automationDraft", "automationResolvedActions", "automationValidation"]
         case .automationResultAssembly:
-            return ["automationDraft", "automationResolvedActions", "smartThingsRule"]
+            return ["automationDraft", "automationResolvedActions", "automationValidation", "automationPlan", "smartThingsRule"]
         default:
             return []
         }
@@ -187,13 +187,13 @@ public enum AgentManifestDefaults {
         case .automationActionResolution:
             return ["automationResolvedActions"]
         case .automationConditionOperandResolution:
-            return ["automationDraft"]
+            return ["automationDraft", "automationConditionOperandResolutionRecords"]
         case .automationValidation:
             return ["automationValidation", "resolution"]
         case .smartThingsCompilation:
-            return ["smartThingsRule"]
+            return ["smartThingsRule", "automationPlan"]
         case .automationResultAssembly:
-            return ["resolution"]
+            return ["resolverResult", "resolution"]
         default:
             return []
         }
