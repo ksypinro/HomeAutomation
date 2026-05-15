@@ -41,7 +41,7 @@ struct HomeAutomationView: View {
             Label("Home Automation", systemImage: "house.and.flag")
                 .font(.largeTitle.weight(.semibold))
 
-            Text("Resolve smart-home commands with the legacy multi-stage Foundation Models pipeline, map them to capability-based commands, and execute low-risk actions locally.")
+            Text("Resolve smart-home commands with the graph-based multi-agent pipeline, map them to capability-based commands, and execute low-risk actions locally.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -2,167 +2,362 @@
 
 ## Summary
 
-The current orchestrator is effective for one primary workflow: resolving a single immediate smart-home command into one validated command draft and execution plan. It is less ready for future workflows such as automation creation, automation update, multi-action rules, condition parsing, scenes, or operation-specific pipelines.
+The orchestrator has already moved from a single fixed phase pipeline toward a graph-capable runtime. Direct commands now default to the graph scheduler, while the legacy phase scheduler remains available as a rollback path.
 
-This plan proposes evolving the orchestrator into a capability-driven DAG runtime. The key change is to stop treating the pipeline as one fixed list of phases and instead let the orchestrator build an execution graph from the requested operation and the capabilities provided by registered agents.
+The next architectural challenge is different: make the orchestrator easy to extend for operation-specific workflows such as automation creation, automation update, automation deletion, automation query, scene creation, and routine execution.
 
-Chosen direction:
+Current state in one sentence:
 
-- Introduce a new DAG runtime beside the current scheduler.
-- Use agent capabilities as the main extension unit.
-- Keep current direct command behavior stable while the DAG path reaches parity.
-- Add operation routing as the first future-compatible capability.
+```text
+Direct command orchestration is graph-default; automation creation is functional but still service-driven rather than fully graph-native.
+```
 
-## Current Architecture Findings
+The intended direction is to keep the graph scheduler as the shared runtime and move each operation into its own operation graph, selected by an operation router.
 
-### What Works Well
+## Current Implementation Baseline
 
-- `HomeCommandOrchestrator` owns the high-level lifecycle: request creation, context store, memory injection, planning, scheduling, result assembly, metrics, and streamed events.
-- `AgentRegistry` already supports lookup by `AgentCapability`, which is a useful extension point.
-- `ContextualHomeAgent` adapts strongly typed agents into a common `AnyHomeAgent` runtime interface.
-- `ResolutionContextStore` centralizes context mutation and keeps agents patch-based rather than directly mutating shared state.
-- `AgentScheduler` supports sequential and parallel execution phases.
-- Mandatory safety gates fail closed through `OrchestratorPolicyEngine`.
-- Metrics and circuit breakers already give useful runtime visibility.
+### Runtime Selection
 
-### Main Limitations
-
-- `AgentPlanner` is static. It chooses either fallback-only or one hardcoded full command pipeline.
-- `AgentScheduler` can only execute ordered phases. It cannot express arbitrary dependencies, conditional routing, operation-specific subgraphs, or repeated subflows.
-- `AgentRegistry` indexes by capability, but the planner still uses concrete `AgentID`s.
-- `ResolutionContextStore.apply` is hardcoded around known patch keys. Every future operation will require more store changes unless context writes become more typed and namespaced.
-- `OrchestratorPolicyEngine` is ID-centric. Retry limits, mandatory gate detection, fail-closed handling, and terminal behavior are tied to current agent IDs.
-- Scheduler stop conditions are coupled to current `HomeCommandResolution` cases.
-- Metrics assume one command draft, one candidate set, and one execution plan.
-- `DefaultAgentRegistryFactory` is a long monolithic registration block, making new operation-specific agent families harder to add cleanly.
-
-## Target Architecture
-
-### Operation-First Orchestration
-
-The orchestrator should first determine what kind of operation the user requested.
-
-Initial operation types:
+`OrchestratorRuntimeMode` currently supports:
 
 ```swift
-public enum HomeAutomationOperationType: Sendable, Hashable, Codable {
+public enum OrchestratorRuntimeMode: String, Sendable, Hashable, Codable {
+    case legacy
+    case graph
+}
+```
+
+The default runtime is graph:
+
+```swift
+public struct OrchestratorRuntimeConfiguration {
+    public static let environmentVariableName = "HOME_AUTOMATION_ORCHESTRATOR_RUNTIME"
+    public static let graphDefault = OrchestratorRuntimeConfiguration(runtimeMode: .graph)
+    public static let legacyRollback = OrchestratorRuntimeConfiguration(runtimeMode: .legacy)
+}
+```
+
+The app resolves the runtime configuration and passes it into both RAG and non-RAG orchestrators.
+
+Review:
+
+- This satisfies the Phase 11 runtime-default requirement.
+- Rollback exists and is useful for direct command parity debugging.
+- Runtime selection is still coarse. It chooses legacy vs graph for direct-command action resolution, but automation creation itself is not yet executed by `GraphScheduler`.
+
+### Operation Detection
+
+The core operation model exists:
+
+```swift
+public enum HomeAutomationOperationKind: String, Sendable, Hashable, Codable {
     case executeDeviceCommand
     case automationCreation
     case automationUpdate
     case automationDeletion
     case automationQuery
+    case sceneCreation
+    case routineExecution
     case unsupported
 }
 ```
 
-The operation result should be stored in context and used by the planner:
+`HomeCommandOrchestrator.resolveStream` runs `HomeOperationDetectionService` before selecting a pipeline.
+
+Current behavior:
+
+- `.executeDeviceCommand` -> direct-command graph or legacy scheduler.
+- `.automationCreation` -> `AutomationCreationResolver`.
+- other operation kinds -> unsupported response.
+
+Review:
+
+- Operation routing exists and works.
+- The detector is deterministic and offline-safe.
+- The detector is not yet a default graph node, even though `AgentID.operationDetection`, `AgentCapability.operationDetection`, and manifest support exist.
+- There is no ambiguity escalation path that combines deterministic detection, RAG examples, and a model-backed router.
+
+### Agent Manifests and Registry
+
+`AgentManifest` now includes:
+
+- `id`
+- `capabilities`
+- `supportedOperations`
+- `consumes`
+- `produces`
+- `safetyRole`
+- `retryPolicy`
+- `priority`
+
+`AgentRegistry` indexes agents by:
+
+- concrete `AgentID`
+- `AgentCapability`
+- `HomeAutomationOperationKind`
+
+Review:
+
+- This is a strong foundation for extensibility.
+- Capability and operation lookups are implemented.
+- Direct command production graphs still mostly use `.byID`, so capability-driven planning is available but not fully exploited.
+- `consumes` and `produces` are string descriptors, not strongly typed context descriptors.
+- The registry has priority ordering, but no plugin-style operation graph registration yet.
+
+### Graph Runtime
+
+The graph runtime includes:
+
+- `OrchestrationGraph`
+- `GraphNode`
+- `GraphEdge`
+- `AgentRequirement`
+- `GraphGuard`
+- `NodeExecutionPolicy`
+- `OrchestrationGoal`
+- `GraphPlanner`
+- `GraphScheduler`
+- `GraphValidator`
+- `GraphRunMetrics`
+
+Current scheduler behavior:
+
+- validates graph structure before execution
+- finds nodes whose dependencies have completed
+- runs independent ready nodes concurrently with task groups
+- resolves nodes by ID or capability
+- filters selected agents by operation support
+- checks circuit breakers
+- applies success patches to `ResolutionContextStore`
+- records traces, events, node statuses, selected agents, skipped nodes, and durations
+- fails closed for mandatory safety gates
+- stops on terminal outcomes
+
+Review:
+
+- The graph scheduler is real, not just a plan.
+- Direct-command graph and fallback graph are production paths.
+- The scheduler still assumes `ResolutionContext` and `AgentRunResult`.
+- Stop behavior is still tied to `HomeCommandResolution` cases.
+- Graph metrics are useful but still missing graph version and critical failure classification.
+
+### Direct Command Graph
+
+`GraphPlanner.directCommandGraph()` models the current direct-command flow:
+
+```text
+language/domain/intent/deviceType/slots/risk
+  -> capabilityKnowledge/bixbyKnowledge/commandExample/candidateRetrieval
+  -> retrievalJudge
+  -> candidateRanking
+  -> candidateHydration
+  -> instructionComposer
+  -> draftGeneration
+  -> safetyValidation
+  -> parameterValidation
+  -> confirmationPolicy
+  -> executionPlanning
+```
+
+`GraphPlanner.fallbackGraph()` models the model-unavailable path:
+
+```text
+ruleFallback -> bixbyFallback -> unsupportedCommand
+```
+
+Review:
+
+- Direct commands are graph-default.
+- Graph/legacy parity tests exist for fallback commands, high-risk confirmation, a command matrix, metrics, and conversation memory.
+- The graph plan is still manually constructed and mostly ID-driven.
+
+### Automation Creation Flow
+
+Automation creation is functional through `AutomationCreationResolver`.
+
+Current flow:
+
+```text
+operationDetection
+  -> AutomationDraftAgent
+  -> AutomationConditionOperandResolver
+  -> AutomationActionResolver
+       -> direct-command graph or legacy scheduler per action
+  -> AutomationValidationAgent
+  -> SmartThingsRuleCompiler
+  -> HomeAutomationCreationPlan
+```
+
+`GraphPlanner.automationCreationGraph()` defines this intended graph shape:
+
+```text
+operationDetection
+  -> automationDraft
+  -> automationConditionOperandResolution
+  -> automationActionResolution
+  -> automationValidation
+  -> smartThingsCompilation
+  -> automationResultAssembly
+```
+
+Review:
+
+- The graph shape exists.
+- The orchestrator uses that graph shape for metrics.
+- The graph scheduler does not execute the automation creation graph yet.
+- Several automation components are services rather than registered contextual agents.
+- Action resolution is sequential.
+- Action and condition values do not have scoped graph context.
+
+### Context Store
+
+`ResolutionContextStore` still applies root-level patch keys for the direct command flow.
+
+There is also an `AutomationResolutionContext` and `AutomationResolutionContextStore`.
+
+Review:
+
+- The patch-based mutation model is still a good design.
+- The current context model is too root-oriented for multi-action automation graphs.
+- Automation patch keys exist, but the main `ResolutionContextStore.apply` does not fully materialize automation fields.
+- A separate automation context store is useful but fragments the runtime model.
+
+### Policy
+
+`OrchestratorPolicyEngine` remains the main policy surface.
+
+Current strengths:
+
+- model availability gates
+- mandatory safety gate checks
+- fail-closed behavior
+- terminal result detection
+
+Review:
+
+- Policy now benefits from manifest `safetyRole`, but it is still partly ID-centric.
+- Retry policy is present in manifests, but graph scheduler does not yet use manifest retry policies for node retry.
+- Future operations need operation-specific policy hooks.
+
+### Metrics
+
+Current metrics capture:
+
+- foundation model usage
+- fallback use
+- graph run metrics for direct commands
+- circuit breaker states
+- automation operation metrics
+- automation action count
+- automation condition count
+- validation issue count
+- SmartThings compilation support
+
+Review:
+
+- The telemetry baseline is strong.
+- Automation graph metrics are currently a planned graph shape plus service-path result data, not actual graph execution data.
+- Node-level automation metrics should become actual `GraphScheduler` node statuses after graph migration.
+
+## Architecture Review
+
+### What Is Strong
+
+- Direct command behavior has not been sacrificed for the graph migration.
+- The graph runtime is already capable of parallel dependency batches.
+- Agent manifests give the registry enough metadata to support operation-specific planning.
+- Operation detection now exists outside the old intent-family model.
+- Automation creation reuses direct-command action resolution, which prevents duplicate command logic.
+- Automation validation and SmartThings compilation are isolated from draft extraction.
+- RAG is gated for automation complexity instead of blindly retrieving for every simple command.
+
+### What Needs Strengthening
+
+- Operation detection should become part of the graph/runtime contract.
+- The planner should evolve from static graph factories to operation graph registration.
+- Automation creation should move from `AutomationCreationResolver` service orchestration to graph execution.
+- Multi-action automations need scoped context and dynamic fan-out.
+- Conditions need scoped operand resolution and ambiguity handling.
+- Policy should read manifests and node metadata first, with ID-based compatibility as a fallback.
+- Outcomes should be operation-neutral internally.
+- Graph metrics should be the source of truth for every operation.
+
+## Target Architecture
+
+### Operation-First Runtime
+
+The orchestrator should follow this high-level shape:
+
+```mermaid
+flowchart LR
+    A["User command"] --> B["Operation router"]
+    B --> C{"Operation"}
+    C -->|"executeDeviceCommand"| D["Direct command graph"]
+    C -->|"automationCreation"| E["Automation creation graph"]
+    C -->|"automationUpdate"| F["Automation update graph"]
+    C -->|"automationDeletion"| G["Automation deletion graph"]
+    C -->|"automationQuery"| H["Automation query graph"]
+    C -->|"unsupported"| I["Unsupported graph"]
+```
+
+The operation router can start deterministic and later add model/RAG support for ambiguous routing. The graph scheduler should not need changes when a new operation graph is added.
+
+### Operation Graph Registry
+
+Add an operation graph registry that maps operation kinds to graph builders.
+
+Target shape:
 
 ```swift
-public struct HomeOperationDetectionResult: Sendable, Hashable, Codable {
-    public let operation: HomeAutomationOperationType
-    public let confidence: Double
-    public let reason: String
+public protocol OperationGraphProvider: Sendable {
+    var operation: HomeAutomationOperationKind { get }
+    func makeGraph(context: ResolutionContext) -> OrchestrationGraph
+}
+
+public struct OperationGraphCatalog: Sendable {
+    public func graph(
+        for operation: HomeAutomationOperationKind,
+        context: ResolutionContext
+    ) -> OrchestrationGraph
 }
 ```
 
-Examples:
+Benefits:
 
-- `Turn on the TV` -> `executeDeviceCommand`
-- `Turn on AC everyday at 7 AM` -> `automationCreation`
-- `Delete my morning AC automation` -> `automationDeletion`
-- `What rules run at 7 AM?` -> `automationQuery`
+- Adding `automationQuery` does not require editing `GraphScheduler`.
+- Operation-specific graphs live beside their agents.
+- Tests can register fake operation graphs.
+- The catalog becomes the seam between routing and execution.
 
-### Capability-Driven Agent Registration
+### Manifest-Driven Planning
 
-Each agent should publish a manifest.
+The planner should prefer capability and manifest requirements over hardcoded IDs.
 
-```swift
-public struct AgentManifest: Sendable, Hashable {
-    public let id: AgentID
-    public let capabilities: Set<AgentCapability>
-    public let consumes: Set<ContextKeyDescriptor>
-    public let produces: Set<ContextKeyDescriptor>
-    public let safetyRole: AgentSafetyRole
-    public let retryPolicy: AgentRetryPolicy
-    public let priority: Int
-}
-
-public enum AgentSafetyRole: Sendable, Hashable {
-    case none
-    case requiredGate
-    case executionGate
-}
-
-public struct AgentRetryPolicy: Sendable, Hashable {
-    public let maxAttempts: Int
-    public let retryFailureKinds: Set<String>
-}
-```
-
-The registry should support:
-
-- lookup by concrete `AgentID`
-- lookup by `AgentCapability`
-- deterministic preferred-agent selection for a capability
-- manifest lookup for policy and graph planning
-
-This allows future operations to ask for "an agent that can extract automation conditions" without hardcoding a single agent ID in the planner.
-
-### DAG Runtime
-
-Introduce a new graph model beside `AgentExecutionPlan`.
+Current:
 
 ```swift
-public struct OrchestrationGraph: Sendable {
-    public let id: String
-    public let version: String
-    public let goal: OrchestrationGoal
-    public let nodes: [GraphNode]
-    public let edges: [GraphEdge]
-}
-
-public enum OrchestrationGoal: Sendable, Hashable {
-    case executeDeviceCommand
-    case automationCreation
-    case unsupported
-}
-
-public struct GraphNode: Sendable, Hashable {
-    public let id: String
-    public let requirement: AgentRequirement
-    public let consumes: [ContextKeyDescriptor]
-    public let produces: [ContextKeyDescriptor]
-    public let guardCondition: GraphGuard?
-    public let executionPolicy: NodeExecutionPolicy
-}
-
-public enum AgentRequirement: Sendable, Hashable {
-    case agentID(AgentID)
-    case capability(AgentCapability)
-}
-
-public struct GraphEdge: Sendable, Hashable {
-    public let from: String
-    public let to: String
-}
+GraphNode(id: "language", requirement: .byID(.language))
 ```
 
-The `GraphScheduler` should:
+Target where safe:
 
-- run nodes when dependencies are satisfied
-- execute independent ready nodes concurrently
-- resolve capability requirements through `AgentRegistry`
-- check circuit breakers before running selected agents
-- apply patches after each node completes
-- trace selected agents, skipped nodes, guard failures, and critical failures
-- fail closed for required safety gates
-- return an operation-neutral outcome
+```swift
+GraphNode(id: "language", requirement: .byCapability(.languageDetection))
+```
+
+Rules:
+
+- Use `.byID` only when one exact agent is semantically required.
+- Use `.byCapability` when any provider can satisfy the node.
+- Validate that required safety gates cannot be optional.
+- Filter by `supportedOperations`.
+- Use `priority` only after safety and compatibility checks.
 
 ### Typed and Scoped Context
 
-The current `ResolutionContext` is root-level and direct-command oriented. Future operation support needs scoped context so multiple actions and conditions do not overwrite each other.
+Add typed context descriptors and scopes.
 
-Add typed context keys:
+Target shape:
 
 ```swift
 public struct ContextKey<Value: Sendable>: Sendable, Hashable {
@@ -175,339 +370,221 @@ public enum ContextScope: Sendable, Hashable {
     case operation(String)
     case action(String)
     case condition(String)
-}
-
-public struct ContextKeyDescriptor: Sendable, Hashable {
-    public let rawValue: String
-    public let scope: ContextScope
+    case backend(String)
 }
 ```
 
-Use root scope for the existing direct command fields:
+Required use cases:
 
-- language
-- domain
-- intent
-- device type
-- slots
-- risk
-- candidates
-- draft
-- execution plan
-- resolution
+- Root scope stores operation detection and direct-command state.
+- Action scope stores per-action candidates, drafts, and resolutions.
+- Condition scope stores per-condition operand resolution.
+- Backend scope stores compiler output and API response metadata.
 
-Use action and condition scopes later for automation creation:
+This prevents multi-action automation work from overwriting a single root `draft`, `aggregation`, or `resolution`.
 
-- action `a1` draft
-- action `a2` draft
-- condition `c1` operand
-- condition `c2` operand
+### Nested Graphs and Fan-Out
+
+Automation creation needs dynamic fan-out:
+
+```text
+automationDraft
+  -> action[a1].directCommandSubgraph
+  -> action[a2].directCommandSubgraph
+  -> condition[c1].operandResolution
+  -> condition[c2].operandResolution
+  -> automationJoin
+  -> automationValidation
+  -> smartThingsCompilation
+  -> resultAssembly
+```
+
+The first implementation can keep a sequential service fallback, but the intended graph runtime should support:
+
+- dynamic node creation from `actionDescriptions`
+- action-scoped direct-command subgraphs
+- condition-scoped operand resolution subgraphs
+- deterministic join ordering
+- early clarification only when a required child fails
 
 ### Operation-Neutral Outcomes
 
-The scheduler should not know only about `HomeCommandResolution`.
+The scheduler should stop based on operation-neutral outcomes, not only `HomeCommandResolution`.
 
-Add an internal outcome wrapper:
+Target internal type:
 
 ```swift
 public enum OrchestrationOutcome: Sendable, Hashable {
     case command(HomeCommandResolution)
-    case automation(HomeAutomationResolution)
+    case automation(HomeAutomationCreationPlan)
     case clarification(String)
     case unsupported(String)
+    case failure(AgentFailure)
 }
 ```
 
-Direct command APIs can still return `HomeAutomationResolverResult`. The outcome wrapper exists so the runtime can support future result types without hardcoding stop behavior around command-only cases.
+The public API can keep returning `HomeAutomationResolverResult`.
 
 ### Graph-Aware Policy
 
-Move policy away from agent-ID switches and toward manifests and graph node metadata.
-
-```swift
-public struct OrchestrationPolicy: Sendable {
-    public func shouldUseModels(for goal: OrchestrationGoal) -> Bool
-    public func retryPolicy(for manifest: AgentManifest) -> AgentRetryPolicy
-    public func isMandatory(_ manifest: AgentManifest) -> Bool
-    public func failClosedOutcome(
-        for node: GraphNode,
-        manifest: AgentManifest?,
-        context: ResolutionContext
-    ) -> OrchestrationOutcome
-}
-```
-
-The old `OrchestratorPolicyEngine` can remain as a compatibility wrapper during migration.
-
-### Graph-Aware Metrics
-
-Add graph runtime metrics without removing current fields.
-
-```swift
-public struct GraphRunMetrics: Sendable, Codable, Hashable {
-    public let graphID: String
-    public let graphVersion: String
-    public let goal: String
-    public let selectedAgents: [String: String]
-    public let nodeStatuses: [String: String]
-    public let skippedNodes: [String]
-    public let criticalFailures: [String]
-}
-```
-
-Current metrics should still populate for direct command runs. When using the DAG runtime, direct command metrics should be derived from graph traces.
-
-## Proposed Implementation Plan
-
-### Phase 1: Add Agent Manifests
-
-Add `AgentManifest`, `AgentSafetyRole`, and `AgentRetryPolicy`.
-
-Update `AgentRegistry` so it stores:
-
-- agent instances by ID
-- capability index
-- manifests by ID
-- priority ordering for capability providers
-
-Keep existing `agent(for:)` and `agents(for:)` APIs.
-
-Add tests for:
-
-- manifest lookup
-- deterministic preferred agent selection
-- duplicate capability providers
-
-### Phase 2: Split Registry Construction
-
-Refactor `DefaultAgentRegistryFactory` into grouped registration helpers:
-
-- NLU registrations
-- knowledge registrations
-- candidate registrations
-- draft registrations
-- safety registrations
-- execution registrations
-- fallback registrations
-- response registrations
-
-Do not change behavior. This phase should only make registration easier to extend.
-
-### Phase 3: Add Typed Context Compatibility Layer
-
-Add `ContextKey`, `ContextScope`, and `ContextKeyDescriptor`.
-
-Add generic read/write helpers to `ResolutionContextStore` while preserving existing typed fields and patch keys.
-
-Initial implementation can map typed root keys to existing fields. Scoped keys can be stored in a new dictionary:
-
-```swift
-private var scopedValues: [ContextKeyDescriptor: AnySendableValue]
-```
-
-Add tests for:
-
-- root key read/write compatibility
-- action-scoped values not overwriting root values
-- condition-scoped values not overwriting action values
-
-### Phase 4: Introduce DAG Graph Types
-
-Add:
-
-- `OrchestrationGraph`
-- `GraphNode`
-- `GraphEdge`
-- `AgentRequirement`
-- `GraphGuard`
-- `NodeExecutionPolicy`
-- `OrchestrationGoal`
-- `OrchestrationOutcome`
-
-Do not connect them to production command resolution yet.
-
-Add unit tests for graph validation:
-
-- missing dependency detection
-- cycle detection
-- unknown node references
-- duplicate node IDs
-
-### Phase 5: Build GraphScheduler
-
-Implement `GraphScheduler` beside the existing `AgentScheduler`.
-
-Required behavior:
-
-- find ready nodes by dependency completion
-- run ready nodes concurrently
-- resolve capability requirements to concrete agents
-- respect circuit breakers
-- apply success patches
-- append errors on failures
-- fail closed for required gates
-- trace node and selected agent
-- support skipped nodes through guards
-
-Add tests for:
-
-- simple linear graph
-- parallel independent nodes
-- dependency-gated node execution
-- guard skipped node
-- missing optional agent
-- missing required gate
-- circuit breaker skip
-- fail-closed required gate
-
-### Phase 6: Add CapabilityGraphPlanner
-
-Create `CapabilityGraphPlanner` beside the current `AgentPlanner`.
-
-It should produce:
-
-- direct command graph matching the current model-available pipeline
-- fallback graph matching the current model-unavailable pipeline
-- unsupported graph
-
-The first direct command graph should preserve current logical ordering:
-
-1. NLU agents in parallel
-2. knowledge agents and candidate retrieval
-3. retrieval judge
-4. candidate ranking
-5. candidate hydration
-6. instruction composition
-7. draft generation
-8. safety validation
-9. parameter validation
-10. confirmation policy
-11. execution planning
-12. optional mock execution when policy allows
-
-Add tests comparing current `AgentPlanner` intent with graph planner output.
-
-### Phase 7: Add Runtime Selection
-
-Add an orchestrator configuration:
-
-```swift
-public enum OrchestratorRuntimeMode: Sendable, Hashable {
-    case legacyPhaseScheduler
-    case graphScheduler
-}
-```
-
-Default to `legacyPhaseScheduler` at first.
-
-Allow tests and internal callers to opt into `graphScheduler`.
-
-Add direct command parity tests:
-
-- fallback command resolves the same selected device
-- model-unavailable metrics remain populated
-- safety confirmation still works
-- memory hint pronoun resolution still works
-
-### Phase 8: Switch Direct Command Default
-
-After parity tests pass, change the default runtime to `graphScheduler`.
-
-Keep the legacy scheduler available for a short compatibility period.
-
-### Phase 9: Add Operation Detection
-
-Add:
-
-- `HomeAutomationOperationType`
-- `HomeOperationDetectionResult`
-- `AgentID.operationDetection`
-- `AgentCapability.operationDetection`
-- `OperationDetectionAgent`
-
-Update graph planning so the first graph can route by operation:
-
-- execute device command -> direct command graph
-- automation creation -> future automation graph
-- unsupported -> unsupported graph
-
-Initially, automation creation can route to a placeholder unsupported/clarification graph until automation agents exist.
-
-### Phase 10: Add Automation Graph Later
-
-Once the orchestrator runtime is graph-based, add automation creation as a new graph goal rather than modifying the direct command graph.
-
-Future automation graph should include:
-
-- operation detection
-- automation decomposition
-- trigger extraction
-- condition graph extraction
-- action resolution subgraphs
-- condition operand resolution subgraphs
-- automation assembly
-- automation validation
-- backend translation
+Policy should read:
+
+- graph goal
+- node execution policy
+- agent manifest
+- operation kind
+- context scope
+
+Target policy responsibilities:
+
+- model availability by operation
+- retry policy by manifest
+- fail-closed behavior by safety role
+- terminal outcome behavior by operation
+- high-risk persistent automation confirmation
+- backend write confirmation
+
+Keep `OrchestratorPolicyEngine` as a compatibility wrapper until all graph paths use the new policy shape.
+
+## Updated Implementation Plan
+
+### Phase 12: Operation Router as Runtime Contract
+
+1. Add a contextual `OperationDetectionAgent` wrapper around `HomeOperationDetectionService`.
+2. Register it in `DefaultAgentRegistryFactory`.
+3. Add root operation storage to `ResolutionContextStore`.
+4. Add tests for graph-executed operation detection.
+5. Keep deterministic routing as the default, with no model dependency.
+
+### Phase 13: Operation Graph Catalog
+
+1. Introduce `OperationGraphProvider`.
+2. Introduce `OperationGraphCatalog`.
+3. Move direct command, fallback, unsupported, and automation creation graph construction behind providers.
+4. Keep `GraphPlanner` as a compatibility facade.
+5. Add tests proving a fake operation graph can be registered without modifying scheduler internals.
+
+### Phase 14: Scoped Context Compatibility Layer
+
+1. Add typed context keys and scopes.
+2. Preserve existing root fields and patch keys.
+3. Add a scoped value dictionary for action, condition, and backend scopes.
+4. Add typed read/write helpers.
+5. Add tests proving scoped action drafts do not overwrite root draft or each other.
+
+### Phase 15: Automation Agents as Graph Nodes
+
+1. Add contextual wrappers for:
+   - operation detection
+   - automation draft
+   - condition operand resolution
+   - automation action resolution
+   - automation validation
+   - SmartThings compilation
+   - automation result assembly
+2. Register these agents with `.automationCreation`.
+3. Make their manifests declare consumes/produces descriptors.
+4. Run automation creation through `GraphScheduler` behind a feature flag.
+5. Compare graph output against `AutomationCreationResolver` output.
+
+### Phase 16: Dynamic Action and Condition Fan-Out
+
+1. Add graph expansion from automation draft output.
+2. Run each action through a scoped direct-command subgraph.
+3. Run each condition operand through a scoped resolver node.
+4. Add deterministic join nodes for action and condition results.
+5. Preserve sequential fallback during migration.
+
+### Phase 17: Policy and Outcome Generalization
+
+1. Add internal `OrchestrationOutcome`.
+2. Teach `GraphScheduler` to return operation-neutral outcomes.
+3. Move terminal stop decisions out of command-only cases.
+4. Apply manifest retry policies.
+5. Move mandatory gate detection toward manifest/node metadata.
+
+### Phase 18: SmartThings Operation Backends
+
+1. Keep compilation isolated behind `HomeAutomationRuleCompiling`.
+2. Add a Rules API client protocol for create/update/delete/query.
+3. Add dry-run and confirmation-required modes.
+4. Add operation graphs for update, deletion, and query.
+5. Never let backend API writes occur before deterministic validation and user confirmation.
+
+### Phase 19: RAG Optimization and Evaluation
+
+1. Build an automation command corpus.
+2. Add retrieval quality metrics by source and subproblem.
+3. Split retrieval into operation routing, automation drafting, condition grammar, and backend schema.
+4. Tune hybrid retrieval weights per subproblem.
+5. Add tests for RAG gating so simple daily schedules remain fast.
+
+### Phase 20: Cleanup and Migration
+
+1. Make automation creation graph-native by default.
+2. Retain service resolver temporarily for parity tests and rollback.
+3. Remove duplicated service orchestration once graph parity is stable.
+4. Update app diagnostics to show operation graph status.
+5. Revisit legacy phase scheduler removal only after direct command and automation graph paths are stable.
 
 ## Testing Requirements
 
 ### Existing Behavior Regression
 
-Current direct command tests must continue to pass:
+- direct command fallback graph matches legacy output
+- high-risk direct command confirmation still works
+- conversation memory still works
+- graph metrics are recorded for direct commands
+- model-unavailable behavior remains deterministic
 
-- `Turn on the bedroom lamp`
-- `Set bedroom lamp to 40 percent`
-- `Make bedroom AC cooler by 2 degrees`
-- high-risk lock confirmation
-- memory-based pronoun resolution
-- fallback-only resolution
+### Operation Routing Tests
 
-### New Architecture Tests
+- direct command routes to direct graph
+- daily schedule routes to automation creation
+- device trigger routes to automation creation
+- update/delete/query operations return explicit unsupported until implemented
+- operation detection can run as a graph node
 
-Add tests for:
+### Automation Graph Tests
 
-- agent manifest registration
-- capability-based agent selection
-- graph validation
-- graph dependency execution
-- graph parallel execution
-- graph guard skip
-- fail-closed mandatory gate
-- typed context root compatibility
-- typed context action and condition scoping
-- graph metrics capture
-- direct command parity between legacy and graph runtime
+- automation graph validates successfully with default registry
+- automation graph service-path and graph-path outputs match
+- multiple actions resolve with scoped action context
+- unresolved action asks clarification
+- unresolved condition operand asks clarification
+- high-risk automation requires confirmation
+- unsupported SmartThings compilation preserves parsed draft
 
-### Future Compatibility Proof
+### Graph Infrastructure Tests
 
-Add a test-only stub graph:
-
-```text
-operationDetection -> fakeAutomationPlanner -> fakeAutomationResult
-```
-
-The test should prove that adding a new operation graph does not require modifying `GraphScheduler`.
+- dependency order
+- independent node parallelism
+- guard skip
+- missing required safety gate fail-closed
+- manifest priority selection
+- operation support filtering
+- scoped context isolation
+- operation-neutral terminal outcome
 
 ## Acceptance Criteria
 
-The orchestrator refactor is successful when:
+The orchestrator architecture is future-compatible when:
 
-1. Existing direct command behavior remains unchanged.
-2. Agents can be selected by capability, not only by hardcoded ID.
-3. A graph planner can express the current command pipeline.
-4. The graph scheduler can run sequential and parallel dependencies.
-5. Mandatory safety gates fail closed through manifest policy.
-6. Context supports scoped values for future multi-action operations.
-7. Metrics identify graph ID, graph version, node statuses, selected agents, skipped nodes, and failures.
-8. Operation detection can be added as a graph node without changing scheduler internals.
-9. A stub future operation graph can run in tests without modifying the direct command graph.
-10. The architecture is ready for automation creation as a separate operation graph.
+1. The scheduler does not need code changes to add a new operation graph.
+2. Operation detection is represented in runtime context and graph traces.
+3. Direct command behavior remains stable under graph default.
+4. Automation creation executes through graph nodes, not only a side service.
+5. Multiple automation actions use scoped context.
+6. Condition operands use scoped context and ambiguity-safe resolution.
+7. Policy is driven by graph goal, node policy, and agent manifests.
+8. Metrics report actual node statuses for every operation graph.
+9. SmartThings API persistence is behind a backend protocol and confirmation policy.
+10. RAG assists extraction and schema grounding but never owns validation or safety decisions.
 
-## Explicit Non-Goals
+## Non-Goals
 
-- Do not implement automation creation in this refactor.
-- Do not remove the current scheduler until graph parity is proven.
-- Do not change the public direct command API in the first migration.
-- Do not make RAG or Foundation Models responsible for final safety decisions.
-- Do not force all future operations to return `HomeAutomationResolverResult`; introduce generalized outcomes internally first.
-
+- Do not remove the legacy scheduler until rollback is no longer useful.
+- Do not merge SmartThings API calls into parsers, agents, or validation policy.
+- Do not force all public APIs to expose operation-specific result types immediately.
+- Do not use RAG or model output as the final authority for devices, capabilities, commands, or safety.
+- Do not make automation creation execute device commands immediately.

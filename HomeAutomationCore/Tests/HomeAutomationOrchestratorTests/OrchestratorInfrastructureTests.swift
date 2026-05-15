@@ -93,6 +93,57 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func runtimeConfigurationDefaultsToGraphAndCanRollbackToLegacy() {
+        let defaultConfiguration = OrchestratorRuntimeConfiguration.resolving(environment: [:])
+        let rollbackConfiguration = OrchestratorRuntimeConfiguration.resolving(
+            environment: [
+                OrchestratorRuntimeConfiguration.environmentVariableName: OrchestratorRuntimeMode.legacy.rawValue
+            ]
+        )
+        let invalidConfiguration = OrchestratorRuntimeConfiguration.resolving(
+            environment: [
+                OrchestratorRuntimeConfiguration.environmentVariableName: "not-a-runtime"
+            ]
+        )
+
+        #expect(defaultConfiguration.runtimeMode == .graph)
+        #expect(rollbackConfiguration.runtimeMode == .legacy)
+        #expect(invalidConfiguration.runtimeMode == .graph)
+    }
+
+    @Test
+    func orchestratorDefaultRuntimeUsesGraph() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        _ = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        let metrics = try #require(await orchestrator.lastMetrics())
+
+        #expect(metrics.graphRun?.graphID == "direct-command-fallback-graph")
+    }
+
+    @Test
+    func legacyRuntimeCanBeExplicitlySelectedAsRollback() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            runtimeMode: .legacy
+        )
+
+        let result = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        let metrics = try #require(await orchestrator.lastMetrics())
+
+        guard case .readyToExecute = result.resolution else {
+            Issue.record("Expected legacy rollback runtime to keep direct commands working.")
+            return
+        }
+        #expect(metrics.graphRun == nil)
+        #expect(metrics.agentStatuses[AgentID.ruleFallback.rawValue] == "success")
+    }
+
+    @Test
     func defaultRegistryContainsAllPhaseThreeAgents() {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
 
@@ -200,7 +251,7 @@ struct OrchestratorInfrastructureTests {
         let metrics = try JSONDecoder().decode(OrchestratorMetrics.self, from: Data(metricsJSON.utf8))
 
         #expect(metrics.automationMetrics.operation == HomeAutomationOperationKind.automationCreation.rawValue)
-        #expect(metrics.automationMetrics.runtimeMode == OrchestratorRuntimeMode.legacy.rawValue)
+        #expect(metrics.automationMetrics.runtimeMode == OrchestratorRuntimeMode.graph.rawValue)
         #expect(metrics.automationMetrics.graphID == "automation-creation-graph")
         #expect(metrics.automationMetrics.automationActionCount == 1)
         #expect(metrics.automationMetrics.automationCompilerTarget == "SmartThingsRulesV1")

@@ -84,7 +84,7 @@ public struct AutomationActionResolver: Sendable {
         planner: AgentPlanner,
         graphPlanner: GraphPlanner,
         policy: OrchestratorPolicyEngine,
-        runtimeMode: OrchestratorRuntimeMode = .legacy,
+        runtimeMode: OrchestratorRuntimeMode = .graph,
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
     ) {
         self.registry = registry

@@ -60,6 +60,7 @@ final class HomeAutomationViewModel {
     var currentPipelineStage: String?
 
     private let registry = MockHomeDeviceRegistry()
+    private let runtimeConfiguration = OrchestratorRuntimeConfiguration.resolving()
     private var orchestrator: HomeCommandOrchestrator
 
     let sampleCommands = [
@@ -75,7 +76,10 @@ final class HomeAutomationViewModel {
     ]
 
     init() {
-        orchestrator = HomeCommandOrchestrator(deviceRegistry: registry)
+        orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: registry,
+            runtimeMode: runtimeConfiguration.runtimeMode
+        )
         Task {
             await initializeRAG()
         }
@@ -85,7 +89,10 @@ final class HomeAutomationViewModel {
     }
 
     func initializeRAG() async {
-        orchestrator = await HomeCommandOrchestrator.makeRAGEnabled(deviceRegistry: registry)
+        orchestrator = await HomeCommandOrchestrator.makeRAGEnabled(
+            deviceRegistry: registry,
+            runtimeMode: runtimeConfiguration.runtimeMode
+        )
     }
 
     func resolveCommand() {

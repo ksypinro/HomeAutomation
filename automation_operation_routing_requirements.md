@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document captures the current project state, the desired new automation capability, and a proposed implementation plan.
+This document describes the intended operation-routing and automation-creation architecture, reviewed against the current implementation.
 
-The project currently resolves direct smart-home control commands such as:
+The original system was built for immediate device-control commands such as:
 
 ```text
 Turn on the TV
@@ -12,20 +12,20 @@ Set the bedroom lamp to 40 percent
 Make the bedroom AC cooler by 2 degrees
 ```
 
-The new goal is to support operation-level detection so the system can decide whether the user wants to execute a device command now or create a persistent automation/rule.
+The new capability is operation-level detection. Before running command-specific agents, the orchestrator must identify whether the user wants an immediate command or a persistent automation/rule.
 
-Example target command:
+Example user command:
 
 ```text
 Turn on AC everyday at 7 AM
 ```
 
-Expected high-level interpretation:
+The target semantic interpretation is:
 
 ```json
 {
   "domain": "homeAutomation",
-  "operation": "AutomationCreation",
+  "operation": "automationCreation",
   "intent": ["createAutomation"],
   "actions": [
     {
@@ -37,41 +37,45 @@ Expected high-level interpretation:
       "value": "on"
     }
   ],
-  "condition": null,
   "trigger": {
     "type": "schedule",
     "time": "07:00",
     "displayTime": "7:00 AM",
     "repeat": "everyDay"
-  }
+  },
+  "condition": null
 }
 ```
 
+The public Swift result currently returns this information through `HomeAutomationResolverResult.resolution`, specifically `.automationDrafted(HomeAutomationCreationPlan)` or `.automationRequiresConfirmation(HomeAutomationCreationPlan)`. The requested JSON shape should be treated as a presentation/contract projection over `HomeAutomationCreationPlan`, not as the internal source of truth.
+
 ## Reference Material
 
-SmartThings Rules are a useful external model for this feature:
+SmartThings Rules are the primary backend model for the first automation compiler:
 
 - SmartThings Rules documentation: <https://developer.smartthings.com/docs/automations/rules>
 - SmartThings Rules API entry point: <https://developer.smartthings.com/docs/api/public#tag/Rules>
 - SmartThings Automations overview: <https://developer.smartthings.com/docs/automations/getting-started-with-automations>
 
-Key SmartThings concepts relevant to this project:
+Important SmartThings concepts for this project:
 
-- Rules are JSON objects with a name and an actions array.
-- A single Rule can contain multiple actions.
-- Actions form a tree that is evaluated when the Rule is triggered.
-- Common action types include `if`, `sleep`, `command`, and `every`.
-- Common condition types include `and`, `or`, `not`, `equals`, `greaterThan`, `lessThan`, `greaterThanOrEquals`, `lessThanOrEquals`, `between`, and `changes`.
-- Operands include device, location, array, specific, and trigger/precondition concepts.
-- The `every` action handles recurring schedule-like behavior.
+- A Rule is a named JSON object with an `actions` tree.
+- A Rule can contain multiple command actions.
+- `if`, `every`, and `command` actions are enough for the first useful slice.
+- Conditions can compose with `and`, `or`, and `not`.
+- Comparison operators include `equals`, `greaterThan`, `lessThan`, `greaterThanOrEquals`, `lessThanOrEquals`, `between`, and `changes`.
+- Device operands carry device IDs, component, capability, attribute, and trigger policy.
+- Trigger policy matters because a device event can be a trigger, while another condition can be only a precondition.
 
-These concepts imply that the internal model should be a rule AST, not a flat `action` plus `condition` object.
+These concepts mean the internal model should be a rule AST plus resolved action commands, not a flat single `action` and single `condition` object.
 
-## Current Project State
+## Current Implementation Review
+
+This review reflects the current code after the Phase 11 implementation.
 
 ### Package Structure
 
-The Swift package is split into these main products:
+The package remains split into:
 
 - `HomeAutomationCore`
 - `HomeAutomationRAG`
@@ -80,169 +84,196 @@ The Swift package is split into these main products:
 
 The app target depends on the core and orchestrator modules.
 
-### Current Resolution Flow
+### Direct Command Baseline
 
-The current orchestrator resolves commands through a fixed agent pipeline:
+Immediate device commands still use the existing direct-command agent family:
 
-1. NLU agents run in parallel:
-   - `LanguageAgent`
-   - `DomainAgent`
-   - `IntentFamilyAgent`
-   - `DeviceTypeAgent`
-   - `SlotExtractionAgent`
-   - `RiskClassificationAgent`
-2. Knowledge and candidate agents run:
-   - `CapabilityKnowledgeAgent`
-   - `BixbyKnowledgeAgent`
-   - `CommandExampleAgent`
-   - `CandidateRetrievalAgent`
-3. Retrieval quality is judged.
-4. Candidate devices are ranked and hydrated.
-5. Instructions are composed for draft generation.
-6. `DraftGenerationAgent` creates one `HomeCommandDraft`.
-7. Safety, parameter, and confirmation agents validate the draft.
-8. `ExecutionPlanningAgent` converts the draft into an execution plan.
-9. `MockExecutionAgent` can execute low-risk plans locally.
+1. NLU agents detect language, domain, intent family, device type, slots, and risk.
+2. Knowledge and candidate agents retrieve and rank relevant devices and command examples.
+3. Draft generation creates a single `HomeCommandDraft`.
+4. Safety, parameter, and confirmation agents validate the draft.
+5. Execution planning produces a `HomeAutomationExecutionPlan`.
+6. Low-risk execution can be mocked locally when requested.
 
-This pipeline is well-suited for direct commands. It assumes the primary operation is "resolve one command against one target/action plan."
+Phase 11 changed the default direct-command runtime to the graph scheduler. The legacy phase scheduler is still available through `OrchestratorRuntimeMode.legacy` and the environment variable `HOME_AUTOMATION_ORCHESTRATOR_RUNTIME=legacy`.
 
-### Current Core Models
+### Operation Routing Baseline
 
-The current intent family enum supports direct command families:
+The project now has a top-level operation model:
 
 ```swift
-public enum HomeAutomationIntentFamily {
-    case power
-    case temperature
-    case brightness
-    case media
-    case applianceCycle
-    case lockUnlock
-    case openClose
-    case routine
-    case statusQuery
-    case maintenanceQuery
-    case unsupported
-}
-```
-
-There is no top-level operation type and no `createAutomation` intent family yet.
-
-The current `HomeCommandDraft` is single-action oriented:
-
-```swift
-public struct HomeCommandDraft {
-    public let intent: HomeAutomationIntent
-    public let targetDeviceID: String?
-    public let targetGroupID: String?
-    public let capability: String?
-    public let command: String?
-    public let parameters: [HomeResolvedParameter]
-    public let needsClarification: Bool
-    public let clarificationQuestion: String?
-    public let requiresConfirmation: Bool
-    public let confidence: Double
-}
-```
-
-This should remain the canonical representation of one device command. Automation creation should reuse this type for command actions instead of replacing it.
-
-### Current Slot Extraction Limits
-
-`HomeSlotExtractionResult` has:
-
-- rooms
-- device nicknames
-- values
-- modes
-- confidence
-
-It does not have structured temporal or condition fields such as:
-
-- time of day
-- recurrence
-- days of week
-- before/after
-- duration
-- condition operator
-- device operand
-- trigger/precondition semantics
-
-As a result, text like `everyday at 7 AM` would be at risk of being represented as generic numeric values rather than a schedule trigger.
-
-### Current RAG State
-
-The RAG layer currently indexes:
-
-- capability chunks
-- device chunks
-- Bixby command chunks
-- natural language command dataset chunks
-
-This works for direct command resolution but does not yet contain automation grammar, condition examples, schedule examples, or SmartThings Rule examples.
-
-### Current Fallback State
-
-The deterministic fallback path resolves immediate commands through keyword intent detection and device scoring. It does not distinguish:
-
-- execute device command now
-- create automation
-- update automation
-- delete automation
-- query automation
-
-This means model-unavailable operation routing would need new deterministic rules.
-
-## Desired Capability
-
-The system should introduce a top-level operation classification step before deciding which specialized agents to run.
-
-The first two operations to support are:
-
-- `ExecuteDeviceCommand`
-- `AutomationCreation`
-
-Additional future operation types should be anticipated:
-
-- `AutomationUpdate`
-- `AutomationDeletion`
-- `AutomationQuery`
-- `SceneCreation`
-- `RoutineExecution`
-- `Unsupported`
-
-The operation classifier should be the primary router for the orchestrator.
-
-## Detailed Requirements
-
-### Functional Requirements
-
-#### FR-001: Operation Detection
-
-The system must add an agent that detects the operation requested by the user.
-
-Required output:
-
-```swift
-public enum HomeAutomationOperationType: Sendable, Hashable, Codable {
+public enum HomeAutomationOperationKind: String, Sendable, Hashable, Codable {
     case executeDeviceCommand
     case automationCreation
     case automationUpdate
     case automationDeletion
     case automationQuery
+    case sceneCreation
+    case routineExecution
     case unsupported
 }
 
 public struct HomeOperationDetectionResult: Sendable, Hashable, Codable {
-    public let operation: HomeAutomationOperationType
+    public let domain: HomeAutomationCommandDomain
+    public let operation: HomeAutomationOperationKind
     public let confidence: Double
     public let reason: String
 }
 ```
 
+`HomeCommandOrchestrator.resolveStream` runs `HomeOperationDetectionService` before selecting the rest of the flow.
+
+Current routing behavior:
+
+- `.executeDeviceCommand` runs the direct-command pipeline.
+- `.automationCreation` runs `AutomationCreationResolver`.
+- `.automationUpdate`, `.automationDeletion`, `.automationQuery`, `.sceneCreation`, and `.routineExecution` are recognized as operation kinds but currently return unsupported results.
+- `.unsupported` returns unsupported.
+
+Important review note: operation detection is currently a deterministic service, not a fully registered graph-executed agent in the default registry. The code has `AgentID.operationDetection`, `AgentCapability.operationDetection`, and manifest support, but the default runtime does not yet execute an `OperationDetectionAgent` node to choose between operation graphs.
+
+### Automation Creation Baseline
+
+Automation creation is functional as an orchestrator service path.
+
+Current flow:
+
+```text
+User command
+  -> HomeOperationDetectionService
+  -> AutomationDraftAgent / AutomationPatternParser
+  -> AutomationConditionOperandResolver
+  -> AutomationActionResolver for each action description
+  -> AutomationValidationAgent
+  -> SmartThingsRuleCompiler
+  -> HomeAutomationCreationPlan
+```
+
+Current models include:
+
+- `HomeAutomationRuleDraft`
+- `HomeAutomationTrigger`
+- `HomeAutomationScheduleTrigger`
+- `HomeAutomationDeviceTrigger`
+- `HomeAutomationCondition`
+- `HomeAutomationComparisonCondition`
+- `HomeAutomationConditionOperand`
+- `HomeAutomationResolvedAction`
+- `HomeAutomationCreationPlan`
+- `SmartThingsRuleDocument`
+
+Current supported examples include:
+
+- `Turn on bedroom AC everyday at 7 AM`
+- `Turn on bedroom AC everyday at 7 AM if the entry contact sensor is closed`
+- `Unlock front door every day at 7 AM` with confirmation required
+- `When the front door opens, turn on hallway light`
+- Multiple action descriptions split with `and`
+
+Current parser/compiler limitations:
+
+- Daily schedules compile to SmartThings `every.specific`.
+- Interval schedules compile to SmartThings `every.interval`.
+- Weekday/weekend/day-of-week schedules can be parsed, but SmartThings compilation is marked unsupported.
+- `between` and `changes` exist in the AST/RAG knowledge, but compiler support is not complete.
+- `tomorrow`, absolute dates, sunrise/sunset, location mode, presence, and duration windows are not fully implemented.
+- Ambiguous logical grouping is not yet clarified robustly.
+
+### Action Reuse Baseline
+
+`AutomationActionResolver` reuses the old direct-command pipeline for each action description, for example `Turn on AC`.
+
+This is the correct architectural direction because automation actions must still use the same device resolution, command draft, parameter validation, and confirmation policy used by immediate commands.
+
+Current limitation: action descriptions are resolved sequentially, not as independent scoped graph subflows. That is correct for a first implementation but should be replaced by graph fan-out when scoped context exists.
+
+### Condition Operand Baseline
+
+`AutomationConditionOperandResolver` resolves simple condition operands by scoring known devices and selecting readable capabilities and attributes.
+
+Current strengths:
+
+- Handles nested `and`, `or`, and `not` trees.
+- Resolves common conditions such as contact sensor open/closed, switch on/off, motion active/inactive, and temperature threshold.
+
+Current limitations:
+
+- It uses deterministic matching only.
+- It does not yet run candidate retrieval/ranking agents for condition operands.
+- Ambiguous condition-device matches return unresolved operands and become clarification or unsupported outcomes later.
+
+### RAG Baseline
+
+The RAG layer has been expanded for automation creation.
+
+Current automation knowledge sources:
+
+- `automationPattern`
+- `automationRuleExample`
+- `automationConditionOperator`
+- `smartThingsRuleSchema`
+
+Current structured retrieval fields:
+
+- `operation`
+- `automationConcepts`
+- `conditionOperators`
+- `repeatHints`
+
+`AutomationRAGPolicy` gates retrieval so high-confidence deterministic daily schedules avoid unnecessary RAG, while complex device triggers, compound conditions, unsupported fragments, and schema-sensitive operators retrieve focused automation knowledge.
+
+Current RAG gap: there is no measured retrieval quality benchmark yet for automation routing, condition parsing, or SmartThings compiler support. The automation RAG set is curated and useful, but not yet evaluated against a larger automation command corpus.
+
+### Metrics Baseline
+
+The orchestrator now records automation metrics including operation, runtime mode, graph ID, action count, condition count, validation issue count, and SmartThings compilation support.
+
+Important review note: automation creation records an automation graph shape for metrics, but the graph scheduler does not yet execute the automation graph end to end. The actual automation work is performed by `AutomationCreationResolver`.
+
+## Capability Status Matrix
+
+| Area | Current status | Review |
+| --- | --- | --- |
+| Operation enum/result | Implemented | Uses `HomeAutomationOperationKind`, not the older planned `HomeAutomationOperationType` name. |
+| Deterministic operation detection | Implemented | Recognizes schedules, trigger words, automation keywords, update/delete/query keywords, and immediate command verbs. |
+| Operation-detection agent | Partial | IDs, capability, and manifest support exist; default registry/runtime does not yet execute a dedicated operation detector agent. |
+| Operation-based routing | Implemented | Orchestrator routes direct commands vs automation creation. Future operations return unsupported. |
+| Graph runtime default | Implemented | Direct command graph is default; legacy rollback remains available. |
+| Automation creation flow | Implemented service path | Functional, but not graph-native yet. |
+| Multiple actions | Partial | Model and sequential resolution exist; parallel/scoped graph fan-out is pending. |
+| Composite conditions | Partial | AST and basic parsing exist; ambiguous grouping and broader grammar are pending. |
+| Trigger vs precondition | Partial | Trigger policy exists and compiles to SmartThings `Always`/`Never` for supported operands. More trigger types are pending. |
+| Schedule parsing | Partial | Daily, interval, and days-of-week parse. SmartThings compilation supports daily and interval only. |
+| Condition operand resolution | Partial | Deterministic resolver exists; agent/RAG-backed candidate resolution is pending. |
+| Action command reuse | Implemented | Embedded actions reuse the direct-command pipeline and do not execute device state changes. |
+| SmartThings compiler | Partial | Supports useful `every`, `if`, comparison, and command JSON. API create/update/delete/query calls are not implemented. |
+| Automation safety | Partial | High-risk commands require confirmation and too-frequent intervals can be blocked. Broader unattended risk policy is pending. |
+| Clarification | Partial | Unresolved actions/operands can ask questions. Ambiguous logical grouping needs explicit clarification support. |
+| Automation RAG | Implemented baseline | Curated automation chunks and gated retrieval exist; optimization and evaluation remain pending. |
+| Direct command regression | Implemented | Tests compare graph and legacy fallback behavior and preserve direct command results. |
+
+## Requirements
+
+### FR-001: Operation Detection
+
+The system must detect the operation requested by the user before choosing the rest of the pipeline.
+
+Required operations:
+
+- `executeDeviceCommand`
+- `automationCreation`
+- `automationUpdate`
+- `automationDeletion`
+- `automationQuery`
+- `sceneCreation`
+- `routineExecution`
+- `unsupported`
+
+Current implementation uses `HomeOperationDetectionService`. The intended architecture should promote this into a graph-capable operation detection agent or a router node that can combine deterministic rules with model/RAG support for ambiguous commands.
+
 Examples:
 
-| User command | Operation |
+| User command | Expected operation |
 | --- | --- |
 | `Turn on the TV` | `executeDeviceCommand` |
 | `Turn on AC everyday at 7 AM` | `automationCreation` |
@@ -251,65 +282,68 @@ Examples:
 | `Disable the night light rule` | `automationUpdate` |
 | `What automations run at 7 AM?` | `automationQuery` |
 
-The initial implementation can route only `executeDeviceCommand`, `automationCreation`, and `unsupported`, while reserving enum cases for future operations.
+### FR-002: Operation-Based Agent Routing
 
-#### FR-002: Operation-Based Agent Routing
+The orchestrator must select operation-specific plans from `HomeOperationDetectionResult.operation`.
 
-The orchestrator must select different agent plans based on `HomeOperationDetectionResult.operation`.
+Required behavior:
 
-For `executeDeviceCommand`, the current device-command pipeline should continue to run.
+- `executeDeviceCommand` uses the direct-command graph.
+- `automationCreation` uses the automation creation graph.
+- Future operations use their own graphs or return an explicit unsupported result.
 
-For `automationCreation`, the orchestrator should run automation-specific agents and reuse the direct command pipeline for each command action inside the automation.
+Current implementation routes correctly but automation creation is not graph-executed yet.
 
-#### FR-003: Multiple Actions
+### FR-003: Multiple Actions
 
-The automation model must support multiple actions.
+Automation creation must support more than one action.
 
-Examples:
+Example:
 
 ```text
 Everyday at 7 AM turn on the AC and turn off the bedroom lamp
 ```
 
-```json
-{
-  "actions": [
-    { "capability": "switch", "command": "on", "device": "AC" },
-    { "capability": "switch", "command": "off", "device": "bedroom lamp" }
-  ]
-}
+Internal representation should keep action text as independently resolvable commands:
+
+```swift
+public let actionDescriptions: [String]
+public let resolvedActions: [HomeAutomationResolvedAction]
 ```
 
-The implementation must not force a single `action` object.
+The next architecture step should run these action descriptions as scoped subgraphs so each action can resolve independently without overwriting root direct-command context.
 
-#### FR-004: Composite Conditions
+### FR-004: Composite Conditions
 
-The automation model must support composite condition trees using `and`, `or`, and `not`.
+Automation creation must preserve logical condition trees.
 
-Examples:
+Required operators:
 
-```text
-Turn on the AC at 7 AM if the temperature is above 26 and the window is closed
-```
+- `and`
+- `or`
+- `not`
+- `equals`
+- `greaterThan`
+- `lessThan`
+- `greaterThanOrEquals`
+- `lessThanOrEquals`
+- `between`
+- `changes`
 
-```text
-Turn on the hallway light if the front door opens or motion is detected
-```
+Current implementation has an AST for all of these, but deterministic parsing and compilation do not yet support the full grammar.
 
-The internal representation should preserve the logical structure, not flatten all conditions into an unordered list.
+### FR-005: Triggers vs Preconditions
 
-#### FR-005: Triggers vs Preconditions
+The system must distinguish:
 
-The system must distinguish between:
+- Triggers: schedules or device events that start rule evaluation.
+- Preconditions: conditions that must be true but should not independently trigger the rule.
 
-- triggers: events or schedules that cause the rule to evaluate or execute
-- preconditions: checks that must be true but should not independently trigger the rule
+Current implementation has `HomeAutomationConditionTriggerPolicy.always` and `.never`, and SmartThings compilation maps those to device operand trigger policy. This should remain core architecture.
 
-SmartThings supports this concept with trigger behavior such as `Always`, `Never`, and default automatic trigger selection. The internal model should support a trigger policy field even if the first implementation keeps it simple.
+### FR-006: Time and Schedule Triggers
 
-#### FR-006: Time and Schedule Triggers
-
-The system must parse schedule expressions such as:
+Required schedule support:
 
 - `everyday at 7 AM`
 - `at 7 AM every day`
@@ -319,16 +353,11 @@ The system must parse schedule expressions such as:
 - `after 10 minutes`
 - `every 30 minutes`
 
-The first implementation should support:
+Current implementation supports daily, interval, weekdays/weekends/day names as parsed repeat rules. Compilation supports daily and interval. Absolute one-time date/time and relative delay expressions remain future work.
 
-- daily time
-- weekly days of week
-- one-time absolute date/time when clearly stated
-- interval recurrence
+### FR-007: Device Condition Operands
 
-#### FR-007: Device Condition Operands
-
-The system must resolve device operands inside conditions.
+Condition operands must resolve to backend-usable device attributes.
 
 Example:
 
@@ -336,24 +365,22 @@ Example:
 If bedroom temperature is above 26, turn on the AC
 ```
 
-The condition operand should resolve to something like:
+Target operand:
 
 ```json
 {
-  "deviceId": "bedroom_ac",
+  "deviceId": "bedroom_temperature_sensor",
   "component": "main",
   "capability": "temperatureMeasurement",
   "attribute": "temperature"
 }
 ```
 
-This requires candidate retrieval/ranking for condition operands, not only for command actions.
+Current deterministic operand resolution is useful but should be replaced or supplemented with candidate retrieval, ranking, and clarification for ambiguous condition devices.
 
-#### FR-008: Action Command Reuse
+### FR-008: Action Command Reuse
 
-Each command action inside an automation must reuse the existing command-resolution and safety machinery.
-
-For example, `turn on AC` inside an automation should still resolve through:
+Each automation action must reuse the direct-command machinery:
 
 - device type inference
 - candidate retrieval
@@ -364,957 +391,269 @@ For example, `turn on AC` inside an automation should still resolve through:
 - parameter validation
 - confirmation policy
 
-#### FR-009: SmartThings Rule Translation
+Current implementation satisfies this with `AutomationActionResolver`.
 
-The system should add a translation layer that converts the internal automation AST into SmartThings-style Rule JSON.
+### FR-009: SmartThings Rule Translation
 
-The internal model should not be tightly coupled to SmartThings JSON. SmartThings should be a target compiler.
+The system should compile internal automation plans into SmartThings Rules JSON through a backend compiler.
 
-This separation keeps the project able to support other automation backends later.
+Required design rule: SmartThings JSON must remain a target output, not the internal automation model.
 
-#### FR-010: Safe Handling of High-Risk Automations
+Current implementation has `SmartThingsRuleCompiler` and `SmartThingsRuleDocument`. It compiles supported schedules, device triggers, conditions, and command actions into typed payloads and JSON strings. SmartThings API persistence is not implemented.
 
-Repeated or conditional automation involving high-risk devices must require confirmation or be blocked.
+### FR-010: Persistent Automation Safety
 
-Examples:
+Automations are higher risk than immediate commands because they execute later and may repeat.
 
-```text
-Unlock the front door every day at 7 AM
-Open the garage whenever motion is detected
-Turn on the oven when I leave home
-```
+Required policy:
 
-The safety policy should be stricter for persistent automations than immediate commands because automations can execute later without the user present.
+- Require confirmation for unattended high-risk devices.
+- Block or clarify too-frequent recurring automations.
+- Require confirmation for unlock/open/security-sensitive commands.
+- Validate both action devices and condition devices.
+- Never let RAG or model output bypass deterministic validation.
 
-#### FR-011: Clarification for Ambiguous Automations
+Current implementation has a strong baseline through `AutomationValidationPolicy`, but should add richer policy for location/presence, critical devices, repeated state changes, and circular automation patterns.
 
-The automation flow must ask clarification questions when:
+### FR-011: Clarification
+
+Automation creation must ask clarification questions when:
 
 - action text is ambiguous
-- trigger text is missing or unsupported
-- condition structure is unclear
-- multiple devices match a condition operand
-- multiple devices match an action command
-- `and`/`or` grouping is ambiguous
+- target devices are ambiguous
+- condition operands are unresolved
+- trigger text is unsupported
+- condition grouping is ambiguous
+- unsupported schedule fragments are present and cannot be compiled
 
-Example:
+Current implementation asks clarification for unresolved actions and operands. Ambiguous logic grouping remains a key gap.
 
-```text
-Turn on the light when motion is detected or the door opens and it is night
-```
+### FR-012: Preserve Direct Command Behavior
 
-This may require clarification because the grouping could be:
+Existing direct commands must not regress.
 
-```text
-(motion OR door opens) AND night
-```
+Required guarantees:
 
-or:
+- Direct commands should not run automation agents.
+- Foundation-model-unavailable fallback must remain deterministic.
+- Legacy rollback must keep direct commands working during graph migration.
+- Existing safety confirmation behavior must remain stable.
 
-```text
-motion OR (door opens AND night)
-```
+Current implementation has regression tests for direct command graph/legacy parity.
 
-#### FR-012: Preserve Direct Command Behavior
+## Architectural Gap Review
 
-Existing direct command behavior should remain stable.
+### Gap 1: Automation Graph Exists as a Shape, Not the Runtime
 
-Commands such as `Turn on the bedroom lamp` should not regress, should not route through automation agents, and should keep existing fallback behavior when Foundation Models are unavailable.
-
-### Data Model Requirements
-
-#### DR-001: Add Operation State
-
-Add operation fields to `ResolutionContext`:
-
-```swift
-public var operation: HomeOperationDetectionResult?
-public var automationDraft: HomeAutomationRuleDraft?
-public var automationPlan: HomeAutomationCreationPlan?
-public var automationResolution: HomeAutomationResolution?
-```
-
-Add matching patch keys:
-
-```swift
-public static let operation = "operation"
-public static let automationDraft = "automationDraft"
-public static let automationPlan = "automationPlan"
-public static let automationResolution = "automationResolution"
-```
-
-#### DR-002: Add Create Automation Intent Family
-
-Add:
-
-```swift
-case createAutomation
-```
-
-to `HomeAutomationIntentFamily`.
-
-This should be used as the top-level intent for automation creation, while embedded action commands continue to use families such as `.power`, `.temperature`, `.brightness`, and `.lockUnlock`.
-
-#### DR-003: Add Rule AST
-
-Recommended internal model:
-
-```swift
-public struct HomeAutomationRuleDraft: Sendable, Hashable, Codable {
-    public let name: String?
-    public let operation: HomeAutomationOperationType
-    public let trigger: HomeAutomationTriggerNode?
-    public let condition: HomeAutomationConditionNode?
-    public let actions: [HomeAutomationActionNode]
-    public let confidence: Double
-}
-
-public indirect enum HomeAutomationActionNode: Sendable, Hashable, Codable {
-    case command(HomeCommandDraft)
-    case sequence([HomeAutomationActionNode])
-    case sleep(HomeDuration)
-    case `if`(
-        condition: HomeAutomationConditionNode,
-        then: [HomeAutomationActionNode],
-        elseActions: [HomeAutomationActionNode]
-    )
-}
-
-public indirect enum HomeAutomationConditionNode: Sendable, Hashable, Codable {
-    case and([HomeAutomationConditionNode])
-    case or([HomeAutomationConditionNode])
-    case not(HomeAutomationConditionNode)
-    case equals(HomeAutomationOperand, HomeAutomationOperand)
-    case greaterThan(HomeAutomationOperand, HomeAutomationOperand)
-    case lessThan(HomeAutomationOperand, HomeAutomationOperand)
-    case greaterThanOrEquals(HomeAutomationOperand, HomeAutomationOperand)
-    case lessThanOrEquals(HomeAutomationOperand, HomeAutomationOperand)
-    case between(value: HomeAutomationOperand, start: HomeAutomationOperand, end: HomeAutomationOperand)
-    case changes(HomeAutomationConditionNode)
-}
-
-public enum HomeAutomationTriggerNode: Sendable, Hashable, Codable {
-    case schedule(HomeScheduleTrigger)
-    case device(HomeAutomationConditionNode)
-    case location(HomeAutomationConditionNode)
-    case manual
-}
-
-public enum HomeAutomationOperand: Sendable, Hashable, Codable {
-    case deviceAttribute(HomeDeviceAttributeOperand)
-    case locationAttribute(HomeLocationAttributeOperand)
-    case string(String)
-    case integer(Int)
-    case decimal(Double)
-    case boolean(Bool)
-    case array([HomeAutomationOperand])
-}
-```
-
-#### DR-004: Add Resolved Action Summary
-
-The user-facing JSON should not expose only internal device IDs. It should include display-friendly values too:
-
-```swift
-public struct HomeAutomationResolvedActionSummary: Sendable, Hashable, Codable {
-    public let intentFamilies: [HomeAutomationIntentFamily]
-    public let deviceID: String?
-    public let deviceName: String?
-    public let deviceType: String?
-    public let capability: String?
-    public let command: String?
-    public let value: String?
-}
-```
-
-### Agent Requirements
-
-#### AR-001: OperationDetectionAgent
-
-New agent:
-
-```swift
-OperationDetectionAgent
-```
-
-Responsibilities:
-
-- classify top-level operation
-- distinguish direct execution from persistent automation creation
-- provide confidence and reason
-- support deterministic fallback
-
-High-confidence automation creation signals:
-
-- `every day`
-- `daily`
-- `at 7 AM`
-- `when`
-- `whenever`
-- `if`
-- `after`
-- `before`
-- `schedule`
-- `create automation`
-- `make a rule`
-- `automatically`
-- `routine`
-
-Careful distinction:
-
-- `Turn on AC now` -> `executeDeviceCommand`
-- `Turn on AC at 7 AM` -> likely `automationCreation`
-- `Set AC to 24` -> `executeDeviceCommand`
-- `Set AC to 24 when I get home` -> `automationCreation`
-
-#### AR-002: AutomationDecompositionAgent
-
-Responsibilities:
-
-- split user text into action spans, trigger spans, and condition spans
-- preserve source text for each span
-- identify `and`/`or` connectors
-- identify whether `and`/`or` connects actions or conditions
-
-Example:
+`GraphPlanner.automationCreationGraph()` defines a graph:
 
 ```text
-At 7 AM every day, turn on AC and turn off the bedroom lamp if the window is closed
+operationDetection
+  -> automationDraft
+  -> automationConditionOperandResolution
+  -> automationActionResolution
+  -> automationValidation
+  -> smartThingsCompilation
+  -> automationResultAssembly
 ```
 
-Expected decomposition:
+However, `HomeCommandOrchestrator` does not execute this graph for automation creation. It uses the graph for metrics and delegates actual work to `AutomationCreationResolver`.
 
-```json
-{
-  "triggerText": "At 7 AM every day",
-  "conditionText": "if the window is closed",
-  "actionTexts": [
-    "turn on AC",
-    "turn off the bedroom lamp"
-  ]
+Intended update: make automation creation graph-native after automation services are adapted into contextual agents and after scoped context exists.
+
+### Gap 2: Automation Services Are Not All Registered Runtime Agents
+
+The following are service-level components today:
+
+- `HomeOperationDetectionService`
+- `AutomationActionResolver`
+- `AutomationConditionOperandResolver`
+- `SmartThingsRuleCompiler`
+- result assembly inside `AutomationCreationResolver`
+
+Intended update: introduce contextual agents for operation detection, action resolution, condition operand resolution, SmartThings compilation, and automation result assembly. Keep the service implementations as reusable internals.
+
+### Gap 3: Context Is Still Root-Oriented
+
+`ResolutionContextStore` applies direct-command patch keys well, but automation patch keys are not first-class root fields in the main context store. A separate `AutomationResolutionContext` exists for automation work.
+
+Intended update: add typed and scoped context keys:
+
+- root operation scope
+- action scope for each automation action
+- condition scope for each condition operand
+- backend compilation scope
+
+This enables graph fan-out without action `a1` overwriting action `a2`.
+
+### Gap 4: Operation-Neutral Outcomes Are Missing
+
+The public result is still `HomeAutomationResolverResult`, and scheduler stop conditions inspect `HomeCommandResolution`.
+
+Intended update: add internal operation-neutral outcomes while keeping the public API stable:
+
+```swift
+public enum OrchestrationOutcome: Sendable, Hashable {
+    case command(HomeCommandResolution)
+    case automation(HomeAutomationCreationPlan)
+    case clarification(String)
+    case unsupported(String)
 }
 ```
 
-#### AR-003: TriggerExtractionAgent
+### Gap 5: RAG Needs Evaluation and Subproblem Routing
 
-Responsibilities:
+Automation RAG now exists, but retrieval optimization is not complete.
 
-- normalize schedule and event triggers
-- support time, date, day-of-week, interval, and device-event triggers
-- produce `HomeAutomationTriggerNode`
+Intended update:
 
-Examples:
+- Add an automation command evaluation set.
+- Track retrieval precision for schedule, trigger, condition, SmartThings schema, and unsupported-fragment cases.
+- Use subproblem-specific retrieval: operation detection, draft extraction, condition parsing, and backend compilation.
+- Prefer deterministic parsing for simple daily schedules to preserve latency.
 
-- `everyday at 7 AM` -> schedule daily 07:00
-- `every 10 minutes` -> interval trigger
-- `when motion is detected` -> device condition trigger
+## Proposed Updated Implementation Plan
 
-#### AR-004: ConditionGraphExtractionAgent
+### Phase A: Finalize Operation Contract
 
-Responsibilities:
+1. Treat `HomeAutomationOperationKind` as the canonical enum name.
+2. Add operation context storage to `ResolutionContext` or typed scoped context.
+3. Add an operation detection contextual agent that wraps `HomeOperationDetectionService`.
+4. Register the operation detector in `DefaultAgentRegistryFactory`.
+5. Add tests proving operation detection can run as a graph node.
 
-- parse condition text into `HomeAutomationConditionNode`
-- preserve `and`, `or`, `not`, comparison, between, and changes structure
-- mark ambiguous grouping for clarification
+### Phase B: Make Automation Creation Graph-Native
 
-#### AR-005: ConditionOperandResolutionAgent
+1. Add contextual adapters for automation draft, condition operand resolution, action resolution, validation, SmartThings compilation, and result assembly.
+2. Make `GraphScheduler` execute `GraphPlanner.automationCreationGraph()` for `.automationCreation`.
+3. Keep `AutomationCreationResolver` as a compatibility service during migration.
+4. Compare service-path and graph-path outputs in tests.
+5. Switch automation creation to graph runtime when parity is proven.
 
-Responsibilities:
+### Phase C: Add Scoped Context for Multi-Action Automations
 
-- resolve condition operands to device/location/capability/attribute
-- reuse candidate retrieval and ranking logic for device operands
-- choose correct attribute for read-only capability conditions
+1. Add `ContextKey<Value>`, `ContextScope`, and `ContextKeyDescriptor`.
+2. Store scoped values inside `ResolutionContextStore`.
+3. Add scoped reads/writes for action and condition subflows.
+4. Update graph nodes so action subgraphs write to action-specific scopes.
+5. Join scoped action outputs into `HomeAutomationResolvedAction` values.
 
-#### AR-006: AutomationActionResolutionAgent
+### Phase D: Parallelize Action and Condition Subflows
 
-Responsibilities:
+1. Add support for dynamic graph fan-out based on `actionDescriptions`.
+2. Resolve independent actions concurrently.
+3. Resolve independent condition operands concurrently.
+4. Add deterministic ordering when joining results.
+5. Stop or clarify early only when a required child subflow fails.
 
-- resolve each action text into one or more `HomeCommandDraft` values
-- reuse the existing device command pipeline per action
-- support multiple command actions
-- preserve action order when order matters
+### Phase E: Expand Automation Grammar and Compiler
 
-#### AR-007: AutomationAssemblyAgent
+1. Add parsing and compilation support for day-of-week schedules.
+2. Add support for one-time absolute date/time where SmartThings can represent it.
+3. Add support for relative delay expressions if backend-compatible.
+4. Implement compiler support for `between` and `changes`.
+5. Add location mode and presence operands only when validation can keep them safe.
 
-Responsibilities:
+### Phase F: SmartThings Backend Integration
 
-- combine trigger, condition tree, and actions into `HomeAutomationRuleDraft`
-- create a proposed rule name if the user did not provide one
-- calculate aggregate confidence
+1. Keep `SmartThingsRuleCompiler` isolated behind `HomeAutomationRuleCompiling`.
+2. Add a separate SmartThings Rules client protocol for create/update/delete/query.
+3. Do not call the API from the parser or validation layers.
+4. Add dry-run mode that returns JSON only.
+5. Require explicit confirmation before creating high-risk persistent automations.
 
-#### AR-008: AutomationValidationAgent
+### Phase G: Future Operation Families
 
-Responsibilities:
+Add separate graph plans for:
 
-- validate trigger availability
-- validate condition operands
-- validate action drafts
-- apply stricter safety for persistent automations
-- produce clarification, confirmation, unsupported, or ready-to-create outcomes
+- `automationUpdate`
+- `automationDeletion`
+- `automationQuery`
+- `sceneCreation`
+- `routineExecution`
 
-#### AR-009: SmartThingsRuleTranslationAgent
+Each operation should reuse shared pieces where appropriate, but must own its own graph and result assembly policy.
 
-Responsibilities:
+### Phase H: RAG Optimization
 
-- compile `HomeAutomationRuleDraft` into SmartThings Rules JSON
-- keep the compiler deterministic
-- reject unsupported AST nodes with actionable reasons
-- preserve a backend-neutral internal model
+1. Build a curated automation evaluation corpus.
+2. Add source-level retrieval metrics for automation RAG.
+3. Split retrieval by subproblem.
+4. Add hybrid retrieval weights per subproblem.
+5. Add metadata filters for operation, pattern kind, condition operator, repeat hint, and schema key.
+6. Keep final device IDs, capabilities, commands, and risk policy hydrated from core deterministic sources.
 
-#### AR-010: AutomationFallbackAgent
+### Phase I: Metrics, UI, and Developer Review
 
-Responsibilities:
+1. Show operation, runtime, graph ID, action count, condition count, and compilation status in app diagnostics.
+2. Show unsupported compilation reason for parsed-but-not-compiled rules.
+3. Emit graph node statuses for automation creation after graph migration.
+4. Add tests for direct command regression, automation creation, unsupported future operations, and graph migration parity.
 
-- support simple automation creation without Foundation Models
-- cover common templates:
-  - schedule plus one command
-  - schedule plus multiple commands
-  - simple device condition plus one command
-  - simple `and` conditions
-- fail safely to clarification for complex `or` or ambiguous grouping
+## Test Matrix
 
-### RAG Requirements
+### Operation Detection
 
-#### RR-001: Add Automation Knowledge Source
+- `Turn on the TV` -> `executeDeviceCommand`
+- `Turn on AC everyday at 7 AM` -> `automationCreation`
+- `When the front door opens, turn on hallway light` -> `automationCreation`
+- `Delete morning AC automation` -> `automationDeletion`
+- `List automations` -> `automationQuery`
+- empty command -> `unsupported`
 
-Add a new `KnowledgeSource` case:
+### Automation Drafting
 
-```swift
-case automationRuleExample
-```
-
-or split it further:
-
-```swift
-case automationPattern
-case smartThingsRuleExample
-```
-
-#### RR-002: Add Automation Example Dataset
-
-Create a generated or curated dataset with examples such as:
-
-```json
-{
-  "id": "automation_0001",
-  "text": "Turn on AC everyday at 7 AM",
-  "operation": "AutomationCreation",
-  "triggerType": "schedule",
-  "repeat": "everyDay",
-  "actionCount": 1,
-  "actionIntentFamilies": ["power"],
-  "deviceTypes": ["airConditioner"],
-  "capabilities": ["switch"],
-  "conditionOperators": []
-}
-```
-
-Examples should cover:
-
-- daily schedule
-- weekly schedule
-- interval schedule
-- device state trigger
+- daily schedule with one action
+- interval schedule with one action
+- weekday schedule parsed but compilation unsupported until compiler expands
+- device trigger with one action
+- schedule with `and` conditions
+- schedule with `or` conditions
 - multiple actions
-- `and` conditions
-- `or` conditions
-- `not` conditions
-- comparisons
-- `between`
-- `changes`
-- sleep/delay
 
-#### RR-003: Split Retrieval by Subproblem
+### Action Reuse
 
-Do not use one RAG query for the full automation sentence.
+- action resolves same draft as direct command
+- action does not execute immediately
+- ambiguous action asks clarification
+- high-risk action requires automation confirmation
 
-Use separate retrieval queries:
+### Condition Resolution
 
-- operation detection query
-- action command query
-- trigger extraction query
-- condition extraction query
-- SmartThings compilation query
+- contact sensor open/closed
+- switch on/off
+- motion active/inactive
+- temperature greater/less than
+- unresolved condition operand asks clarification
+- ambiguous condition operand does not silently choose a device
 
-This prevents temporal terms like `7 AM` from polluting action slots and prevents device action terms from polluting condition grammar.
+### SmartThings Compilation
 
-#### RR-004: Use Hybrid Retrieval for Automation Grammar
+- daily schedule to `every.specific`
+- interval schedule to `every.interval`
+- device trigger to `if` with trigger policy `Always`
+- precondition to trigger policy `Never`
+- command action includes devices, capability, command, and arguments
+- unsupported operator/schedule preserves `unsupportedCompilationReason`
 
-Automation grammar relies on exact terms such as `every`, `if`, `when`, `and`, `or`, `not`, `between`, and `changes`. Hybrid retrieval is better than semantic-only retrieval for these.
+### Regression
 
-Use structured retrieval hints:
-
-```swift
-public struct AutomationRetrievalHints {
-    public let operationTypes: [String]
-    public let triggerTypes: [String]
-    public let conditionOperators: [String]
-    public let actionFamilies: [String]
-    public let deviceTypes: [String]
-    public let capabilities: [String]
-}
-```
-
-#### RR-005: Hydrate Final Facts From Core
-
-RAG examples should never be final authority.
-
-Final device IDs, capabilities, commands, attributes, enum values, numeric ranges, and risk levels must still be hydrated and validated from `HomeAutomationCore`.
-
-### Safety Requirements
-
-#### SR-001: Persistent Automation Risk Is Higher Than Immediate Execution
-
-Automation actions execute later and may repeat. Safety policy must be stricter than direct command execution.
-
-Examples requiring confirmation or blocking:
-
-- unlock lock on schedule
-- open garage on schedule
-- open valve on repeated trigger
-- start oven automatically
-- disable camera or alarm
-
-#### SR-002: Validate Both Condition and Action Devices
-
-Conditions can reference devices too. Both sides must be validated:
-
-- action target device/capability/command
-- condition operand device/capability/attribute
-
-#### SR-003: Detect Runaway Automations
-
-Reject or ask confirmation for automations that can repeatedly trigger too often.
-
-Examples:
-
-- `when temperature is above 26 turn AC on` without `changes` may evaluate repeatedly
-- `every 1 second turn on the light`
-- condition/action feedback loops
-
-#### SR-004: Require Confirmation for Ambiguous Logic
-
-If logical grouping changes outcome, ask clarification instead of guessing.
-
-### Non-Functional Requirements
-
-#### NFR-001: Preserve Current Direct Command Latency
-
-Direct command execution should not pay for full automation parsing. The operation detection phase should be lightweight and deterministic-first.
-
-#### NFR-002: Keep Agents Independently Testable
-
-Each new automation agent should have typed inputs/outputs and unit tests, matching the current project pattern.
-
-#### NFR-003: Keep Backend Translation Isolated
-
-SmartThings JSON generation should live behind a compiler/translator layer so other backends can be supported later.
-
-#### NFR-004: Maintain Offline Deterministic Behavior
-
-Simple automation templates should work when Foundation Models are unavailable.
-
-#### NFR-005: Keep Prompt Context Small
-
-Automation creation can become token-heavy. Use decomposition before retrieval and draft generation to keep prompts focused.
-
-## Proposed Architecture
-
-### High-Level Flow
-
-```mermaid
-flowchart TD
-    A["User command"] --> B["OperationDetectionAgent"]
-    B --> C{"Operation"}
-    C -->|"ExecuteDeviceCommand"| D["Existing device command pipeline"]
-    C -->|"AutomationCreation"| E["Automation creation pipeline"]
-    C -->|"Unsupported or unknown"| F["Unsupported or clarification"]
-
-    E --> G["AutomationDecompositionAgent"]
-    G --> H["TriggerExtractionAgent"]
-    G --> I["ConditionGraphExtractionAgent"]
-    G --> J["AutomationActionResolutionAgent"]
-    I --> K["ConditionOperandResolutionAgent"]
-    J --> L["Existing command resolver per action"]
-    H --> M["AutomationAssemblyAgent"]
-    K --> M
-    L --> M
-    M --> N["AutomationValidationAgent"]
-    N --> O["SmartThingsRuleTranslationAgent"]
-    O --> P["AutomationCreationPlanningAgent"]
-```
-
-### Planner Changes
-
-Current planner:
-
-```text
-One fixed plan for all model-available commands.
-```
-
-Recommended planner:
-
-```text
-Phase 0:
-  OperationDetectionAgent
-
-If executeDeviceCommand:
-  current full plan
-
-If automationCreation:
-  automation creation plan
-
-If unsupported:
-  unsupported/clarification plan
-```
-
-Implementation options:
-
-1. Pre-route in `HomeCommandOrchestrator.resolveStream`.
-   - Run a small operation detection plan first.
-   - Snapshot context.
-   - Ask `AgentPlanner` for the operation-specific plan.
-   - This is the cleanest option.
-
-2. Support dynamic replanning in `AgentScheduler`.
-   - More flexible but more invasive.
-
-Recommended: option 1.
-
-### Internal Rule AST to SmartThings Rule Compilation
-
-Internal model:
-
-```text
-HomeAutomationRuleDraft
-  trigger: schedule daily at 07:00
-  condition: optional boolean AST
-  actions:
-    command(HomeCommandDraft for AC switch on)
-```
-
-SmartThings-style output:
-
-```json
-{
-  "name": "Turn on AC everyday at 7 AM",
-  "actions": [
-    {
-      "every": {
-        "specific": {
-          "reference": "Noon",
-          "offset": {
-            "value": { "integer": -300 },
-            "unit": "Minute"
-          }
-        },
-        "actions": [
-          {
-            "command": {
-              "devices": ["bedroom_ac"],
-              "commands": [
-                {
-                  "component": "main",
-                  "capability": "switch",
-                  "command": "on",
-                  "arguments": []
-                }
-              ]
-            }
-          }
-        ]
-      }
-    }
-  ]
-}
-```
-
-Note: This is a compiler output shape. The exact time representation should be verified during implementation against the current SmartThings API schema and examples.
-
-## Example Interpretations
-
-### Example 1: Simple Daily Automation
-
-Input:
-
-```text
-Turn on AC everyday at 7 AM
-```
-
-Operation:
-
-```json
-{
-  "operation": "AutomationCreation",
-  "confidence": 0.97
-}
-```
-
-Rule draft:
-
-```json
-{
-  "trigger": {
-    "type": "schedule",
-    "repeat": "everyDay",
-    "time": "07:00"
-  },
-  "condition": null,
-  "actions": [
-    {
-      "type": "command",
-      "deviceType": "airConditioner",
-      "capability": "switch",
-      "command": "on"
-    }
-  ]
-}
-```
-
-### Example 2: Multiple Actions
-
-Input:
-
-```text
-Everyday at 7 AM turn on the AC and turn off the bedroom lamp
-```
-
-Rule draft:
-
-```json
-{
-  "trigger": {
-    "type": "schedule",
-    "repeat": "everyDay",
-    "time": "07:00"
-  },
-  "actions": [
-    {
-      "type": "command",
-      "capability": "switch",
-      "command": "on",
-      "device": "AC"
-    },
-    {
-      "type": "command",
-      "capability": "switch",
-      "command": "off",
-      "device": "bedroom lamp"
-    }
-  ]
-}
-```
-
-### Example 3: Composite Conditions
-
-Input:
-
-```text
-At 7 AM turn on the AC if the room temperature is above 26 and the window is closed
-```
-
-Rule draft:
-
-```json
-{
-  "trigger": {
-    "type": "schedule",
-    "time": "07:00"
-  },
-  "condition": {
-    "and": [
-      {
-        "greaterThan": {
-          "left": {
-            "deviceAttribute": {
-              "capability": "temperatureMeasurement",
-              "attribute": "temperature"
-            }
-          },
-          "right": { "decimal": 26 }
-        }
-      },
-      {
-        "equals": {
-          "left": {
-            "deviceAttribute": {
-              "capability": "contactSensor",
-              "attribute": "contact"
-            }
-          },
-          "right": { "string": "closed" }
-        }
-      }
-    ]
-  },
-  "actions": [
-    {
-      "type": "command",
-      "capability": "switch",
-      "command": "on",
-      "device": "AC"
-    }
-  ]
-}
-```
-
-### Example 4: OR Condition
-
-Input:
-
-```text
-Turn on hallway light when the front door opens or motion is detected
-```
-
-Rule draft:
-
-```json
-{
-  "trigger": {
-    "type": "condition",
-    "condition": {
-      "or": [
-        {
-          "equals": {
-            "left": { "deviceAttribute": { "capability": "contactSensor", "attribute": "contact" } },
-            "right": { "string": "open" }
-          }
-        },
-        {
-          "equals": {
-            "left": { "deviceAttribute": { "capability": "motionSensor", "attribute": "motion" } },
-            "right": { "string": "active" }
-          }
-        }
-      ]
-    }
-  },
-  "actions": [
-    {
-      "type": "command",
-      "device": "hallway light",
-      "capability": "switch",
-      "command": "on"
-    }
-  ]
-}
-```
-
-## Proposed Implementation Plan
-
-### Phase 1: Operation Routing Foundation
-
-1. Add `HomeAutomationOperationType`.
-2. Add `HomeOperationDetectionResult`.
-3. Add operation field to `ResolutionContext`.
-4. Add operation patch key.
-5. Add `AgentID.operationDetection`.
-6. Add `AgentCapability.operationDetection`.
-7. Implement `OperationDetectionAgent`.
-8. Add deterministic operation parser support to `AgentTextParser` or a new `AgentOperationTextParser`.
-9. Update `DefaultAgentRegistryFactory`.
-10. Update `AgentPlanner` or `HomeCommandOrchestrator` to run operation detection before selecting the rest of the plan.
-11. Add tests:
-    - direct command routes to `executeDeviceCommand`
-    - schedule command routes to `automationCreation`
-    - condition command routes to `automationCreation`
-    - unsupported text routes to `unsupported`
-
-### Phase 2: Automation AST Models
-
-1. Add `HomeAutomationRuleDraft`.
-2. Add `HomeAutomationActionNode`.
-3. Add `HomeAutomationConditionNode`.
-4. Add `HomeAutomationTriggerNode`.
-5. Add `HomeAutomationOperand`.
-6. Add schedule/duration helper models.
-7. Add automation resolution cases:
-   - `readyToCreateAutomation`
-   - `requiresAutomationConfirmation`
-   - `automationCreated`
-   - `automationUnsupported`
-8. Add final result fields for automation draft and compiled rule.
-
-### Phase 3: Decomposition and Trigger Extraction
-
-1. Implement `AutomationDecompositionAgent`.
-2. Implement `TriggerExtractionAgent`.
-3. Add deterministic handling for common schedule expressions:
-   - `everyday at <time>`
-   - `at <time> every day`
-   - `weekdays at <time>`
-   - `every <weekday> at <time>`
-   - `every <number> minutes/hours`
-4. Add tests for action/trigger/condition span splitting.
-
-### Phase 4: Condition Graph Extraction
-
-1. Implement `ConditionGraphExtractionAgent`.
-2. Support:
-   - `and`
-   - `or`
-   - `not`
-   - `equals`
-   - `greaterThan`
-   - `lessThan`
-   - `between`
-   - `changes`
-3. Add ambiguity detection for mixed `and`/`or` without clear grouping.
-4. Add tests for condition AST output.
-
-### Phase 5: Action and Condition Operand Resolution
-
-1. Implement `AutomationActionResolutionAgent`.
-2. Reuse existing direct-command pipeline for each action text.
-3. Implement `ConditionOperandResolutionAgent`.
-4. Reuse candidate retrieval/ranking for condition devices.
-5. Add capability/attribute inference for condition operands.
-6. Add tests for:
-   - action command resolution
-   - condition device resolution
-   - multiple action resolution
-
-### Phase 6: Automation Assembly and Validation
-
-1. Implement `AutomationAssemblyAgent`.
-2. Implement `AutomationValidationAgent`.
-3. Extend `HomeRiskPolicy` or add `HomeAutomationRiskPolicy`.
-4. Validate persistent automation risk.
-5. Validate trigger frequency.
-6. Validate condition/action feedback loops where possible.
-7. Add tests for high-risk scheduled actions.
-
-### Phase 7: SmartThings Rule Translation
-
-1. Implement `SmartThingsRuleTranslationAgent`.
-2. Add backend-neutral compiler protocol:
-
-```swift
-public protocol HomeAutomationRuleCompiling: Sendable {
-    associatedtype Output: Sendable
-    func compile(_ draft: HomeAutomationRuleDraft) throws -> Output
-}
-```
-
-3. Add `SmartThingsRuleCompiler`.
-4. Compile:
-   - command actions
-   - if actions
-   - every actions
-   - sleep actions
-   - and/or/not/equality/comparison conditions
-   - device operands
-   - location operands when available
-5. Add fixture tests using SmartThings-style JSON.
-
-### Phase 8: RAG Expansion
-
-1. Add automation knowledge source.
-2. Add automation example resource.
-3. Update `DocumentChunker`.
-4. Update `KnowledgeIndexer` versioning so automation examples invalidate cache.
-5. Update `ContextRetriever` usage in new automation agents.
-6. Add retrieval reports for automation agents.
-7. Add tests for automation RAG retrieval.
-
-### Phase 9: UI and Metrics
-
-1. Show operation in the app result panel.
-2. Show automation draft JSON.
-3. Show compiled SmartThings Rule JSON.
-4. Add operation routing to metrics.
-5. Add automation-specific agent traces to the dashboard.
-
-## Test Plan
-
-### Unit Tests
-
-- Operation detection:
-  - `Turn on TV` -> `executeDeviceCommand`
-  - `Turn on AC everyday at 7 AM` -> `automationCreation`
-  - `When door opens turn on light` -> `automationCreation`
-- Decomposition:
-  - action spans extracted correctly
-  - trigger span extracted correctly
-  - condition span extracted correctly
-- Trigger extraction:
-  - daily schedule
-  - weekly schedule
-  - interval schedule
-- Condition graph:
-  - `and`
-  - `or`
-  - `not`
-  - comparisons
-  - mixed ambiguity
-- Action resolution:
-  - one action
-  - multiple actions
-  - ambiguous device
-- Operand resolution:
-  - temperature sensor/AC temperature
-  - contact sensor/window closed
-  - motion sensor active
-- Validation:
-  - safe schedule
-  - high-risk repeated automation
-  - invalid trigger
-  - missing action
-  - unsupported condition
-- SmartThings compiler:
-  - command action JSON
-  - every action JSON
-  - if action JSON
-  - composite condition JSON
-
-### Integration Tests
-
-- Direct command still resolves through current pipeline.
-- Model-unavailable simple automation uses deterministic fallback.
-- Automation creation does not execute the action immediately.
-- Multi-action automation produces multiple command actions.
-- Composite condition automation preserves logical structure.
-
-### Regression Tests
-
-Existing tests around:
-
-- candidate retrieval
-- candidate ranking
-- draft generation
-- safety validation
-- parameter validation
-- confirmation policy
-- fallback command resolution
-
-should continue to pass.
-
-## Open Questions
-
-1. Should `AutomationCreation` create local internal automation drafts only, or should it call SmartThings Rules API in the app?
-2. Do we need support for updating/deleting existing automations in the first release?
-3. Should operation names be API-style (`automationCreation`) or user-facing style (`AutomationCreation`)?
-4. What timezone should be used for schedule normalization?
-5. How should ambiguous `AC` be resolved when multiple air conditioners exist?
-6. Should SmartThings Rules JSON be persisted in project state, displayed only, or sent to an API client?
-7. Should scenes/manual routines be represented separately from rules/automatic routines?
+- graph runtime matches legacy fallback for direct commands
+- high-risk direct command confirmation still works
+- conversation memory still works
+- model-unavailable fallback still resolves supported direct commands
 
 ## Acceptance Criteria
 
-The first implementation should be considered successful when:
+The automation routing architecture is complete when:
 
-1. `Turn on the TV` routes to `executeDeviceCommand` and preserves current behavior.
-2. `Turn on AC everyday at 7 AM` routes to `automationCreation`.
-3. The system extracts:
-   - action: `turn on AC`
-   - trigger: `everyday at 7 AM`
-   - action command: `switch.on`
-   - device type: `airConditioner`
-4. The system can represent multiple actions.
-5. The system can represent `and` and `or` condition trees.
-6. The system does not execute automation actions immediately.
-7. The system can produce an internal automation AST.
-8. The system can compile a simple schedule plus command automation to SmartThings-style Rule JSON.
-9. High-risk persistent automations require confirmation or are blocked.
-10. Existing direct command tests continue to pass.
-
+1. Operation detection is represented as a graph-capable agent or router node.
+2. Direct commands remain graph-default and regression-safe.
+3. Automation creation runs through the graph scheduler, not only through a side service.
+4. Multiple action descriptions resolve through scoped subgraphs.
+5. Conditions support nested `and`, `or`, and `not` without flattening.
+6. Condition operands resolve through deterministic and candidate-based paths with clarification on ambiguity.
+7. SmartThings JSON compilation is isolated behind a compiler protocol.
+8. SmartThings API persistence is isolated behind a client protocol.
+9. RAG is used only for the subproblems where it improves extraction or schema grounding.
+10. Safety validation remains deterministic and cannot be bypassed by model or RAG output.

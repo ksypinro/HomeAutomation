@@ -13,7 +13,9 @@ flowchart TB
 
     subgraph Runtime["Orchestrator Runtime"]
         Planner["AgentPlanner"]
+        GraphPlanner["GraphPlanner"]
         Scheduler["AgentScheduler"]
+        GraphScheduler["GraphScheduler"]
         Registry["AgentRegistry"]
         Context["ResolutionContextStore"]
         Events["AgentEventBus"]
@@ -29,7 +31,9 @@ flowchart TB
 
     UI --> Orchestrator
     Orchestrator --> Planner
+    Orchestrator --> GraphPlanner
     Orchestrator --> Scheduler
+    Orchestrator --> GraphScheduler
     Orchestrator --> Context
     Orchestrator --> Events
     Orchestrator --> Metrics
@@ -37,12 +41,41 @@ flowchart TB
     Scheduler --> Registry
     Scheduler --> Policy
     Scheduler --> Breakers
+    GraphScheduler --> Registry
+    GraphScheduler --> Policy
+    GraphScheduler --> Breakers
     Registry --> Agents
     Agents --> Core
     Agents --> RAG
 ```
 
 ## Runtime Flow
+
+```mermaid
+flowchart TD
+    A["resolveStream receives text"] --> B["Trim and validate command"]
+    B --> C["Create CommandRequest and ResolutionContextStore"]
+    C --> D["Attach memory hint when command references previous turn"]
+    D --> E["Publish input event"]
+    E --> F["Operation detection selects command path"]
+    F --> G["GraphPlanner builds execution graph"]
+    G --> H["GraphScheduler executes ready DAG nodes"]
+    H --> I["Agents return patches or terminal exits"]
+    I --> J["ResolutionContextStore applies patches"]
+    J --> K["Retrieval reports and metrics remain attached to context"]
+    K --> L{"Execution policy allows mock execution?"}
+    L -->|Yes| M["Run post-pipeline MockExecutionAgent"]
+    L -->|No| N["Keep ready/confirmation/clarification/unsupported result"]
+    M --> O["Assemble HomeAutomationResolverResult"]
+    N --> O
+    O --> P["Capture metrics and circuit states"]
+    P --> Q["Append conversation memory turn"]
+    Q --> R["Emit outcome event and final result"]
+```
+
+The graph runtime is the default. The legacy phased scheduler remains available as a rollback path by constructing `HomeCommandOrchestrator(runtimeMode: .legacy)` or setting `HOME_AUTOMATION_ORCHESTRATOR_RUNTIME=legacy` in the app environment.
+
+## Legacy Runtime Flow
 
 ```mermaid
 flowchart TD
@@ -84,6 +117,11 @@ Parallel NLU agents
 -> ConfirmationPolicyAgent
 -> ExecutionPlanningAgent
 -> post-pipeline MockExecutionAgent when allowed by policy
+
+Graph runtime:
+OperationDetectionAgent
+-> direct-command graph or automation-creation graph
+-> GraphScheduler runs ready DAG nodes, records graph metrics, and fails closed on mandatory safety gates
 ```
 
 ## Component Details
@@ -93,11 +131,14 @@ Parallel NLU agents
 | `OrchestratorUpdate` | Stream output enum: either an `OrchestratorPipelineEvent` or final `HomeAutomationResolverResult`. |
 | `HomeCommandOrchestrator` | Main resolver. Owns high-level lifecycle, stream creation, context store setup, memory hint injection, scheduling, result assembly, metrics storage, and memory append. |
 | `HomeCommandOrchestrator.makeRAGEnabled` | Convenience factory that indexes canonical knowledge and injects a `ContextRetriever` into the agent registry. |
+| `OrchestratorRuntimeConfiguration` | Runtime-mode configuration. Defaults to graph and supports a legacy rollback environment override. |
 | `AgentTask` | One planned agent call identified by `AgentID`. |
 | `AgentPhase` | Execution phase, either sequential or parallel. |
 | `AgentExecutionPlan` | Ordered plan of agent phases plus fallback-only marker. |
 | `AgentPlanner` | Builds fallback-only or full model execution plans based on `OrchestratorPolicyEngine.shouldUseModels`. |
+| `GraphPlanner` | Builds direct-command, fallback, and automation-creation DAGs. |
 | `AgentScheduler` | Executes phases, checks circuit breakers, publishes events, runs agents, applies patches, records traces, and returns terminal exits. |
+| `GraphScheduler` | Executes graph nodes when dependencies and guards are satisfied, records graph metrics, and respects mandatory fail-closed policy. |
 | `AgentRegistry` | Stores type-erased agents by ID and capability for scheduler lookup. |
 | `ContextualHomeAgent` | Adapts a typed `HomeAgent` to `AnyHomeAgent` by deriving input from context and mapping output to a patch. |
 | `DefaultAgentRegistryFactory` | Wires default agent instances, dependencies, RAG retriever, model availability closure, registry, validators, tools, and executors. |

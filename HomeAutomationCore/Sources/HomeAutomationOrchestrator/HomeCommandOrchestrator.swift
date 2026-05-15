@@ -41,7 +41,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         registry: AgentRegistry,
         planner: AgentPlanner,
         policy: OrchestratorPolicyEngine,
-        runtimeMode: OrchestratorRuntimeMode = .legacy,
+        runtimeMode: OrchestratorRuntimeMode = .graph,
         deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
@@ -81,7 +81,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
-        runtimeMode: OrchestratorRuntimeMode = .legacy,
+        runtimeMode: OrchestratorRuntimeMode = .graph,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
@@ -122,7 +122,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
-        runtimeMode: OrchestratorRuntimeMode = .legacy,
+        runtimeMode: OrchestratorRuntimeMode = .graph,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         indexCache: VectorIndexCache = VectorIndexCache()
     ) async -> HomeCommandOrchestrator {

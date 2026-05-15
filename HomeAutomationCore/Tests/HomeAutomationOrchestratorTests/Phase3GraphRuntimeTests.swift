@@ -172,6 +172,37 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
+    func directCommandMatrixMatchesLegacyAndGraphRuntimes() async throws {
+        let commands = [
+            "Turn on the TV",
+            "Set the bedroom lamp to 40 percent",
+            "Make the bedroom AC cooler by 2 degrees",
+            "Unlock the front door",
+            "Run movie time"
+        ]
+
+        for command in commands {
+            let legacy = HomeCommandOrchestrator(
+                deviceRegistry: MockHomeDeviceRegistry(),
+                foundationModelAvailability: { false },
+                runtimeMode: .legacy
+            )
+            let graph = HomeCommandOrchestrator(
+                deviceRegistry: MockHomeDeviceRegistry(),
+                foundationModelAvailability: { false },
+                runtimeMode: .graph
+            )
+
+            let legacyResult = try await legacy.resolve(command, executeLowRiskCommands: false)
+            let graphResult = try await graph.resolve(command, executeLowRiskCommands: false)
+
+            #expect(graphResult.aggregation.finalCandidateIDs == legacyResult.aggregation.finalCandidateIDs)
+            #expect(graphResult.draft == legacyResult.draft)
+            #expect(Self.resolutionKind(graphResult.resolution) == Self.resolutionKind(legacyResult.resolution))
+        }
+    }
+
+    @Test
     func graphRuntimeMetricsCaptureNodeStatusesAndSelectedAgents() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
@@ -273,5 +304,26 @@ private struct ComparableExecutionStep: Equatable {
         self.value = step.value
         self.attribute = step.attribute
         self.valueFormula = step.valueFormula
+    }
+}
+
+private extension Phase3GraphRuntimeTests {
+    static func resolutionKind(_ resolution: HomeCommandResolution) -> String {
+        switch resolution {
+        case .readyToExecute:
+            return "readyToExecute"
+        case .executed:
+            return "executed"
+        case .requiresConfirmation:
+            return "requiresConfirmation"
+        case .needsClarification:
+            return "needsClarification"
+        case .unsupported:
+            return "unsupported"
+        case .automationDrafted:
+            return "automationDrafted"
+        case .automationRequiresConfirmation:
+            return "automationRequiresConfirmation"
+        }
     }
 }
