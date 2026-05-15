@@ -135,8 +135,8 @@ struct HomeAutomationView: View {
                             ProgressView()
                                 .controlSize(.small)
                             Text(currentPipelineStage)
-                                .font(.callout.weight(.semibold))
-                                .lineLimit(1)
+                                .font(.caption.weight(.semibold))
+                                //.lineLimit(1)
                             Spacer()
                         }
                         .padding(10)
@@ -150,8 +150,8 @@ struct HomeAutomationView: View {
                                 Image(systemName: iconName(for: event.status))
                                     .foregroundStyle(iconColor(for: event.status))
                                 Text(event.title)
-                                    .font(.callout.weight(.semibold))
-                                    .lineLimit(1)
+                                    .font(.caption.weight(.semibold))
+                                    //.lineLimit(1)
                             }
 
                             Text(event.detail.isEmpty ? event.status.rawValue : event.detail)

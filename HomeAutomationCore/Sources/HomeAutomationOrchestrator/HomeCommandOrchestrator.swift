@@ -42,6 +42,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let deviceRegistry: MockHomeDeviceRegistry
     private let operationDetector: HomeOperationDetectionService
     private let automationCreationResolver: AutomationCreationResolver
+    private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
 
     public init(
         registry: AgentRegistry,
@@ -52,7 +53,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
-        automationDraftAgent: AutomationDraftAgent = AutomationDraftAgent()
+        automationDraftAgent: AutomationDraftAgent = AutomationDraftAgent(),
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) {
         self.registry = registry
         self.planner = planner
@@ -64,6 +66,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.conversationMemory = conversationMemory
         self.circuitBreakers = circuitBreakers
         self.operationDetector = HomeOperationDetectionService()
+        self.smartThingsRuleCreator = smartThingsRuleCreator
 
         let actionResolver = AutomationActionResolver(
             registry: registry,
@@ -76,7 +79,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.automationCreationResolver = AutomationCreationResolver(
             automationDraftAgent: automationDraftAgent,
             actionResolver: actionResolver,
-            conditionOperandResolver: AutomationConditionOperandResolver(registry: deviceRegistry)
+            conditionOperandResolver: AutomationConditionOperandResolver(registry: deviceRegistry),
+            smartThingsRuleCreator: smartThingsRuleCreator
         )
     }
 
@@ -90,7 +94,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         runtimeMode: OrchestratorRuntimeMode = .graph,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
-        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
+        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) {
         let policy = OrchestratorPolicyEngine(
             isModelAvailable: foundationModelAvailability,
@@ -100,7 +105,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             registry: DefaultAgentRegistryFactory.make(
                 registry: deviceRegistry,
                 contextRetriever: contextRetriever,
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                smartThingsRuleCreator: smartThingsRuleCreator
             ),
             planner: AgentPlanner(policy: policy),
             policy: policy,
@@ -114,7 +120,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     foundationModelAvailability: foundationModelAvailability,
                     contextRetriever: contextRetriever
                 )
-            )
+            ),
+            smartThingsRuleCreator: smartThingsRuleCreator
         )
     }
 
@@ -130,7 +137,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
         runtimeMode: OrchestratorRuntimeMode = .graph,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
-        indexCache: VectorIndexCache = VectorIndexCache()
+        indexCache: VectorIndexCache = VectorIndexCache(),
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) async -> HomeCommandOrchestrator {
         let conversationMemory = ConversationMemory()
         let circuitBreakers = CircuitBreakerRegistry()
@@ -145,7 +153,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             runtimeMode: runtimeMode,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
-            circuitBreakers: circuitBreakers
+            circuitBreakers: circuitBreakers,
+            smartThingsRuleCreator: smartThingsRuleCreator
         )
     }
 
@@ -155,10 +164,26 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ///   - text: The natural language command.
     ///   - executeLowRiskCommands: Whether to automatically mock execution for low risk intents.
     /// - Returns: The final `HomeAutomationResolverResult`.
-    public func resolve(_ text: String, executeLowRiskCommands: Bool = true) async throws -> HomeAutomationResolverResult {
+    public func resolve(_ text: String, executeLowRiskCommands: Bool) async throws -> HomeAutomationResolverResult {
+        try await resolve(
+            text,
+            executeLowRiskCommands: executeLowRiskCommands,
+            automationCreationOptions: .dryRun
+        )
+    }
+
+    public func resolve(
+        _ text: String,
+        executeLowRiskCommands: Bool = true,
+        automationCreationOptions: SmartThingsRuleCreationOptions = .dryRun
+    ) async throws -> HomeAutomationResolverResult {
         logger.info("Resolving text command synchronously: '\(text, privacy: .private)'")
         var finalResult: HomeAutomationResolverResult?
-        for try await update in resolveStream(text, executeLowRiskCommands: executeLowRiskCommands) {
+        for try await update in resolveStream(
+            text,
+            executeLowRiskCommands: executeLowRiskCommands,
+            automationCreationOptions: automationCreationOptions
+        ) {
             if case .result(let result) = update {
                 finalResult = result
             }
@@ -174,7 +199,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     /// The stream emits intermediate `.event` updates and terminates with a final `.result`.
     public func resolveStream(
         _ text: String,
-        executeLowRiskCommands: Bool = true
+        executeLowRiskCommands: Bool = true,
+        automationCreationOptions: SmartThingsRuleCreationOptions = .dryRun
     ) -> AsyncThrowingStream<OrchestratorUpdate, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -186,7 +212,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 }
 
                 logger.info("Starting resolution stream for command: '\(trimmedText, privacy: .private)'")
-                let request = CommandRequest(text: trimmedText, executeLowRiskCommands: executeLowRiskCommands)
+                let request = CommandRequest(
+                    text: trimmedText,
+                    executeLowRiskCommands: executeLowRiskCommands,
+                    automationCreationOptions: automationCreationOptions
+                )
                 let contextStore = ResolutionContextStore(request: request)
                 if ConversationMemoryReferenceDetector.containsMemoryReference(trimmedText),
                    let hint = await conversationMemory.lastResolvedDeviceHint() {
@@ -208,7 +238,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     detail: trimmedText
                 )
                 await eventBus.publish(inputEvent)
-                continuation.yield(.event(inputEvent))
 
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
@@ -226,7 +255,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                 )
                 await eventBus.publish(operationEvent)
-                continuation.yield(.event(operationEvent))
 
                 if operation.operation == .automationCreation {
                     let started = Date()
@@ -292,9 +320,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         detail: result.resolution.displaySummary
                     )
                     await eventBus.publish(outcomeEvent)
-                    continuation.yield(.event(outcomeEvent))
+                    await eventBus.finish()
+                    await eventForwarder.value
                     continuation.yield(.result(result))
-                    eventForwarder.cancel()
                     continuation.finish()
                     return
                 }
@@ -357,10 +385,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     detail: result.resolution.displaySummary
                 )
                 await eventBus.publish(outcomeEvent)
-                continuation.yield(.event(outcomeEvent))
+                await eventBus.finish()
+                await eventForwarder.value
                 continuation.yield(.result(result))
                 logger.info("Stream resolution completed successfully.")
-                eventForwarder.cancel()
                 continuation.finish()
             }
         }
@@ -381,12 +409,14 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private func resolveAutomationCreation(
         text: String,
         operation: HomeOperationDetectionResult,
+        creationOptions: SmartThingsRuleCreationOptions,
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> HomeAutomationResolverResult {
         await automationCreationResolver.resolve(
             text: text,
             operation: operation,
+            creationOptions: creationOptions,
             eventBus: eventBus,
             runID: runID
         )
@@ -407,9 +437,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
         switch runtimeMode {
         case .legacy:
+            let context = await contextStore.snapshot()
             let result = await resolveAutomationCreation(
                 text: text,
                 operation: operation,
+                creationOptions: context.request.automationCreationOptions,
                 eventBus: eventBus,
                 runID: runID
             )
@@ -420,6 +452,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             )
 
         case .graph:
+            await contextStore.setScopedValue(
+                AutomationPipelineEventBridge(eventBus: eventBus, runID: runID),
+                for: AutomationRuntimeContextKeys.pipelineEventBridge
+            )
             let schedulerResult = await GraphScheduler().execute(
                 graph,
                 registry: registry,
@@ -460,6 +496,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             let fallbackResult = await resolveAutomationCreation(
                 text: text,
                 operation: operation,
+                creationOptions: context.request.automationCreationOptions,
                 eventBus: eventBus,
                 runID: runID
             )

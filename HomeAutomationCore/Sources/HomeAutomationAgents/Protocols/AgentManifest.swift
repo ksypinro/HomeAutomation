@@ -84,6 +84,7 @@ public enum AgentManifestDefaults {
              .automationConditionOperandResolution,
              .automationValidation,
              .smartThingsCompilation,
+             .smartThingsRuleCreation,
              .automationResultAssembly:
             return [.automationCreation]
         default:
@@ -131,8 +132,10 @@ public enum AgentManifestDefaults {
             return ["automationDraft", "automationResolvedActions", "automationConditionOperandResolutionRecords"]
         case .smartThingsCompilation:
             return ["automationDraft", "automationResolvedActions", "automationValidation"]
+        case .smartThingsRuleCreation:
+            return ["automationPlan", "smartThingsRule", "automationValidation", "request.automationCreationOptions"]
         case .automationResultAssembly:
-            return ["automationDraft", "automationResolvedActions", "automationValidation", "automationPlan", "smartThingsRule"]
+            return ["automationDraft", "automationResolvedActions", "automationValidation", "automationPlan", "smartThingsRule", "smartThingsRuleCreation"]
         default:
             return []
         }
@@ -183,7 +186,7 @@ public enum AgentManifestDefaults {
         case .operationDetection:
             return ["operation"]
         case .automationDraft:
-            return ["automationDraft"]
+            return ["automationDraft", "retrievalReports"]
         case .automationActionResolution:
             return ["automationResolvedActions"]
         case .automationConditionOperandResolution:
@@ -192,6 +195,8 @@ public enum AgentManifestDefaults {
             return ["automationValidation", "resolution"]
         case .smartThingsCompilation:
             return ["smartThingsRule", "automationPlan"]
+        case .smartThingsRuleCreation:
+            return ["smartThingsRuleCreation", "automationPlan"]
         case .automationResultAssembly:
             return ["resolverResult", "resolution"]
         default:
@@ -234,6 +239,7 @@ public enum AgentManifestDefaults {
              .automationConditionOperandResolution,
              .automationValidation,
              .smartThingsCompilation,
+             .smartThingsRuleCreation,
              .automationResultAssembly:
             return 90
         case .safetyValidation, .parameterValidation, .confirmationPolicy, .executionPlanning:

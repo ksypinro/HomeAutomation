@@ -4,12 +4,12 @@
 
 The orchestrator has already moved from a single fixed phase pipeline toward a graph-capable runtime. Direct commands now default to the graph scheduler, while the legacy phase scheduler remains available as a rollback path.
 
-The next architectural challenge is narrower: make automation creation a first-class graph-native workflow while keeping immediate device commands stable.
+The next architectural challenge is narrower: keep automation creation graph-native and harden the pieces that are still implemented as scoped subflows or compatibility layers.
 
 Current state in one sentence:
 
 ```text
-Direct command orchestration is graph-default; automation creation is functional but still service-driven rather than fully graph-native.
+Direct command orchestration is graph-default; automation creation is graph-native in graph runtime mode with a legacy service fallback for rollback and parity.
 ```
 
 The intended direction is to keep the graph scheduler as the shared runtime and support two runtime paths only:
@@ -18,6 +18,25 @@ The intended direction is to keep the graph scheduler as the shared runtime and 
 - automation creation
 
 Automation update, deletion, query, scene creation, and routine execution are intentionally out of scope for this plan.
+
+## Current Implementation Snapshot
+
+- `OperationDetectionAgent` is registered and runs as the entry node of the automation creation graph.
+- `OperationGraphCatalog` provides direct command, automation creation, and unsupported graph plans behind the `GraphPlanner` facade.
+- `ResolutionContext` and `ResolutionContextStore` support scoped root, action, condition, and backend values.
+- Automation creation graph nodes are registered for draft extraction, action resolution, condition operand resolution, validation, SmartThings compilation, SmartThings rule creation, and result assembly.
+- `GraphScheduler` executes the automation creation graph in graph runtime mode; `AutomationCreationResolver` remains the legacy fallback path.
+- Multiple automation actions resolve concurrently inside `AutomationActionResolver` and write action-scoped outputs in stable order.
+- SmartThings Rule creation is implemented as a create-only backend behind dry-run, validation, location, and confirmation gates.
+- Automation RAG is source- and subproblem-scoped, with a small evaluation corpus and per-source retrieval metrics.
+
+Remaining hardening areas:
+
+- Top-level operation routing still happens before graph scheduling; the graph operation node records context but does not choose the graph by itself.
+- Dynamic action/condition fan-out is implemented inside agents, not by expanding the graph into one node per child.
+- Condition operand resolution is deterministic and should later reuse candidate retrieval/ranking with clarification.
+- Scheduler terminal decisions still use `HomeCommandResolution` rather than an operation-neutral internal outcome.
+- Unsupported non-creation operations return at the orchestrator boundary instead of running the unsupported graph.
 
 ## Current Implementation Baseline
 
@@ -48,7 +67,7 @@ Review:
 
 - This satisfies the Phase 11 runtime-default requirement.
 - Rollback exists and is useful for direct command parity debugging.
-- Runtime selection is still coarse. It chooses legacy vs graph for direct-command action resolution, but automation creation itself is not yet executed by `GraphScheduler`.
+- Runtime selection is still coarse, but graph mode now executes automation creation through `GraphScheduler`; legacy mode still uses `AutomationCreationResolver`.
 
 ### Operation Detection
 
@@ -72,14 +91,14 @@ public enum HomeAutomationOperationKind: String, Sendable, Hashable, Codable {
 Current behavior:
 
 - `.executeDeviceCommand` -> direct-command graph or legacy scheduler.
-- `.automationCreation` -> `AutomationCreationResolver`.
+- `.automationCreation` -> automation creation graph in graph runtime mode; `AutomationCreationResolver` in legacy mode or defensive fallback.
 - other operation kinds -> unsupported response and no graph execution.
 
 Review:
 
 - Operation routing exists and works.
 - The detector is deterministic and offline-safe.
-- The detector is not yet a default graph node, even though `AgentID.operationDetection`, `AgentCapability.operationDetection`, and manifest support exist.
+- The detector is a registered graph node for automation creation, while top-level graph selection remains deterministic and outside the scheduler.
 - There is no ambiguity escalation path that combines deterministic detection, RAG examples, and a model-backed router.
 
 ### Agent Manifests and Registry
@@ -178,19 +197,20 @@ Review:
 
 ### Automation Creation Flow
 
-Automation creation is functional through `AutomationCreationResolver`.
+Automation creation is functional through `GraphScheduler` in graph runtime mode and through `AutomationCreationResolver` in legacy mode.
 
 Current flow:
 
 ```text
 operationDetection
-  -> AutomationDraftAgent
-  -> AutomationConditionOperandResolver
-  -> AutomationActionResolver
-       -> direct-command graph or legacy scheduler per action
+  -> AutomationDraftExtractionAgent
+  -> AutomationConditionOperandResolutionAgent
+  -> AutomationActionResolutionAgent
+       -> direct-command graph per action in isolated subflows
   -> AutomationValidationAgent
-  -> SmartThingsRuleCompiler
-  -> HomeAutomationCreationPlan
+  -> SmartThingsCompilationAgent
+  -> SmartThingsRuleCreationAgent
+  -> AutomationResultAssemblyAgent
 ```
 
 `GraphPlanner.automationCreationGraph()` defines this intended graph shape:
@@ -207,25 +227,24 @@ operationDetection
 
 Review:
 
-- The graph shape exists.
-- The orchestrator uses that graph shape for metrics.
-- The graph scheduler does not execute the automation creation graph yet.
-- Several automation components are services rather than registered contextual agents.
-- Action resolution is sequential.
-- Action and condition values do not have scoped graph context.
+- The graph shape exists and is executed by `GraphScheduler`.
+- Automation components are registered contextual agents while keeping service implementations reusable internally.
+- Action resolution is concurrent inside the action-resolution agent and writes action-scoped outputs.
+- Condition values write scoped records.
+- Full dynamic graph expansion is not implemented yet; per-action/per-condition graph statuses are enriched from scoped subflow results.
 
 ### Context Store
 
-`ResolutionContextStore` still applies root-level patch keys for the direct command flow.
+`ResolutionContextStore` still applies root-level patch keys for the direct command flow and now also merges scoped values for automation root, action, condition, and backend outputs.
 
 There is also an `AutomationResolutionContext` and `AutomationResolutionContextStore`.
 
 Review:
 
 - The patch-based mutation model is still a good design.
-- The current context model is too root-oriented for multi-action automation graphs.
-- Automation patch keys exist, but the main `ResolutionContextStore.apply` does not fully materialize automation fields.
-- A separate automation context store is useful but fragments the runtime model.
+- Scoped values solve the main overwrite risk for multi-action automation work.
+- Some automation aggregates intentionally remain scoped rather than being promoted to dedicated root fields.
+- `AutomationResolutionContextStore` remains for compatibility and focused automation tests, but graph runtime uses `ResolutionContextStore`.
 
 ### Policy
 
@@ -261,8 +280,8 @@ Current metrics capture:
 Review:
 
 - The telemetry baseline is strong.
-- Automation graph metrics are currently a planned graph shape plus service-path result data, not actual graph execution data.
-- Node-level automation metrics should become actual `GraphScheduler` node statuses after graph migration.
+- Automation graph metrics are actual `GraphScheduler` node statuses in graph runtime mode.
+- Per-action and per-condition statuses are currently derived from scoped subflow outputs; true dynamic graph nodes remain a future hardening path.
 
 ## Architecture Review
 
@@ -280,12 +299,12 @@ Review:
 
 - Operation detection should become part of the graph/runtime contract.
 - The planner should evolve from static graph factories to operation graph registration.
-- Automation creation should move from `AutomationCreationResolver` service orchestration to graph execution.
-- Multi-action automations need scoped context and dynamic fan-out.
+- Automation creation graph execution should keep replacing service orchestration as the default path while preserving legacy rollback.
+- Multi-action automations have scoped context and concurrent subflows; full dynamic graph node fan-out remains future hardening.
 - Conditions need scoped operand resolution and ambiguity handling.
 - Policy should read manifests and node metadata first, with ID-based compatibility as a fallback.
 - Outcomes should be operation-neutral internally.
-- Graph metrics should be the source of truth for both supported runtime paths: direct commands and automation creation.
+- Graph metrics should remain the source of truth for both supported runtime paths: direct commands and automation creation.
 
 ## Target Architecture
 
@@ -302,7 +321,7 @@ flowchart LR
     C -->|"unsupported"| I["Unsupported graph"]
 ```
 
-The operation router can start deterministic and later add model/RAG support for ambiguous automation-creation routing. The graph scheduler should not need changes while automation creation moves from a service path into graph execution.
+The operation router is deterministic today and can later add model/RAG support for ambiguous automation-creation routing. The graph scheduler should not need changes while automation creation continues to harden as a graph-native path.
 
 ### Automation-Focused Graph Catalog
 
@@ -401,7 +420,7 @@ automationDraft
   -> resultAssembly
 ```
 
-The first implementation can keep a sequential service fallback, but the intended graph runtime should support:
+The current implementation keeps a legacy service fallback, while the intended graph runtime should continue moving toward:
 
 - dynamic node creation from `actionDescriptions`
 - action-scoped direct-command subgraphs
@@ -495,7 +514,7 @@ Keep `OrchestratorPolicyEngine` as a compatibility wrapper until all graph paths
 2. Run each action through a scoped direct-command subgraph.
 3. Run each condition operand through a scoped resolver node.
 4. Add deterministic join nodes for action and condition results.
-5. Preserve sequential fallback during migration.
+5. Preserve legacy fallback during migration.
 
 ### Phase 17: Policy and Outcome Generalization
 

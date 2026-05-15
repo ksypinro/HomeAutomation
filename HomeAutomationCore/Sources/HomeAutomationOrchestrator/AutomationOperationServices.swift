@@ -34,6 +34,9 @@ public struct HomeOperationDetectionService: Sendable {
             normalized,
             ["automation", "automatically", "schedule", "rule", "routine to"]
         )
+        let hasConversationalAutomationIntent =
+            containsAny(normalized, ["remember this", "remember that", "similar situation", "similar situations", "when this happens", "whenever this happens", "in this situation", "from now on", "next time"]) &&
+            containsAny(normalized, ["turn on", "turn off", "set ", "increase", "decrease", "lock", "unlock", "open", "close", "start", "stop"])
         let hasSchedule = containsAny(
             normalized,
             ["every day", "everyday", "daily", "every monday", "every tuesday", "every wednesday", "every thursday", "every friday", "every saturday", "every sunday", "weekdays", "weekends"]
@@ -42,8 +45,12 @@ public struct HomeOperationDetectionService: Sendable {
             normalized.hasPrefix("when ") ||
             normalized.hasPrefix("whenever ")
 
-        if hasAutomationKeyword || hasSchedule || hasTrigger {
-            return result(.automationCreation, confidence: hasAutomationKeyword ? 0.92 : 0.84, reason: "Schedule, trigger, or automation keyword matched")
+        if hasAutomationKeyword || hasSchedule || hasTrigger || hasConversationalAutomationIntent {
+            return result(
+                .automationCreation,
+                confidence: hasAutomationKeyword || hasConversationalAutomationIntent ? 0.92 : 0.84,
+                reason: "Schedule, trigger, conversational routine, or automation keyword matched"
+            )
         }
 
         if containsAny(

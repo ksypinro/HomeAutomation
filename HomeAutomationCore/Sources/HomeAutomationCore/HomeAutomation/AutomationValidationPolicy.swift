@@ -184,7 +184,9 @@ public struct AutomationValidationPolicy: Sendable {
                 unsupportedCompilationReason = reason
                 issues.append(issue("automation.schedule.unsupportedCompilation", reason, .warning))
             case .once:
-                break
+                let reason = "SmartThings Rules v1 compilation does not support schedule: one-time schedule"
+                unsupportedCompilationReason = reason
+                issues.append(issue("automation.schedule.unsupportedCompilation", reason, .warning))
             }
         case .device:
             break
@@ -337,6 +339,13 @@ public struct AutomationValidationPolicy: Sendable {
                 issues: &issues,
                 clarificationQuestion: &clarificationQuestion
             )
+        case .changes(let child):
+            validateConditionTree(
+                child,
+                path: "\(path).changes",
+                issues: &issues,
+                clarificationQuestion: &clarificationQuestion
+            )
         case .comparison(let comparison):
             validateOperand(
                 comparison.left,
@@ -402,7 +411,7 @@ public struct AutomationValidationPolicy: Sendable {
                     .error
                 )
             )
-        case .literalString, .literalNumber, .locationMode:
+        case .literalString, .literalNumber, .literalRange, .locationMode:
             break
         }
     }

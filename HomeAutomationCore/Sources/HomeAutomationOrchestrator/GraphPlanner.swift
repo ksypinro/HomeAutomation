@@ -125,6 +125,7 @@ public struct GraphPlanner: Sendable {
             (.automationActionResolution, .required),
             (.automationValidation, .safetyGate),
             (.smartThingsCompilation, .required),
+            (.smartThingsRuleCreation, .required),
             (.automationResultAssembly, .required)
         ]
 
@@ -145,7 +146,8 @@ public struct GraphPlanner: Sendable {
                 GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue),
                 GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue),
                 GraphEdge(from: AgentID.automationValidation.rawValue, to: AgentID.smartThingsCompilation.rawValue),
-                GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.automationResultAssembly.rawValue)
+                GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue),
+                GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)
             ],
             entryNodeIDs: [AgentID.operationDetection.rawValue]
         )

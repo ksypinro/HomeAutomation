@@ -53,6 +53,7 @@ public extension AgentID {
     static let executionPlanning = AgentID("executionPlanning")
     static let mockExecution = AgentID("mockExecution")
     static let smartThingsCompilation = AgentID("smartThingsCompilation")
+    static let smartThingsRuleCreation = AgentID("smartThingsRuleCreation")
 
     // Fallback
     static let ruleFallback = AgentID("ruleFallback")
@@ -96,6 +97,7 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case bixbyFallback
     case unsupported
     case automationResultAssembly
+    case smartThingsRuleCreation
     case clarification
     case resultSummary
 }

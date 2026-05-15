@@ -12,6 +12,11 @@ private struct AutomationRuntimeAgentInputError: LocalizedError, Sendable {
 }
 
 public enum AutomationRuntimeContextKeys {
+    public static let pipelineEventBridge = ScopedContextKey<AutomationPipelineEventBridge>(
+        "automationPipelineEventBridge",
+        scope: .root
+    )
+
     public static let actionResolutionAggregate = ScopedContextKey<AutomationActionResolutionAggregate>(
         "automationActionResolutionAggregate",
         scope: .root
@@ -27,10 +32,25 @@ public enum AutomationRuntimeContextKeys {
         scope: .backend("smartthings")
     )
 
+    public static let smartThingsRuleCreation = ScopedContextKey<SmartThingsRuleCreationOutput>(
+        "smartThingsRuleCreationOutput",
+        scope: .backend("smartthings")
+    )
+
     public static func conditionOperandResolution(
         in scope: ContextScope
     ) -> ScopedContextKey<AutomationConditionOperandResolutionRecord> {
         ScopedContextKey("automationConditionOperandResolution", scope: scope)
+    }
+}
+
+public struct AutomationPipelineEventBridge: Sendable {
+    public let eventBus: AgentEventBus
+    public let runID: UUID
+
+    public init(eventBus: AgentEventBus, runID: UUID) {
+        self.eventBus = eventBus
+        self.runID = runID
     }
 }
 
@@ -135,9 +155,57 @@ public struct SmartThingsCompilationOutput: Sendable {
     }
 }
 
+public struct SmartThingsRuleCreationInput: Sendable {
+    public let plan: HomeAutomationCreationPlan
+    public let document: SmartThingsRuleDocument?
+    public let validation: AutomationValidationResult?
+    public let options: SmartThingsRuleCreationOptions
+
+    public init(
+        plan: HomeAutomationCreationPlan,
+        document: SmartThingsRuleDocument?,
+        validation: AutomationValidationResult?,
+        options: SmartThingsRuleCreationOptions
+    ) {
+        self.plan = plan
+        self.document = document
+        self.validation = validation
+        self.options = options
+    }
+}
+
+public struct SmartThingsRuleCreationOutput: Sendable {
+    public let plan: HomeAutomationCreationPlan
+    public let receipt: SmartThingsRuleCreationReceipt?
+    public let detail: String
+
+    public init(
+        plan: HomeAutomationCreationPlan,
+        receipt: SmartThingsRuleCreationReceipt?,
+        detail: String
+    ) {
+        self.plan = plan
+        self.receipt = receipt
+        self.detail = detail
+    }
+}
+
+public struct AutomationDraftExtractionOutput: Sendable, Hashable {
+    public let ruleDraft: HomeAutomationRuleDraft
+    public let retrievalReports: [KnowledgeRetrievalReport]
+
+    public init(
+        ruleDraft: HomeAutomationRuleDraft,
+        retrievalReports: [KnowledgeRetrievalReport] = []
+    ) {
+        self.ruleDraft = ruleDraft
+        self.retrievalReports = retrievalReports
+    }
+}
+
 public struct AutomationDraftExtractionAgent: HomeAgent {
     public typealias Input = AutomationDraftInput
-    public typealias Output = HomeAutomationRuleDraft
+    public typealias Output = AutomationDraftExtractionOutput
 
     public let id = AgentID.automationDraft
     public let capabilities: Set<AgentCapability> = [.automationDrafting]
@@ -151,9 +219,12 @@ public struct AutomationDraftExtractionAgent: HomeAgent {
     public func run(
         _ input: AutomationDraftInput,
         context: ResolutionContext
-    ) async throws -> HomeAutomationRuleDraft {
-        let output = try await draftAgent.run(input, context: context)
-        return try output.makeRuleDraft()
+    ) async throws -> AutomationDraftExtractionOutput {
+        let output = try await draftAgent.runWithDiagnostics(input, context: context)
+        return try AutomationDraftExtractionOutput(
+            ruleDraft: output.draft.makeRuleDraft(),
+            retrievalReports: output.retrievalReports
+        )
     }
 }
 
@@ -201,10 +272,11 @@ public struct AutomationActionResolutionAgent: HomeAgent {
                 message: "Automation action resolver is unavailable"
             )
         }
+        let bridge = context.scopedValue(for: AutomationRuntimeContextKeys.pipelineEventBridge)
         let results = await resolver.resolveAll(
             input,
-            eventBus: AgentEventBus(),
-            runID: UUID()
+            eventBus: bridge?.eventBus ?? AgentEventBus(),
+            runID: bridge?.runID ?? UUID()
         )
         return AutomationActionResolutionAggregate(
             actionDescriptions: input,
@@ -272,6 +344,154 @@ public struct SmartThingsCompilationAgent: HomeAgent {
     }
 }
 
+public struct SmartThingsRuleCreationAgent: HomeAgent {
+    public typealias Input = SmartThingsRuleCreationInput
+    public typealias Output = SmartThingsRuleCreationOutput
+
+    public let id = AgentID.smartThingsRuleCreation
+    public let capabilities: Set<AgentCapability> = [.smartThingsRuleCreation]
+    public let timeoutNanoseconds: UInt64 = 2_000_000_000
+    private let creator: (any SmartThingsRuleCreating)?
+
+    public init(creator: (any SmartThingsRuleCreating)? = nil) {
+        self.creator = creator
+    }
+
+    public func run(
+        _ input: SmartThingsRuleCreationInput,
+        context: ResolutionContext
+    ) async throws -> SmartThingsRuleCreationOutput {
+        guard input.options.mode == .create else {
+            return SmartThingsRuleCreationOutput(
+                plan: input.plan,
+                receipt: nil,
+                detail: "dry-run"
+            )
+        }
+
+        guard input.validation?.isValid != false else {
+            return skipped(
+                input: input,
+                status: .skipped,
+                message: input.validation?.blockingMessage ?? "Automation validation blocked SmartThings rule creation."
+            )
+        }
+
+        guard let document = input.document else {
+            return skipped(
+                input: input,
+                status: .skipped,
+                message: input.plan.unsupportedCompilationReason ?? "SmartThings rule JSON is unavailable."
+            )
+        }
+
+        if input.plan.requiresConfirmation && !input.options.confirmsHighRiskAutomation {
+            return skipped(
+                input: input,
+                status: .confirmationRequired,
+                message: "Explicit confirmation is required before creating this high-risk automation."
+            )
+        }
+
+        guard let locationID = input.options.locationID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !locationID.isEmpty else {
+            return skipped(
+                input: input,
+                status: .skipped,
+                message: "SmartThings location ID is required before creating a rule."
+            )
+        }
+
+        guard let creator else {
+            return skipped(
+                input: input,
+                status: .skipped,
+                message: "SmartThings rule creator backend is not configured."
+            )
+        }
+
+        do {
+            let receipt = try await creator.createRule(
+                SmartThingsRuleCreationRequest(
+                    document: document,
+                    locationID: locationID,
+                    plan: input.plan
+                )
+            )
+            return SmartThingsRuleCreationOutput(
+                plan: plan(input.plan, receipt: receipt, requiresConfirmation: false),
+                receipt: receipt,
+                detail: receipt.message
+            )
+        } catch {
+            let receipt = SmartThingsRuleCreationReceipt(
+                status: .failed,
+                locationID: locationID,
+                message: error.localizedDescription
+            )
+            return SmartThingsRuleCreationOutput(
+                plan: plan(
+                    input.plan,
+                    receipt: receipt,
+                    requiresConfirmation: remainingConfirmationRequired(for: input, status: .failed)
+                ),
+                receipt: receipt,
+                detail: receipt.message
+            )
+        }
+    }
+
+    private func skipped(
+        input: SmartThingsRuleCreationInput,
+        status: SmartThingsRuleCreationStatus,
+        message: String
+    ) -> SmartThingsRuleCreationOutput {
+        let receipt = SmartThingsRuleCreationReceipt(
+            status: status,
+            locationID: input.options.locationID,
+            message: message
+        )
+        return SmartThingsRuleCreationOutput(
+            plan: plan(
+                input.plan,
+                receipt: receipt,
+                requiresConfirmation: remainingConfirmationRequired(for: input, status: status)
+            ),
+            receipt: receipt,
+            detail: message
+        )
+    }
+
+    private func plan(
+        _ plan: HomeAutomationCreationPlan,
+        receipt: SmartThingsRuleCreationReceipt,
+        requiresConfirmation: Bool? = nil
+    ) -> HomeAutomationCreationPlan {
+        HomeAutomationCreationPlan(
+            name: plan.name,
+            ruleDraft: plan.ruleDraft,
+            resolvedActions: plan.resolvedActions,
+            smartThingsRuleJSON: plan.smartThingsRuleJSON,
+            requiresConfirmation: requiresConfirmation ?? plan.requiresConfirmation,
+            unsupportedCompilationReason: plan.unsupportedCompilationReason,
+            backendResponse: receipt
+        )
+    }
+
+    private func remainingConfirmationRequired(
+        for input: SmartThingsRuleCreationInput,
+        status: SmartThingsRuleCreationStatus
+    ) -> Bool {
+        if status == .confirmationRequired {
+            return true
+        }
+        if input.options.mode == .create && input.options.confirmsHighRiskAutomation {
+            return false
+        }
+        return input.plan.requiresConfirmation
+    }
+}
+
 public struct AutomationResultAssemblyAgent: HomeAgent {
     public typealias Input = ResolutionContext
     public typealias Output = HomeAutomationResolverResult
@@ -303,6 +523,7 @@ public struct AutomationResultAssemblyAgent: HomeAgent {
         let aggregate = input.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate)
         let validation = input.scopedValue(for: ScopedContextKeys.validation())
         let compilation = input.scopedValue(for: AutomationRuntimeContextKeys.smartThingsCompilation)
+        let creation = input.scopedValue(for: AutomationRuntimeContextKeys.smartThingsRuleCreation)
 
         if let blocking = aggregate?.firstBlockingResolution {
             return Self.blockingActionResult(
@@ -346,7 +567,7 @@ public struct AutomationResultAssemblyAgent: HomeAgent {
             )
         }
 
-        let plan = compilation?.plan ?? HomeAutomationCreationPlan(
+        let plan = creation?.plan ?? compilation?.plan ?? HomeAutomationCreationPlan(
             name: ruleDraft.name,
             ruleDraft: ruleDraft,
             resolvedActions: aggregate?.resolvedActions ?? [],

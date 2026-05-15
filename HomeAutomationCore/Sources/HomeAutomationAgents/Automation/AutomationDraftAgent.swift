@@ -1,6 +1,19 @@
 import Foundation
 import HomeAutomationCore
 
+public struct AutomationDraftAgentOutput: Sendable, Hashable {
+    public let draft: AutomationDraftOutput
+    public let retrievalReports: [KnowledgeRetrievalReport]
+
+    public init(
+        draft: AutomationDraftOutput,
+        retrievalReports: [KnowledgeRetrievalReport] = []
+    ) {
+        self.draft = draft
+        self.retrievalReports = retrievalReports
+    }
+}
+
 public struct AutomationDraftAgent: HomeAgent {
     public typealias Input = AutomationDraftInput
     public typealias Output = AutomationDraftOutput
@@ -20,9 +33,20 @@ public struct AutomationDraftAgent: HomeAgent {
         _ input: AutomationDraftInput,
         context: ResolutionContext
     ) async throws -> AutomationDraftOutput {
+        try await runWithDiagnostics(input, context: context).draft
+    }
+
+    public func runWithDiagnostics(
+        _ input: AutomationDraftInput,
+        context: ResolutionContext
+    ) async throws -> AutomationDraftAgentOutput {
         let effectiveInput = input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? AutomationDraftInput(text: context.request.text, operation: input.operation)
             : input
-        return try await worker.createDraft(effectiveInput)
+        let result = try await worker.createDraftWithDiagnostics(effectiveInput)
+        return AutomationDraftAgentOutput(
+            draft: result.output,
+            retrievalReports: result.retrievalReports
+        )
     }
 }

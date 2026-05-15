@@ -488,6 +488,9 @@ public enum HomeCommandResolution: Sendable, Hashable, Codable {
         case .requiresConfirmation:
             return "This command requires confirmation before execution."
         case .automationDrafted(let plan):
+            if plan.backendResponse?.status == .created {
+                return "Automation created with \(plan.resolvedActions.count) action(s)."
+            }
             if plan.smartThingsRuleJSON != nil {
                 return "Automation drafted with \(plan.resolvedActions.count) action(s) and SmartThings JSON."
             }

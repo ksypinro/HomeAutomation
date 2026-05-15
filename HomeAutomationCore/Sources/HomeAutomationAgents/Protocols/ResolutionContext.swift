@@ -142,11 +142,17 @@ public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
 public struct CommandRequest: Sendable {
     public let text: String
     public let executeLowRiskCommands: Bool
+    public let automationCreationOptions: SmartThingsRuleCreationOptions
     public let timestamp: Date
 
-    public init(text: String, executeLowRiskCommands: Bool) {
+    public init(
+        text: String,
+        executeLowRiskCommands: Bool,
+        automationCreationOptions: SmartThingsRuleCreationOptions = .dryRun
+    ) {
         self.text = text
         self.executeLowRiskCommands = executeLowRiskCommands
+        self.automationCreationOptions = automationCreationOptions
         self.timestamp = Date()
     }
 }

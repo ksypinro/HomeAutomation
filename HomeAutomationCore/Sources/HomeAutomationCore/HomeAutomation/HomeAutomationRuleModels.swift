@@ -123,6 +123,7 @@ public enum HomeAutomationConditionOperand: Sendable, Hashable, Codable {
     case deviceAttribute(description: String, deviceID: String?, capability: String?, attribute: String?)
     case literalString(String)
     case literalNumber(Double, unit: String?)
+    case literalRange(start: Double, end: Double, unit: String?)
     case locationMode(String)
     case unsupported(rawValue: String)
 }
@@ -150,6 +151,7 @@ public indirect enum HomeAutomationCondition: Sendable, Hashable, Codable {
     case and([HomeAutomationCondition])
     case or([HomeAutomationCondition])
     case not(HomeAutomationCondition)
+    case changes(HomeAutomationCondition)
     case comparison(HomeAutomationComparisonCondition)
 }
 

@@ -178,9 +178,10 @@ final class HomeAutomationViewModel {
     }
 
     private func upsertPipelineEvent(_ event: OrchestratorPipelineEvent) {
+        let title = Self.pipelineTitle(for: event)
         let item = HomePipelineEventItem(
-            id: event.agentID ?? event.stage,
-            title: event.agentID ?? event.stage,
+            id: event.stage,
+            title: title,
             status: Self.status(from: event.status),
             detail: event.detail
         )
@@ -247,6 +248,13 @@ final class HomeAutomationViewModel {
         case .skipped:
             return .skipped
         }
+    }
+
+    private static func pipelineTitle(for event: OrchestratorPipelineEvent) -> String {
+        guard let agentID = event.agentID, agentID != event.stage else {
+            return event.stage
+        }
+        return "\(event.stage) (\(agentID))"
     }
 
     private func stableUnique(_ values: [String]) -> [String] {
@@ -410,7 +418,9 @@ final class HomeAutomationViewModel {
             return ([prefix + "not"] + [describeAutomationCondition(child, depth: depth + 1)]).joined(separator: "\n")
         case .comparison(let comparison):
             return "\(prefix)\(describeOperand(comparison.left)) \(comparison.operatorName.rawValue) \(describeOperand(comparison.right))"
-        }
+		case .changes(let child):
+			return ([prefix + "any change"] + [describeAutomationCondition(child, depth: depth + 1)]).joined(separator: "\n") //mark need check
+		}
     }
 
     private static func describeOperand(_ operand: HomeAutomationConditionOperand) -> String {
@@ -427,7 +437,9 @@ final class HomeAutomationViewModel {
             return "location \(value)"
         case .unsupported(let rawValue):
             return rawValue
-        }
+		case .literalRange(let start, let end, let unit):
+			return "value is between \(start) \(unit ?? "")and \(end) \(unit ?? "")"  //Mark need check
+		}
     }
 
 }

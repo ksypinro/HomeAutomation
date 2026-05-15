@@ -88,12 +88,15 @@ struct OrchestratorInfrastructureTests {
             AgentID.automationActionResolution.rawValue,
             AgentID.automationValidation.rawValue,
             AgentID.smartThingsCompilation.rawValue,
+            AgentID.smartThingsRuleCreation.rawValue,
             AgentID.automationResultAssembly.rawValue
         ])
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)))
         #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationActionResolution.rawValue)))
     }
 
@@ -159,6 +162,7 @@ struct OrchestratorInfrastructureTests {
             .automationActionResolution,
             .automationValidation,
             .smartThingsCompilation,
+            .smartThingsRuleCreation,
             .automationResultAssembly,
             AgentID.language,
             .domain,
@@ -210,6 +214,7 @@ struct OrchestratorInfrastructureTests {
         }
         #expect(registry.manifest(for: .automationActionResolution)?.produces.contains(ResolutionContextPatchKey.automationResolvedActions) == true)
         #expect(registry.manifest(for: .smartThingsCompilation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
+        #expect(registry.manifest(for: .smartThingsRuleCreation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
         #expect(registry.manifest(for: .automationResultAssembly)?.produces.contains(ResolutionContextPatchKey.resolverResult) == true)
     }
 
@@ -245,6 +250,27 @@ struct OrchestratorInfrastructureTests {
         #expect(sawInput)
         #expect(sawOutcome)
         #expect(result?.aggregation.finalCandidateIDs == ["bedroom_lamp"])
+    }
+
+    @Test
+    func orchestratorStreamDoesNotDuplicateEventIDs() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        var eventIDs: [String] = []
+
+        for try await update in orchestrator.resolveStream(
+            "Turn on the bedroom lamp",
+            executeLowRiskCommands: false
+        ) {
+            if case .event(let event) = update {
+                eventIDs.append(event.id)
+            }
+        }
+
+        #expect(!eventIDs.isEmpty)
+        #expect(Set(eventIDs).count == eventIDs.count)
     }
 
     @Test

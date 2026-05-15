@@ -142,6 +142,94 @@ struct SmartThingsRuleCompilerTests {
     }
 
     @Test
+    func betweenConditionCompilesToSmartThingsBetweenShape() throws {
+        let document = try SmartThingsRuleCompiler().compile(
+            makePlan(
+                trigger: .schedule(
+                    HomeAutomationScheduleTrigger(
+                        repeatRule: .everyDay,
+                        timeOfDay: HomeAutomationTimeOfDay(hour: 7, minute: 0)
+                    )
+                ),
+                condition: .comparison(
+                    HomeAutomationComparisonCondition(
+                        left: .deviceAttribute(
+                            description: "bedroom lamp level",
+                            deviceID: "bedroom_lamp",
+                            capability: "switchLevel",
+                            attribute: "level"
+                        ),
+                        operatorName: .between,
+                        right: .literalRange(start: 20, end: 80, unit: nil)
+                    )
+                ),
+                actions: [
+                    resolvedAction("turn on bedroom AC", deviceID: "bedroom_ac", capability: "switch", command: "on")
+                ]
+            )
+        )
+
+        let every = try firstEveryAction(jsonObject(document))
+        let actions = try #require(every["actions"] as? [[String: Any]])
+        let ifAction = try #require(actions.first?["if"] as? [String: Any])
+        let between = try #require(ifAction["between"] as? [String: Any])
+        let value = try #require(between["value"] as? [String: Any])
+        let device = try #require(value["device"] as? [String: Any])
+        #expect(device["capability"] as? String == "switchLevel")
+        #expect(device["attribute"] as? String == "level")
+        #expect(device["trigger"] as? String == "Never")
+        let start = try #require(between["start"] as? [String: Any])
+        let end = try #require(between["end"] as? [String: Any])
+        #expect(start["integer"] as? Int == 20)
+        #expect(end["integer"] as? Int == 80)
+    }
+
+    @Test
+    func changesConditionCompilesToSmartThingsChangesShape() throws {
+        let triggerCondition = HomeAutomationCondition.changes(
+            .comparison(
+                HomeAutomationComparisonCondition(
+                    left: .deviceAttribute(
+                        description: "hallway motion sensor",
+                        deviceID: "hallway_motion_sensor",
+                        capability: "motionSensor",
+                        attribute: "motion"
+                    ),
+                    operatorName: .equals,
+                    right: .literalString("active"),
+                    triggerPolicy: .always
+                )
+            )
+        )
+
+        let document = try SmartThingsRuleCompiler().compile(
+            makePlan(
+                trigger: .device(
+                    HomeAutomationDeviceTrigger(
+                        description: "hallway motion sensor changes to active",
+                        condition: triggerCondition
+                    )
+                ),
+                actions: [
+                    resolvedAction("turn on bedroom lamp", deviceID: "bedroom_lamp", capability: "switch", command: "on")
+                ]
+            )
+        )
+
+        let root = try jsonObject(document)
+        let actions = try #require(root["actions"] as? [[String: Any]])
+        let ifAction = try #require(actions.first?["if"] as? [String: Any])
+        let changes = try #require(ifAction["changes"] as? [String: Any])
+        let equals = try #require(changes["equals"] as? [String: Any])
+        let left = try #require(equals["left"] as? [String: Any])
+        let device = try #require(left["device"] as? [String: Any])
+        #expect(device["capability"] as? String == "motionSensor")
+        #expect(device["attribute"] as? String == "motion")
+        #expect(device["trigger"] as? String == "Always")
+        #expect(ifAction["then"] != nil)
+    }
+
+    @Test
     func unsupportedWeekdayScheduleReturnsTypedError() throws {
         let plan = makePlan(
             trigger: .schedule(

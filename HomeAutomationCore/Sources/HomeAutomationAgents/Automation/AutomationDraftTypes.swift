@@ -40,6 +40,7 @@ public enum AutomationConditionOutputType: String, Sendable, Hashable, Codable {
     case and
     case or
     case not
+    case changes
     case comparison
 }
 
@@ -48,6 +49,7 @@ public enum AutomationConditionOperandOutputType: String, Sendable, Hashable, Co
     case deviceAttribute
     case literalString
     case literalNumber
+    case literalRange
     case locationMode
     case unsupported
 }
@@ -103,6 +105,7 @@ public struct AutomationConditionOperandOutput: Sendable, Hashable, Codable {
     public let description: String?
     public let stringValue: String?
     public let numberValue: Double?
+    public let endNumberValue: Double?
     public let unit: String?
 
     public init(
@@ -110,12 +113,14 @@ public struct AutomationConditionOperandOutput: Sendable, Hashable, Codable {
         description: String? = nil,
         stringValue: String? = nil,
         numberValue: Double? = nil,
+        endNumberValue: Double? = nil,
         unit: String? = nil
     ) {
         self.type = type
         self.description = description
         self.stringValue = stringValue
         self.numberValue = numberValue
+        self.endNumberValue = endNumberValue
         self.unit = unit
     }
 
@@ -132,6 +137,12 @@ public struct AutomationConditionOperandOutput: Sendable, Hashable, Codable {
             return .literalString(nonEmpty(stringValue) ?? nonEmpty(description) ?? "")
         case .literalNumber:
             return .literalNumber(numberValue ?? 0, unit: nonEmpty(unit))
+        case .literalRange:
+            return .literalRange(
+                start: numberValue ?? 0,
+                end: endNumberValue ?? numberValue ?? 0,
+                unit: nonEmpty(unit)
+            )
         case .locationMode:
             return .locationMode(nonEmpty(stringValue) ?? nonEmpty(description) ?? "")
         case .unsupported:
@@ -190,6 +201,11 @@ public struct AutomationConditionOutput: Sendable, Hashable, Codable {
                 throw AutomationDraftError.invalidOutput("not condition has no child")
             }
             return .not(try child.makeHomeCondition(defaultTriggerPolicy: defaultTriggerPolicy))
+        case .changes:
+            guard let child = children.first else {
+                throw AutomationDraftError.invalidOutput("changes condition has no child")
+            }
+            return .changes(try child.makeHomeCondition(defaultTriggerPolicy: defaultTriggerPolicy))
         case .comparison:
             guard let left, let right else {
                 throw AutomationDraftError.invalidOutput("comparison condition is missing operands")

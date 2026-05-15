@@ -29,7 +29,7 @@ public struct AutomationConditionOperandResolutionRecord: Sendable, Hashable, Co
         switch output {
         case .deviceAttribute(_, let deviceID, let capability, let attribute):
             return Self.hasText(deviceID) && Self.hasText(capability) && Self.hasText(attribute)
-        case .literalString, .literalNumber, .locationMode:
+        case .literalString, .literalNumber, .literalRange, .locationMode:
             return true
         case .unsupported:
             return false
@@ -143,6 +143,12 @@ public struct AutomationConditionOperandResolver: Sendable {
                 path: "\(path).not",
                 workItems: &workItems
             )
+        case .changes(let child):
+            collectWorkItems(
+                from: child,
+                path: "\(path).changes",
+                workItems: &workItems
+            )
         case .comparison(let comparison):
             collectWorkItem(
                 operand: comparison.left,
@@ -229,6 +235,8 @@ public struct AutomationConditionOperandResolver: Sendable {
             })
         case .not(let child):
             return .not(apply(replacements, to: child, path: "\(path).not"))
+        case .changes(let child):
+            return .changes(apply(replacements, to: child, path: "\(path).changes"))
         case .comparison(let comparison):
             return .comparison(
                 HomeAutomationComparisonCondition(
@@ -357,6 +365,10 @@ public struct AutomationConditionOperandResolver: Sendable {
         if query.contains("temperature"), device.capabilities.contains("temperatureMeasurement") {
             return "temperatureMeasurement"
         }
+        if (query.contains("level") || query.contains("brightness")),
+           device.capabilities.contains("switchLevel") {
+            return "switchLevel"
+        }
         if case .literalString(let value) = comparison.right {
             switch value {
             case "open", "closed":
@@ -412,6 +424,9 @@ private struct ConditionOperandWorkItem: Sendable {
             return value
         case .literalNumber(let value, let unit):
             return unit.map { "\(value) \($0)" } ?? "\(value)"
+        case .literalRange(let start, let end, let unit):
+            let range = "\(start)-\(end)"
+            return unit.map { "\(range) \($0)" } ?? range
         }
     }
 }

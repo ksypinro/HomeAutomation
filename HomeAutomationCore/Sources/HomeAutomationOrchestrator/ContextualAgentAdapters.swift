@@ -103,7 +103,8 @@ public enum DefaultAgentRegistryFactory {
         contextRetriever: ContextRetriever? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
-        }
+        },
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) -> AgentRegistry {
         let candidateResolver = HomeCandidateResolverSupport(
             foundationModelAvailability: foundationModelAvailability
@@ -194,11 +195,15 @@ public enum DefaultAgentRegistryFactory {
                     )
                 },
                 makePatch: { output, _ in
-                    scopedPatch(
-                        .automationDraft,
-                        scope: .root,
-                        [
-                            ScopedContextKeys.automationRuleDraft().name: output
+                    ResolutionContextPatch(
+                        agentID: .automationDraft,
+                        updates: [
+                            ResolutionContextPatchKey.retrievalReports: AnySendableValue(output.retrievalReports)
+                        ],
+                        scopedUpdates: [
+                            .root: [
+                                ScopedContextKeys.automationRuleDraft().name: AnySendableValue(output.ruleDraft)
+                            ]
                         ]
                     )
                 }
@@ -283,6 +288,21 @@ public enum DefaultAgentRegistryFactory {
                     )
                 },
                 makePatch: smartThingsCompilationPatch
+            ),
+            ContextualHomeAgent(
+                agent: SmartThingsRuleCreationAgent(creator: smartThingsRuleCreator),
+                makeInput: { context in
+                    guard let compilation = context.scopedValue(for: AutomationRuntimeContextKeys.smartThingsCompilation) else {
+                        throw AgentContextInputError(agentID: .smartThingsRuleCreation, message: "Missing SmartThings compilation output")
+                    }
+                    return SmartThingsRuleCreationInput(
+                        plan: compilation.plan,
+                        document: compilation.document,
+                        validation: context.scopedValue(for: ScopedContextKeys.validation()),
+                        options: context.request.automationCreationOptions
+                    )
+                },
+                makePatch: smartThingsRuleCreationPatch
             ),
             ContextualHomeAgent(
                 agent: AutomationResultAssemblyAgent(),
@@ -647,6 +667,28 @@ public enum DefaultAgentRegistryFactory {
 
         return ResolutionContextPatch(
             agentID: .smartThingsCompilation,
+            scopedUpdates: [
+                .root: [
+                    ScopedContextKeys.automationPlan().name: AnySendableValue(output.plan)
+                ],
+                .backend("smartthings"): backendValues
+            ]
+        )
+    }
+
+    private static func smartThingsRuleCreationPatch(
+        _ output: SmartThingsRuleCreationOutput,
+        _ context: ResolutionContext
+    ) -> ResolutionContextPatch {
+        var backendValues: [String: AnySendableValue] = [
+            AutomationRuntimeContextKeys.smartThingsRuleCreation.name: AnySendableValue(output)
+        ]
+        if let receipt = output.receipt {
+            backendValues[ScopedContextKeys.smartThingsRuleCreation().name] = AnySendableValue(receipt)
+        }
+
+        return ResolutionContextPatch(
+            agentID: .smartThingsRuleCreation,
             scopedUpdates: [
                 .root: [
                     ScopedContextKeys.automationPlan().name: AnySendableValue(output.plan)

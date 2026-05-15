@@ -149,11 +149,32 @@ public struct SmartThingsRuleCompiler: HomeAutomationRuleCompiling {
             return .or(try children.map { try conditionRule($0, triggerDefault: triggerDefault) })
         case .not(let child):
             return .not(try conditionRule(child, triggerDefault: triggerDefault))
+        case .changes(let child):
+            return .changes(try conditionRule(child, triggerDefault: triggerDefault))
         case .comparison(let comparison):
             switch comparison.operatorName {
-            case .between, .changes:
-                throw SmartThingsRuleCompileError.unsupportedCondition(
-                    "\(comparison.operatorName.rawValue) condition compilation is not implemented"
+            case .between:
+                let triggerPolicy: SmartThingsRuleTriggerPolicy =
+                    comparison.triggerPolicy == .always || triggerDefault == .always ? .always : .never
+                guard case .literalRange(let start, let end, let unit) = comparison.right else {
+                    throw SmartThingsRuleCompileError.unsupportedCondition(
+                        "between condition requires a literal range"
+                    )
+                }
+                return .between(
+                    value: try operandRule(comparison.left, triggerPolicy: triggerPolicy),
+                    start: numericOperand(start, unit: unit),
+                    end: numericOperand(end, unit: unit)
+                )
+            case .changes:
+                let triggerPolicy: SmartThingsRuleTriggerPolicy =
+                    comparison.triggerPolicy == .always || triggerDefault == .always ? .always : .never
+                return .changes(
+                    .comparison(
+                        operatorName: HomeAutomationComparisonOperator.equals.rawValue,
+                        left: try operandRule(comparison.left, triggerPolicy: triggerPolicy),
+                        right: try operandRule(comparison.right, triggerPolicy: triggerPolicy)
+                    )
                 )
             case .equals, .greaterThan, .lessThan, .greaterThanOrEquals, .lessThanOrEquals:
                 break
@@ -188,14 +209,25 @@ public struct SmartThingsRuleCompiler: HomeAutomationRuleCompiling {
         case .literalString(let value):
             return .string(value)
         case .literalNumber(let value, let unit):
-            if value.rounded() == value, unit == nil {
-                return .integer(Int(value))
-            }
-            return .decimal(value, unit: unit)
+            return numericOperand(value, unit: unit)
+        case .literalRange:
+            throw SmartThingsRuleCompileError.unsupportedCondition(
+                "literal range can only be used as the right operand of a between condition"
+            )
         case .locationMode(let value):
             return .locationMode(value)
         case .unsupported(let rawValue):
             throw SmartThingsRuleCompileError.unsupportedCondition(rawValue)
         }
+    }
+
+    private func numericOperand(
+        _ value: Double,
+        unit: String?
+    ) -> SmartThingsRuleOperand {
+        if value.rounded() == value, unit == nil {
+            return .integer(Int(value))
+        }
+        return .decimal(value, unit: unit)
     }
 }

@@ -10,17 +10,21 @@ public struct AutomationPatternParser: Sendable {
         let normalized = Self.normalized(commandText)
         guard !commandText.isEmpty else { return nil }
 
+        if let conversationalRoutine = parseConversationalRoutine(commandText, normalized: normalized) {
+            return conversationalRoutine
+        }
+
         if normalized.hasPrefix("when ") || normalized.hasPrefix("whenever ") {
             return parseDeviceTrigger(commandText, normalized: normalized)
         }
 
+        let split = Self.splitCondition(from: commandText)
         guard let time = Self.extractTime(from: normalized) else {
-            return nil
+            return parseConditionOnlyAction(actionText: split.actionText, conditionText: split.conditionText)
         }
 
         let repeatRule = Self.extractRepeatRule(from: normalized)
         let unsupportedFragments = Self.unsupportedFragments(in: normalized, repeatRule: repeatRule)
-        let split = Self.splitCondition(from: commandText)
         let actionText = Self.cleanedActionText(split.actionText)
         let actions = Self.actionDescriptions(from: actionText)
         guard !actions.isEmpty else { return nil }
@@ -44,6 +48,32 @@ public struct AutomationPatternParser: Sendable {
 
     public func parseRuleDraft(_ text: String) -> HomeAutomationRuleDraft? {
         try? parse(text)?.makeRuleDraft()
+    }
+
+    private func parseConversationalRoutine(_ text: String, normalized: String) -> AutomationDraftOutput? {
+        guard Self.hasConversationalRoutineSignal(normalized),
+              let actionText = Self.conversationalAction(from: text),
+              let condition = Self.conversationalCondition(from: text, normalized: normalized) else {
+            return nil
+        }
+
+        let actions = Self.actionDescriptions(from: Self.cleanedActionText(actionText))
+        guard !actions.isEmpty else { return nil }
+
+        let trigger = AutomationTriggerOutput(
+            type: .device,
+            description: Self.triggerDescription(for: condition),
+            condition: condition
+        )
+
+        return AutomationDraftOutput(
+            name: Self.name(for: actions, trigger: trigger),
+            trigger: trigger,
+            condition: nil,
+            actionDescriptions: actions,
+            unsupportedFragments: [],
+            confidence: 0.91
+        )
     }
 
     private func parseDeviceTrigger(_ text: String, normalized: String) -> AutomationDraftOutput? {
@@ -102,6 +132,33 @@ public struct AutomationPatternParser: Sendable {
         )
     }
 
+    private func parseConditionOnlyAction(
+        actionText: String,
+        conditionText: String?
+    ) -> AutomationDraftOutput? {
+        guard let conditionText,
+              let condition = Self.condition(from: conditionText, triggerPolicy: .always) else {
+            return nil
+        }
+
+        let actions = Self.actionDescriptions(from: Self.cleanedActionText(actionText))
+        guard !actions.isEmpty else { return nil }
+
+        let trigger = AutomationTriggerOutput(
+            type: .device,
+            description: conditionText.trimmingCharacters(in: .whitespacesAndNewlines),
+            condition: condition
+        )
+        return AutomationDraftOutput(
+            name: Self.name(for: actions, trigger: trigger),
+            trigger: trigger,
+            condition: nil,
+            actionDescriptions: actions,
+            unsupportedFragments: [],
+            confidence: 0.90
+        )
+    }
+
     private static func splitCondition(from text: String) -> (actionText: String, conditionText: String?) {
         guard let range = text.range(of: #"(?i)\s+if\s+"#, options: .regularExpression) else {
             return (text, nil)
@@ -110,6 +167,169 @@ public struct AutomationPatternParser: Sendable {
             String(text[..<range.lowerBound]),
             String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    private static func hasConversationalRoutineSignal(_ normalized: String) -> Bool {
+        let routineSignals = [
+            "remember this",
+            "remember that",
+            "similar situation",
+            "similar situations",
+            "when this happens",
+            "whenever this happens",
+            "from now on",
+            "next time"
+        ]
+        let actionSignals = [
+            "turn on",
+            "turn off",
+            "switch on",
+            "switch off",
+            "set ",
+            "increase",
+            "decrease",
+            "lock",
+            "unlock",
+            "open",
+            "close",
+            "start",
+            "stop"
+        ]
+        return routineSignals.contains { normalized.contains($0) } &&
+            actionSignals.contains { normalized.contains($0) }
+    }
+
+    private static func conversationalAction(from text: String) -> String? {
+        guard let match = text.firstAutomationMatch(
+            of: #"\b(?:always\s+)?(turn on|turn off|switch on|switch off|set|increase|decrease|unlock|lock|open|close|start|stop)\s+(.+?)(?:\s+(?:in|under|for)\s+(?:a\s+)?similar\s+situation|\s+when\s+this\s+happens|[.!?]|$)"#
+        ) else {
+            return nil
+        }
+
+        let verb = canonicalVerb(match[1])
+        let target = match[2]
+            .replacingOccurrences(of: #"(?i)\s+from\s+now\s+on$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !target.isEmpty else { return nil }
+        return "\(verb) \(target)"
+    }
+
+    private static func conversationalCondition(from text: String, normalized: String) -> AutomationConditionOutput? {
+        temperatureCondition(from: text, normalized: normalized)
+    }
+
+    private static func temperatureCondition(from text: String, normalized: String) -> AutomationConditionOutput? {
+        guard let reading = temperatureReading(from: normalized) ?? temperatureReading(from: Self.normalized(text)) else {
+            return nil
+        }
+
+        return AutomationConditionOutput(
+            type: .comparison,
+            left: AutomationConditionOperandOutput(
+                type: .deviceAttribute,
+                description: reading.sensorDescription
+            ),
+            operatorName: temperatureOperator(from: normalized),
+            right: AutomationConditionOperandOutput(
+                type: .literalNumber,
+                numberValue: reading.value,
+                unit: temperatureUnit(from: normalized)
+            ),
+            triggerPolicy: .always
+        )
+    }
+
+    private static func temperatureReading(from normalized: String) -> (sensorDescription: String, value: Double)? {
+        if let match = normalized.firstAutomationMatch(
+            of: #"\b((?:(?:bedroom|living room|kitchen|hallway|entry|front|back|nursery|basement|garage|porch|patio)\s+)?temperature\s+sensor)\s+(?:is\s+)?(?:showing|shows|reading|reads|reports|says|is\s+at|at)\s+(\d+(?:\.\d+)?)\b"#
+        ),
+           let value = Double(match[2]) {
+            return (cleanConditionDescription(match[1]), value)
+        }
+
+        if let match = normalized.firstAutomationMatch(
+            of: #"\btemperature\s+(?:is\s+)?(?:showing|shows|reading|reads|reports|says|is\s+at|at)\s+(\d+(?:\.\d+)?)\b"#
+        ),
+           let value = Double(match[1]) {
+            return ("temperature sensor", value)
+        }
+
+        return nil
+    }
+
+    private static func temperatureOperator(from normalized: String) -> AutomationComparisonOperatorOutput {
+        if containsAnyWord(normalized, ["cold", "cool", "freezing", "chilly"]) {
+            return .lessThanOrEquals
+        }
+        if containsAnyWord(normalized, ["hot", "warm", "heat"]) || normalized.contains("too high") {
+            return .greaterThanOrEquals
+        }
+        return .equals
+    }
+
+    private static func temperatureUnit(from normalized: String) -> String? {
+        if normalized.contains("celsius") ||
+            normalized.contains("celcius") ||
+            normalized.contains("degree c") ||
+            normalized.contains("degrees c") {
+            return "celsius"
+        }
+        if normalized.contains("fahrenheit") ||
+            normalized.contains("degree f") ||
+            normalized.contains("degrees f") {
+            return "fahrenheit"
+        }
+        return normalized.contains("degree") || normalized.contains("degrees") ? "celsius" : nil
+    }
+
+    private static func triggerDescription(for condition: AutomationConditionOutput) -> String {
+        guard condition.type == .comparison,
+              let left = condition.left?.description,
+              let operatorName = condition.operatorName,
+              let right = condition.right else {
+            return "similar situation"
+        }
+
+        let value: String
+        if let number = right.numberValue {
+            value = number.rounded() == number ? String(Int(number)) : String(number)
+        } else {
+            value = right.stringValue ?? right.description ?? "value"
+        }
+        let unit = right.unit.map { " \($0)" } ?? ""
+        return "\(left) \(operatorText(operatorName)) \(value)\(unit)"
+    }
+
+    private static func cleanConditionDescription(_ value: String) -> String {
+        normalized(value)
+            .replacingOccurrences(of: #"^(the|a|an)\s+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func containsAnyWord(_ text: String, _ words: [String]) -> Bool {
+        words.contains { word in
+            let escaped = NSRegularExpression.escapedPattern(for: word)
+            return text.range(of: #"\b\#(escaped)\b"#, options: .regularExpression) != nil
+        }
+    }
+
+    private static func operatorText(_ operatorName: AutomationComparisonOperatorOutput) -> String {
+        switch operatorName {
+        case .equals:
+            return "equals"
+        case .greaterThan:
+            return "greater than"
+        case .lessThan:
+            return "less than"
+        case .greaterThanOrEquals:
+            return "is at least"
+        case .lessThanOrEquals:
+            return "is at most"
+        case .between:
+            return "between"
+        case .changes:
+            return "changes"
+        }
     }
 
     private static func extractRepeatRule(from normalized: String) -> HomeAutomationRepeatRule {
@@ -225,15 +445,13 @@ public struct AutomationPatternParser: Sendable {
     ) -> AutomationConditionOutput? {
         let normalized = Self.normalized(text)
 
-        if normalized.contains(" or ") {
-            let children = normalized
-                .components(separatedBy: " or ")
+        if let segments = logicalSegments(in: normalized, separator: " or ") {
+            let children = segments
                 .compactMap { condition(from: $0, triggerPolicy: triggerPolicy) }
             return children.isEmpty ? nil : AutomationConditionOutput(type: .or, children: children)
         }
-        if normalized.contains(" and ") {
-            let children = normalized
-                .components(separatedBy: " and ")
+        if let segments = logicalSegments(in: normalized, separator: " and ") {
+            let children = segments
                 .compactMap { condition(from: $0, triggerPolicy: triggerPolicy) }
             return children.isEmpty ? nil : AutomationConditionOutput(type: .and, children: children)
         }
@@ -243,11 +461,73 @@ public struct AutomationPatternParser: Sendable {
             }
         }
 
+        if let match = normalized.firstAutomationMatch(
+            of: #"^(.+?)\s+(?:is\s+)?between\s+(\d+(?:\.\d+)?)\s+(?:and|to)\s+(\d+(?:\.\d+)?)$"#
+        ),
+           let start = Double(match[2]),
+           let end = Double(match[3]) {
+            return AutomationConditionOutput(
+                type: .comparison,
+                left: AutomationConditionOperandOutput(type: .deviceAttribute, description: match[1]),
+                operatorName: .between,
+                right: AutomationConditionOperandOutput(
+                    type: .literalRange,
+                    numberValue: start,
+                    endNumberValue: end
+                ),
+                triggerPolicy: triggerPolicy
+            )
+        }
+
+        if let match = normalized.firstAutomationMatch(
+            of: #"^(.+?)\s+changes\s+(?:to\s+)?(above|greater than|over|below|less than|under)\s+(\d+(?:\.\d+)?)$"#
+        ),
+           let value = Double(match[3]) {
+            let op: AutomationComparisonOperatorOutput = ["above", "greater than", "over"].contains(match[2])
+                ? .greaterThan
+                : .lessThan
+            return AutomationConditionOutput(
+                type: .changes,
+                children: [
+                    AutomationConditionOutput(
+                        type: .comparison,
+                        left: AutomationConditionOperandOutput(type: .deviceAttribute, description: match[1]),
+                        operatorName: op,
+                        right: AutomationConditionOperandOutput(type: .literalNumber, numberValue: value),
+                        triggerPolicy: triggerPolicy
+                    )
+                ]
+            )
+        }
+
+        if let match = normalized.firstAutomationMatch(
+            of: #"^(.+?)\s+changes\s+(?:to\s+)?(on|off|open|closed|active|inactive)$"#
+        ) {
+            return AutomationConditionOutput(
+                type: .changes,
+                children: [
+                    AutomationConditionOutput(
+                        type: .comparison,
+                        left: AutomationConditionOperandOutput(type: .deviceAttribute, description: match[1]),
+                        operatorName: .equals,
+                        right: AutomationConditionOperandOutput(type: .literalString, stringValue: match[2]),
+                        triggerPolicy: triggerPolicy
+                    )
+                ]
+            )
+        }
+
         let valuePairs: [(String, String)] = [
+            (" is turned on", "on"),
+            (" is turned off", "off"),
             (" is closed", "closed"),
             (" is open", "open"),
             (" opens", "open"),
             (" closes", "closed"),
+            (" turns on", "on"),
+            (" turns off", "off"),
+            (" turned on", "on"),
+            (" turned off", "off"),
             (" is on", "on"),
             (" is off", "off"),
             ("motion is detected", "active"),
@@ -272,7 +552,7 @@ public struct AutomationPatternParser: Sendable {
             )
         }
 
-        if let match = normalized.firstAutomationMatch(of: #"(.+)\s+(above|greater than|over|below|less than|under)\s+(\d+)"#),
+        if let match = normalized.firstAutomationMatch(of: #"^(.+)\s+(above|greater than|over|below|less than|under)\s+(\d+)$"#),
            let value = Double(match[3]) {
             let op: AutomationComparisonOperatorOutput = ["above", "greater than", "over"].contains(match[2])
                 ? .greaterThan
@@ -287,6 +567,35 @@ public struct AutomationPatternParser: Sendable {
         }
 
         return nil
+    }
+
+    private static func logicalSegments(in normalized: String, separator: String) -> [String]? {
+        var segments: [String] = []
+        var segmentStart = normalized.startIndex
+        var searchStart = normalized.startIndex
+
+        while let range = normalized.range(of: separator, range: searchStart..<normalized.endIndex) {
+            let beforeSeparator = String(normalized[segmentStart..<range.lowerBound])
+            if separator == " and ",
+               beforeSeparator.firstAutomationMatch(of: #"\bbetween\s+\d+(?:\.\d+)?\s*$"#) != nil {
+                searchStart = range.upperBound
+                continue
+            }
+
+            let segment = beforeSeparator.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !segment.isEmpty {
+                segments.append(segment)
+            }
+            segmentStart = range.upperBound
+            searchStart = range.upperBound
+        }
+
+        guard !segments.isEmpty else { return nil }
+        let finalSegment = String(normalized[segmentStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !finalSegment.isEmpty {
+            segments.append(finalSegment)
+        }
+        return segments
     }
 
     private static func unsupportedFragments(

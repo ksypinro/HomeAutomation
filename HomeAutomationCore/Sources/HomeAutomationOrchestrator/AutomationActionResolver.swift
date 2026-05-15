@@ -195,21 +195,34 @@ public struct AutomationActionResolver: Sendable {
             for (index, actionText) in actionDescriptions.enumerated() {
                 group.addTask {
                     let actionID = "a\(index + 1)"
+                    let childEventBus = AgentEventBus()
+                    let eventForwarder = Task {
+                        for await event in await childEventBus.stream() {
+                            await eventBus.publish(
+                                Self.namespacedPipelineEvent(
+                                    event,
+                                    actionID: actionID
+                                )
+                            )
+                        }
+                    }
                     await eventBus.publish(
                         OrchestratorPipelineEvent(
                             runID: runID,
                             stage: "automationActionResolution:\(actionID)",
-                            agentID: AgentID.automationActionResolution.rawValue,
+                            agentID: Self.actionAgentID(actionID),
                             status: .running,
                             detail: "[\(index + 1)/\(actionDescriptions.count)] \(actionText)"
                         )
                     )
-                    let result = await self.resolve(actionText, eventBus: eventBus, runID: runID)
+                    let result = await self.resolve(actionText, eventBus: childEventBus, runID: runID)
+                    await childEventBus.finish()
+                    await eventForwarder.value
                     await eventBus.publish(
                         OrchestratorPipelineEvent(
                             runID: runID,
                             stage: "automationActionResolution:\(actionID)",
-                            agentID: AgentID.automationActionResolution.rawValue,
+                            agentID: Self.actionAgentID(actionID),
                             status: result.isResolved ? .completed : .failed,
                             detail: result.resolution.displaySummary
                         )
@@ -242,6 +255,24 @@ public struct AutomationActionResolver: Sendable {
     }
 
     // MARK: - Private
+
+    private static func actionAgentID(_ actionID: String) -> String {
+        "\(AgentID.automationActionResolution.rawValue):\(actionID)"
+    }
+
+    private static func namespacedPipelineEvent(
+        _ event: OrchestratorPipelineEvent,
+        actionID: String
+    ) -> OrchestratorPipelineEvent {
+        let agentID = event.agentID ?? event.stage
+        return OrchestratorPipelineEvent(
+            runID: event.runID,
+            stage: "\(AgentID.automationActionResolution.rawValue):\(actionID)/\(event.stage)",
+            agentID: "\(agentID):\(actionID)",
+            status: event.status,
+            detail: event.detail
+        )
+    }
 
     private func executeDirectCommandPipeline(
         text: String,

@@ -26,19 +26,22 @@ public struct AutomationCreationResolver: Sendable {
     private let conditionOperandResolver: AutomationConditionOperandResolver
     private let automationValidationAgent: AutomationValidationAgent
     private let smartThingsCompiler: SmartThingsRuleCompiler
+    private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
 
     public init(
         automationDraftAgent: AutomationDraftAgent,
         actionResolver: AutomationActionResolver,
         conditionOperandResolver: AutomationConditionOperandResolver,
         automationValidationAgent: AutomationValidationAgent = AutomationValidationAgent(),
-        smartThingsCompiler: SmartThingsRuleCompiler = SmartThingsRuleCompiler()
+        smartThingsCompiler: SmartThingsRuleCompiler = SmartThingsRuleCompiler(),
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) {
         self.automationDraftAgent = automationDraftAgent
         self.actionResolver = actionResolver
         self.conditionOperandResolver = conditionOperandResolver
         self.automationValidationAgent = automationValidationAgent
         self.smartThingsCompiler = smartThingsCompiler
+        self.smartThingsRuleCreator = smartThingsRuleCreator
     }
 
     /// Resolves an automation creation request end-to-end.
@@ -52,6 +55,7 @@ public struct AutomationCreationResolver: Sendable {
     public func resolve(
         text: String,
         operation: HomeOperationDetectionResult,
+        creationOptions: SmartThingsRuleCreationOptions = .dryRun,
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> HomeAutomationResolverResult {
@@ -147,6 +151,7 @@ public struct AutomationCreationResolver: Sendable {
                 validation: validation,
                 state: state,
                 operation: operation,
+                creationOptions: creationOptions,
                 eventBus: eventBus,
                 runID: runID
             )
@@ -320,6 +325,7 @@ public struct AutomationCreationResolver: Sendable {
         validation: AutomationValidationResult,
         state: HomeResolutionState,
         operation: HomeOperationDetectionResult,
+        creationOptions: SmartThingsRuleCreationOptions,
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> HomeAutomationResolverResult {
@@ -333,8 +339,10 @@ public struct AutomationCreationResolver: Sendable {
         )
 
         let compileDetail: String
+        let compiledDocument: SmartThingsRuleDocument?
         do {
             let document = try smartThingsCompiler.compile(plan)
+            compiledDocument = document
             plan = HomeAutomationCreationPlan(
                 name: plan.name,
                 ruleDraft: plan.ruleDraft,
@@ -346,6 +354,7 @@ public struct AutomationCreationResolver: Sendable {
             compileDetail = "compiled"
             logger.info("SmartThings rule compiled successfully.")
         } catch {
+            compiledDocument = nil
             plan = HomeAutomationCreationPlan(
                 name: plan.name,
                 ruleDraft: plan.ruleDraft,
@@ -368,13 +377,24 @@ public struct AutomationCreationResolver: Sendable {
             )
         )
 
+        if creationOptions.mode == .create {
+            plan = await createSmartThingsRuleIfRequested(
+                plan: plan,
+                document: compiledDocument,
+                validation: validation,
+                creationOptions: creationOptions,
+                eventBus: eventBus,
+                runID: runID
+            )
+        }
+
         let aggregation = HomeCandidateAggregationResult(
             finalCandidateIDs: Self.stableUnique(selectedIDs),
             needsClarification: false,
             confidence: resolvedActions.map(\.confidence).min() ?? ruleDraft.confidence
         )
 
-        let resolution: HomeCommandResolution = requiresConfirmation
+        let resolution: HomeCommandResolution = plan.requiresConfirmation
             ? .automationRequiresConfirmation(plan)
             : .automationDrafted(plan)
 
@@ -398,6 +418,64 @@ public struct AutomationCreationResolver: Sendable {
         )
 
         return result
+    }
+
+    private func createSmartThingsRuleIfRequested(
+        plan: HomeAutomationCreationPlan,
+        document: SmartThingsRuleDocument?,
+        validation: AutomationValidationResult,
+        creationOptions: SmartThingsRuleCreationOptions,
+        eventBus: AgentEventBus,
+        runID: UUID
+    ) async -> HomeAutomationCreationPlan {
+        let output: SmartThingsRuleCreationOutput
+        do {
+            output = try await SmartThingsRuleCreationAgent(creator: smartThingsRuleCreator).run(
+                SmartThingsRuleCreationInput(
+                    plan: plan,
+                    document: document,
+                    validation: validation,
+                    options: creationOptions
+                ),
+                context: ResolutionContext(
+                    request: CommandRequest(
+                        text: plan.name,
+                        executeLowRiskCommands: false,
+                        automationCreationOptions: creationOptions
+                    )
+                )
+            )
+        } catch {
+            let receipt = SmartThingsRuleCreationReceipt(
+                status: .failed,
+                locationID: creationOptions.locationID,
+                message: error.localizedDescription
+            )
+            output = SmartThingsRuleCreationOutput(
+                plan: HomeAutomationCreationPlan(
+                    name: plan.name,
+                    ruleDraft: plan.ruleDraft,
+                    resolvedActions: plan.resolvedActions,
+                    smartThingsRuleJSON: plan.smartThingsRuleJSON,
+                    requiresConfirmation: plan.requiresConfirmation,
+                    unsupportedCompilationReason: plan.unsupportedCompilationReason,
+                    backendResponse: receipt
+                ),
+                receipt: receipt,
+                detail: receipt.message
+            )
+        }
+
+        await eventBus.publish(
+            OrchestratorPipelineEvent(
+                runID: runID,
+                stage: "smartThingsRuleCreation",
+                agentID: "smartThingsRuleCreation",
+                status: output.receipt?.status == .created ? .completed : .skipped,
+                detail: output.detail
+            )
+        )
+        return output.plan
     }
 
     // MARK: - Result Helpers
@@ -573,6 +651,8 @@ public struct AutomationCreationResolver: Sendable {
         case .and(let children), .or(let children):
             return children.map(conditionCount).reduce(1, +)
         case .not(let child):
+            return 1 + conditionCount(child)
+        case .changes(let child):
             return 1 + conditionCount(child)
         case .comparison:
             return 1

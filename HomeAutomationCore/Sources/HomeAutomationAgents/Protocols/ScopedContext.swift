@@ -86,4 +86,10 @@ public enum ScopedContextKeys {
     ) -> ScopedContextKey<SmartThingsRuleDocument> {
         ScopedContextKey("smartThingsRule", scope: scope)
     }
+
+    public static func smartThingsRuleCreation(
+        in scope: ContextScope = .backend("smartthings")
+    ) -> ScopedContextKey<SmartThingsRuleCreationReceipt> {
+        ScopedContextKey("smartThingsRuleCreation", scope: scope)
+    }
 }

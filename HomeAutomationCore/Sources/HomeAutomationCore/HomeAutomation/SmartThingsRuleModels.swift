@@ -217,6 +217,8 @@ public indirect enum SmartThingsRuleCondition: Sendable, Hashable, Codable {
     case and([SmartThingsRuleCondition])
     case or([SmartThingsRuleCondition])
     case not(SmartThingsRuleCondition)
+    case changes(SmartThingsRuleCondition)
+    case between(value: SmartThingsRuleOperand, start: SmartThingsRuleOperand, end: SmartThingsRuleOperand)
     case comparison(operatorName: String, left: SmartThingsRuleOperand, right: SmartThingsRuleOperand)
 
     public var jsonObject: [String: SmartThingsRuleJSONValue] {
@@ -227,6 +229,16 @@ public indirect enum SmartThingsRuleCondition: Sendable, Hashable, Codable {
             return ["or": .array(conditions.map { .object($0.jsonObject) })]
         case .not(let condition):
             return ["not": .object(condition.jsonObject)]
+        case .changes(let condition):
+            return ["changes": .object(condition.jsonObject)]
+        case .between(let value, let start, let end):
+            return [
+                "between": .object([
+                    "value": value.jsonValue,
+                    "start": start.jsonValue,
+                    "end": end.jsonValue
+                ])
+            ]
         case .comparison(let operatorName, let left, let right):
             return [
                 operatorName: .object([

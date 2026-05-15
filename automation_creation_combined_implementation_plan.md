@@ -9,6 +9,23 @@ This plan combines the two active goals:
 
 The plan intentionally excludes automation update, automation deletion, automation query, scene creation, and routine execution. Those operation names may remain reserved in the code, but they should return explicit unsupported results unless the product scope changes later.
 
+## Implementation Status Snapshot
+
+This snapshot reflects the current codebase after the automation-creation graph, SmartThings rule creation backend, and automation RAG optimization work.
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 1: Supported operation contract | Implemented | Orchestrator supports `executeDeviceCommand`, `automationCreation`, and `unsupported`; reserved operations are normalized to unsupported at the orchestrator boundary. |
+| Phase 2: Graph-executed operation detection | Implemented for automation graph | `OperationDetectionAgent` is registered and runs as the entry node of the automation creation graph. Top-level deterministic detection still selects the graph before scheduling. |
+| Phase 3: Automation-focused graph catalog | Implemented | `OperationGraphCatalog` owns direct command, automation creation, and unsupported graph providers behind the `GraphPlanner` facade. |
+| Phase 4: Scoped runtime context | Implemented | `ContextScope`, `ScopedContextKey`, and scoped values in `ResolutionContext`/`ResolutionContextStore` isolate root, action, condition, and backend outputs. |
+| Phase 5: Automation runtime agents | Implemented | Draft extraction, action resolution, condition operand resolution, validation, SmartThings compilation, SmartThings rule creation, and result assembly are registered contextual agents. |
+| Phase 6: Automation through graph | Implemented with legacy fallback | Graph runtime executes `automationCreationGraph`; `AutomationCreationResolver` remains the legacy/parity path. |
+| Phase 7: Dynamic fan-out | Implemented as scoped concurrent subflows | Actions resolve concurrently inside `AutomationActionResolver` and write action-scoped outputs. Condition operands write scoped records. Full dynamic graph node expansion remains future hardening. |
+| Phase 8: Grammar/compiler strengthening | Implemented for `between` and `changes`; partial for schedules | Daily and interval schedules compile. Weekday, one-time, and relative-delay schedules are preserved with unsupported compilation reasons. |
+| Phase 9: SmartThings rule creation backend | Implemented | Create-only backend protocol, dry-run default, validation gate, location requirement, and high-risk confirmation gate are in place. |
+| Phase 10: Automation RAG optimization | Implemented baseline | Automation knowledge is split by source and subproblem, simple daily schedules stay retrieval-free, and an evaluation corpus now checks policy behavior. Precision benchmarking can still be expanded. |
+
 ## Current State Reanalysis
 
 ### What Already Works
@@ -17,25 +34,26 @@ The plan intentionally excludes automation update, automation deletion, automati
 - Legacy direct-command scheduling remains available through `OrchestratorRuntimeMode.legacy` and `HOME_AUTOMATION_ORCHESTRATOR_RUNTIME=legacy`.
 - `HomeAutomationOperationKind` and `HomeOperationDetectionResult` exist.
 - `HomeOperationDetectionService` detects scheduled and trigger-based automation creation requests.
-- `AutomationCreationResolver` can create an automation plan through a service-driven flow.
+- `AutomationCreationResolver` remains available as the legacy/parity automation creation flow.
 - `AutomationDraftAgent` and `AutomationPatternParser` can extract basic schedules, device triggers, multiple action descriptions, and simple condition trees.
 - `AutomationActionResolver` reuses the existing direct-command pipeline for each embedded automation action.
 - `AutomationConditionOperandResolver` resolves simple condition operands to device attributes.
 - `AutomationValidationPolicy` requires confirmation for high-risk unattended automations and blocks some unsafe schedules.
 - `SmartThingsRuleCompiler` compiles supported automation plans into SmartThings-style Rule JSON.
 - Automation RAG knowledge exists for patterns, rule examples, condition operators, and SmartThings schema grounding.
+- Automation creation runs through `GraphScheduler` in graph runtime mode and still has a legacy service fallback.
+- SmartThings Rule creation can persist compiled rules only when explicitly requested.
+- Retrieval quality is tracked by source, including automation-specific sources.
 
 ### What Is Still Missing
 
-- Operation detection is a service call, not a graph-executed agent.
-- Automation creation is not executed by `GraphScheduler`; the graph is currently only a planned shape and metrics reference.
-- Automation-specific service components are not all registered as contextual runtime agents.
-- `ResolutionContextStore` remains root-oriented and cannot safely hold multiple action/condition subflow outputs.
-- Multiple actions are resolved sequentially rather than through action-scoped graph fan-out.
-- Condition operands use deterministic matching only; they do not yet reuse retrieval/ranking or scoped clarification.
-- Scheduler stop behavior is still tied to `HomeCommandResolution`.
-- SmartThings API persistence is not implemented; only JSON compilation exists.
-- Non-creation automation requests can still be detected as reserved operation kinds, but the product target is to return unsupported for them.
+- The operation router still runs once before graph selection; the graph-executed operation node records automation graph context but does not choose the graph by itself.
+- Dynamic fan-out is implemented inside automation agents with scoped outputs, not as expanded graph nodes for each action and condition.
+- Condition operands use deterministic matching only; they do not yet reuse candidate retrieval/ranking or RAG-backed clarification.
+- Scheduler terminal stop behavior is still tied to `HomeCommandResolution` instead of an operation-neutral internal outcome.
+- Weekday, one-time, relative-delay, sunrise/sunset, location-mode, presence, and duration-window automation grammar remain future work.
+- Ambiguous logical grouping is not clarified robustly yet.
+- Non-creation automation requests are normalized to unsupported at the orchestrator boundary rather than executed through an unsupported graph.
 
 ## Scope
 
@@ -118,7 +136,7 @@ Acceptance criteria:
 
 - Operation detection appears in trace and graph metrics.
 - Direct commands still route exactly as before.
-- Automation creation still returns the same result as the current service path.
+- Automation creation still returns the same result as the legacy service/parity path.
 
 ### Phase 3: Add an Automation-Focused Graph Catalog
 
@@ -205,7 +223,7 @@ Tasks:
 
 Acceptance criteria:
 
-- Graph-native automation creation produces the same public `HomeAutomationResolverResult` as the current service path.
+- Graph-native automation creation produces the same public `HomeAutomationResolverResult` as the legacy service/parity path.
 - Automation actions are not executed immediately.
 - Automation graph metrics contain actual node statuses, not just planned graph metadata.
 

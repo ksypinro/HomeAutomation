@@ -7,6 +7,7 @@ public struct HomeAutomationCreationPlan: Sendable, Hashable, Codable {
     public let smartThingsRuleJSON: String?
     public let requiresConfirmation: Bool
     public let unsupportedCompilationReason: String?
+    public let backendResponse: SmartThingsRuleCreationReceipt?
 
     public init(
         name: String,
@@ -14,7 +15,8 @@ public struct HomeAutomationCreationPlan: Sendable, Hashable, Codable {
         resolvedActions: [HomeAutomationResolvedAction],
         smartThingsRuleJSON: String?,
         requiresConfirmation: Bool,
-        unsupportedCompilationReason: String?
+        unsupportedCompilationReason: String?,
+        backendResponse: SmartThingsRuleCreationReceipt? = nil
     ) {
         self.name = name
         self.ruleDraft = ruleDraft
@@ -22,5 +24,6 @@ public struct HomeAutomationCreationPlan: Sendable, Hashable, Codable {
         self.smartThingsRuleJSON = smartThingsRuleJSON
         self.requiresConfirmation = requiresConfirmation
         self.unsupportedCompilationReason = unsupportedCompilationReason
+        self.backendResponse = backendResponse
     }
 }
