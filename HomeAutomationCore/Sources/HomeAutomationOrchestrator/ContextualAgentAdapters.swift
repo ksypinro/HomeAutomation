@@ -24,11 +24,15 @@ public struct OperationDetectionAgent: HomeAgent {
 
     public let id = AgentID.operationDetection
     public let capabilities: Set<AgentCapability> = [.operationDetection]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
-    private let detector: HomeOperationDetectionService
+    public let timeoutNanoseconds: UInt64 = 3_000_000_000
+    private let worker: OperationDetectionWorkerSession
 
-    public init(detector: HomeOperationDetectionService = HomeOperationDetectionService()) {
-        self.detector = detector
+    public init(
+        worker: OperationDetectionWorkerSession = OperationDetectionWorkerSession(
+            ruleDetect: { text in HomeOperationDetectionService().detect(text) }
+        )
+    ) {
+        self.worker = worker
     }
 
     public func run(
@@ -38,7 +42,7 @@ public struct OperationDetectionAgent: HomeAgent {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? context.request.text
             : input
-        return detector.detect(text)
+        return try await worker.detectOperation(text)
     }
 }
 
@@ -127,7 +131,12 @@ public enum DefaultAgentRegistryFactory {
 
         let agents: [any AnyHomeAgent] = [
             ContextualHomeAgent(
-                agent: OperationDetectionAgent(),
+                agent: OperationDetectionAgent(
+                    worker: OperationDetectionWorkerSession(
+                        ruleDetect: { text in HomeOperationDetectionService().detect(text) },
+                        foundationModelAvailability: foundationModelAvailability
+                    )
+                ),
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in patch(.operationDetection, [ResolutionContextPatchKey.operation: output]) }
             ),
@@ -210,7 +219,7 @@ public enum DefaultAgentRegistryFactory {
             ),
             ContextualHomeAgent(
                 agent: AutomationConditionOperandResolutionAgent(
-                    resolver: AutomationConditionOperandResolver(registry: registry)
+                    resolver: AutomationConditionOperandResolver(registry: registry, foundationModelAvailability: foundationModelAvailability)
                 ),
                 makeInput: { context in
                     guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {

@@ -62,31 +62,20 @@ public struct AutomationDraftWorkerSession: Sendable {
             return AutomationDraftSessionResult(output: result)
         }
 
+        // Always compute deterministic parser output for hint and fallback
         let deterministic = parser.parse(commandText)
-        if let deterministic,
-           deterministic.confidence >= deterministicConfidenceThreshold,
-           deterministic.unsupportedFragments.isEmpty,
-           !AutomationRAGPolicy.shouldRetrieve(for: normalizedInput, draftOutput: deterministic) {
-            logger.info("[DeterministicParser] High-confidence automation draft produced.")
-            return AutomationDraftSessionResult(output: deterministic)
+        if let deterministic {
+            logger.debug("[DeterministicParser] result: \(String(describing: deterministic), privacy: .public)")
         }
 
+        // Retrieve RAG context
         let ragContext = await AgentRAGSupport.automationContext(
             normalizedInput,
             draftOutput: deterministic,
             contextRetriever: contextRetriever
         )
 
-        if let deterministic,
-           deterministic.confidence >= deterministicConfidenceThreshold,
-           deterministic.unsupportedFragments.isEmpty {
-            logger.info("[DeterministicParser] High-confidence automation draft retained after RAG policy evaluation.")
-            return AutomationDraftSessionResult(
-                output: deterministic,
-                retrievalReports: ragContext.reports
-            )
-        }
-
+        // If FM unavailable, use deterministic parser as fallback
         guard foundationModelAvailability() else {
             if let deterministic {
                 logger.info("[Availability] Foundation model unavailable, using deterministic parser output.")
@@ -96,6 +85,29 @@ public struct AutomationDraftWorkerSession: Sendable {
                 )
             }
             throw AutomationDraftError.unsupported("I could not extract a supported automation trigger and action from this command.")
+        }
+
+        // Build parser hint for the FM prompt
+        let parserHintText: String
+        if let deterministic {
+            parserHintText = """
+
+            A deterministic parser produced this draft (confidence=\(deterministic.confidence)):
+            - name: \(deterministic.name ?? "nil")
+            - trigger type: \(deterministic.trigger?.type.rawValue ?? "nil")
+            - trigger time: \(deterministic.trigger?.time ?? "nil")
+            - trigger repeatRule: \(deterministic.trigger?.repeatRule ?? "nil")
+            - trigger description: \(deterministic.trigger?.description ?? "nil")
+            - actionDescriptions: \(deterministic.actionDescriptions)
+            - unsupportedFragments: \(deterministic.unsupportedFragments)
+            - condition: \(deterministic.condition != nil ? "present" : "nil")
+            Use this as guidance. Verify, correct, and improve where needed. \
+            The parser may miss nuanced triggers or conditions that you can detect.
+            """
+            logger.info("[ParserHint] Providing deterministic parser draft as hint (confidence: \(deterministic.confidence, privacy: .public)).")
+        } else {
+            parserHintText = ""
+            logger.info("[ParserHint] No deterministic parser output available; model working without hint.")
         }
 
         let instructions = """
@@ -130,7 +142,7 @@ public struct AutomationDraftWorkerSession: Sendable {
         User: When hallway motion sensor changes to active turn on bedroom lamp
         Output trigger condition: changes(hallway motion sensor equals active)
         """
-        let promptText = ragContext.promptText
+        let promptText = ragContext.promptText + parserHintText
 
         logger.debug("[FoundationModelInput] System Instructions: \(instructions, privacy: .public)")
         logger.debug("[FoundationModelInput] Prompt: \(promptText, privacy: .public)")

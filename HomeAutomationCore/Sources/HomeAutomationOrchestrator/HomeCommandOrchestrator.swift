@@ -40,7 +40,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let conversationMemory: ConversationMemory
     private let circuitBreakers: CircuitBreakerRegistry
     private let deviceRegistry: MockHomeDeviceRegistry
-    private let operationDetector: HomeOperationDetectionService
+    private let operationDetector: OperationDetectionWorkerSession
     private let automationCreationResolver: AutomationCreationResolver
     private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
 
@@ -54,7 +54,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
         automationDraftAgent: AutomationDraftAgent = AutomationDraftAgent(),
-        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
+        foundationModelAvailability: @escaping @Sendable () -> Bool = {
+            SystemLanguageModel.default.isAvailable
+        }
     ) {
         self.registry = registry
         self.planner = planner
@@ -65,7 +68,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.metricsCollector = metricsCollector
         self.conversationMemory = conversationMemory
         self.circuitBreakers = circuitBreakers
-        self.operationDetector = HomeOperationDetectionService()
+        let ruleService = HomeOperationDetectionService()
+        self.operationDetector = OperationDetectionWorkerSession(
+            ruleDetect: { text in ruleService.detect(text) },
+            foundationModelAvailability: foundationModelAvailability
+        )
         self.smartThingsRuleCreator = smartThingsRuleCreator
 
         let actionResolver = AutomationActionResolver(
@@ -121,7 +128,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     contextRetriever: contextRetriever
                 )
             ),
-            smartThingsRuleCreator: smartThingsRuleCreator
+            smartThingsRuleCreator: smartThingsRuleCreator,
+            foundationModelAvailability: foundationModelAvailability
         )
     }
 
@@ -242,7 +250,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
 
-                let detectedOperation = operationDetector.detect(trimmedText)
+                let detectedOperation = try await operationDetector.detectOperation(trimmedText)
                 let operation = Self.supportedOperation(from: detectedOperation)
                 let operationEvent = OrchestratorPipelineEvent(
                     runID: runID,

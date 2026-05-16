@@ -326,12 +326,17 @@ public struct HomeCandidateResolverSupport: Sendable {
             candidates: candidates,
             memoryHints: memoryHints
         )
-        guard foundationModelAvailability(),
-              deterministic.needsClarification || deterministic.confidence < 0.7 else {
+        guard foundationModelAvailability() else {
             return deterministic
         }
 
         do {
+            let deterministicHint: String
+            if !deterministic.finalCandidateIDs.isEmpty {
+                deterministicHint = "\nDeterministic scoring suggests candidates: \(deterministic.finalCandidateIDs) with confidence \(deterministic.confidence). Verify or correct."
+            } else {
+                deterministicHint = ""
+            }
             let instructionText = """
             Select the best candidate IDs for the user's smart-home command.
             Use only the provided candidate IDs.
@@ -353,7 +358,7 @@ public struct HomeCandidateResolverSupport: Sendable {
 
             let response = try await respondForAggregation(
                 session: session,
-                prompt: promptPackage.prompt,
+                prompt: promptPackage.prompt + deterministicHint,
                 allowedIDs: candidates.map(\.id)
             )
             
@@ -418,12 +423,17 @@ public struct HomeCandidateResolverSupport: Sendable {
             confidence: aggregation.confidence,
             reason: aggregation.needsClarification ? "Deterministic shard selection is ambiguous" : "Deterministic shard selection"
         )
-        guard foundationModelAvailability(),
-              deterministic.confidence < 0.7 || selected.count != 1 else {
+        guard foundationModelAvailability() else {
             return deterministic
         }
 
         do {
+            let deterministicHint: String
+            if !selected.isEmpty {
+                deterministicHint = "\nDeterministic scoring suggests: \(selected) with confidence \(aggregation.confidence). Verify or correct."
+            } else {
+                deterministicHint = ""
+            }
             let instructionText = """
             Rank only the candidates in this shard for the user's smart-home command.
             Return candidate IDs only.
@@ -445,7 +455,7 @@ public struct HomeCandidateResolverSupport: Sendable {
 
             let response = try await respondForShardSelection(
                 session: session,
-                prompt: promptPackage.prompt,
+                prompt: promptPackage.prompt + deterministicHint,
                 allowedIDs: shard.map(\.id)
             )
             logger.debug("[resolveShard] FoundationModelOutput: \(String(describing: response), privacy: .public)")

@@ -35,9 +35,20 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
             logger.info("[Availability] Foundation model unavailable, using fallback.")
             return fallback
         }
-        guard modelCallPolicy.shouldUseModel(task: .riskClassification, deterministicState: deterministicState) else {
-            logger.info("[Policy] Deterministic confidence (\(fallback.confidence, privacy: .public)) >= threshold, skipping model.")
-            return fallback
+
+        let hintText: String
+        if modelCallPolicy.shouldProvideHint(task: .riskClassification, deterministicState: deterministicState) {
+            hintText = """
+
+            Deterministic analysis suggests: riskLevel=\(fallback.riskLevel), \
+            requiresConfirmation=\(fallback.requiresConfirmation), \
+            reason=\(fallback.reason), confidence=\(fallback.confidence). \
+            Verify or correct. Note: you may escalate risk but should not downgrade \
+            high or critical risk assessed by the deterministic system.
+            """
+            logger.info("[Hint] Providing deterministic risk hint to model (riskLevel: \(String(describing: fallback.riskLevel), privacy: .public), confidence: \(fallback.confidence, privacy: .public)).")
+        } else {
+            hintText = ""
         }
 
         let instructionsText = """
@@ -52,12 +63,55 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
 
         let session = LanguageModelSession(instructions: Instructions(instructionsText))
         do {
-            let result = try await session.respond(to: Prompt(text), generating: HomeRiskClassificationResult.self).content
-            logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
-            return result
+            let prompt = text + hintText
+            let modelResult = try await session.respond(to: Prompt(prompt), generating: HomeRiskClassificationResult.self).content
+            logger.debug("[FoundationModelOutput] result: \(String(describing: modelResult), privacy: .public)")
+            // Safety floor merge: deterministic high/critical can never be downgraded by model
+            let merged = Self.mergeWithSafetyFloor(model: modelResult, rule: fallback)
+            if merged.riskLevel != modelResult.riskLevel {
+                logger.info("[SafetyFloor] Model suggested \(String(describing: modelResult.riskLevel), privacy: .public) but deterministic floor enforced \(String(describing: merged.riskLevel), privacy: .public).")
+            }
+            return merged
         } catch {
-            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public)")
-            throw error
+            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public), using deterministic fallback.")
+            return fallback
+        }
+    }
+
+    /// Merges model and rule-based risk results using max(ruleRisk, modelRisk).
+    /// The deterministic high/critical assessment is a safety floor that the model cannot lower.
+    public static func mergeWithSafetyFloor(
+        model: HomeRiskClassificationResult,
+        rule: HomeRiskClassificationResult
+    ) -> HomeRiskClassificationResult {
+        let ruleOrdinal = riskOrdinal(rule.riskLevel)
+        let modelOrdinal = riskOrdinal(model.riskLevel)
+
+        if ruleOrdinal > modelOrdinal {
+            // Deterministic assessed higher risk — enforce safety floor
+            return HomeRiskClassificationResult(
+                riskLevel: rule.riskLevel,
+                requiresConfirmation: rule.requiresConfirmation || model.requiresConfirmation,
+                reason: "Safety floor: \(rule.reason) (model suggested \(model.riskLevel))",
+                confidence: max(rule.confidence, model.confidence)
+            )
+        }
+
+        // Model matched or escalated — use model result, but merge confirmation flags
+        return HomeRiskClassificationResult(
+            riskLevel: model.riskLevel,
+            requiresConfirmation: model.requiresConfirmation || rule.requiresConfirmation,
+            reason: model.reason,
+            confidence: model.confidence
+        )
+    }
+
+    private static func riskOrdinal(_ level: HomeAutomationRiskLevel) -> Int {
+        switch level {
+        case .low: return 0
+        case .medium: return 1
+        case .high: return 2
+        case .critical: return 3
         }
     }
 }

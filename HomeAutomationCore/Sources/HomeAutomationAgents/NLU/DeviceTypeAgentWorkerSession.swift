@@ -231,9 +231,22 @@ public struct DeviceTypeAgentWorkerSession: Sendable {
             instructions: Instructions(systemInstructions)
         )
 
+        // Build optional deterministic hint for auxiliary context
+        let deterministicHint: String
+        let deterministicState = AgentTextParser.deterministicState(for: text)
+        let deterministicTypes = deterministicState.deviceType.deviceTypes
+        if !deterministicTypes.isEmpty {
+            deterministicHint = "\n\nDeterministic keyword analysis suggests device types: \(deterministicTypes). Use this only as auxiliary context — call the tool first and confirm against valid identifiers."
+            logger.info("[Hint] Providing deterministic device type hint: \(deterministicTypes, privacy: .public).")
+        } else {
+            deterministicHint = ""
+        }
+
+        let prompt = text + deterministicHint
+
         do {
             let result = try await session.respond(
-                to: Prompt(text),
+                to: Prompt(prompt),
                 generating: HomeDeviceTypeResult.self
             ).content
             logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
