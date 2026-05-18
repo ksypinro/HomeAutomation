@@ -9,7 +9,7 @@ public struct CandidateRankingAgent: HomeAgent {
 
     public let id = AgentID.candidateRanking
     public let capabilities: Set<AgentCapability> = [.candidateRanking]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let rank: @Sendable (CandidateRankingInput) async throws -> HomeCandidateAggregationResult
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateRanking")
 

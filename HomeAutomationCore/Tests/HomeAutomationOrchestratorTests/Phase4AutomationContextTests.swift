@@ -229,8 +229,8 @@ struct Phase4AutomationContextTests {
             ResolutionContextPatch(
                 agentID: .language,
                 updates: [
-                    ResolutionContextPatchKey.language: AnySendableValue(language),
-                    ResolutionContextPatchKey.draft: AnySendableValue(rootDraft)
+                    ResolutionContextPatchKey.language.rawValue: AnySendableValue(language),
+                    ResolutionContextPatchKey.draft.rawValue: AnySendableValue(rootDraft)
                 ],
                 scopedUpdates: [
                     .action("a1"): [key.name: AnySendableValue(scopedDraft)]

@@ -8,7 +8,7 @@ public struct ConfirmationPolicyAgent: HomeAgent {
 
     public let id = AgentID.confirmationPolicy
     public let capabilities: Set<AgentCapability> = [.confirmationPolicy]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let requiresConfirmation: @Sendable (ConfirmationPolicyInput) async throws -> Bool
 
     public init(requiresConfirmation: @escaping @Sendable (ConfirmationPolicyInput) async throws -> Bool) {

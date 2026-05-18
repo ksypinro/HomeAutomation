@@ -78,6 +78,7 @@ public struct AutomationActionResolver: Sendable {
     private let policy: OrchestratorPolicyEngine
     private let runtimeMode: OrchestratorRuntimeMode
     private let circuitBreakers: CircuitBreakerRegistry
+    private let maxConcurrentActions: Int
 
     public init(
         registry: AgentRegistry,
@@ -85,7 +86,8 @@ public struct AutomationActionResolver: Sendable {
         graphPlanner: GraphPlanner,
         policy: OrchestratorPolicyEngine,
         runtimeMode: OrchestratorRuntimeMode = .graph,
-        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry()
+        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
+        maxConcurrentActions: Int = 1
     ) {
         self.registry = registry
         self.planner = planner
@@ -93,6 +95,7 @@ public struct AutomationActionResolver: Sendable {
         self.policy = policy
         self.runtimeMode = runtimeMode
         self.circuitBreakers = circuitBreakers
+        self.maxConcurrentActions = max(1, maxConcurrentActions)
     }
 
     /// Resolves a single action description through the direct-command pipeline.
@@ -192,7 +195,14 @@ public struct AutomationActionResolver: Sendable {
         }
 
         let indexedResults = await withTaskGroup(of: (Int, AutomationActionResolutionResult).self) { group in
-            for (index, actionText) in actionDescriptions.enumerated() {
+            var nextIndex = 0
+
+            func enqueueNextAction() -> Bool {
+                guard nextIndex < actionDescriptions.count else { return false }
+                let index = nextIndex
+                nextIndex += 1
+                let actionText = actionDescriptions[index]
+
                 group.addTask {
                     let actionID = "a\(index + 1)"
                     let childEventBus = AgentEventBus()
@@ -229,11 +239,17 @@ public struct AutomationActionResolver: Sendable {
                     )
                     return (index, result)
                 }
+                return true
+            }
+
+            for _ in 0..<min(maxConcurrentActions, actionDescriptions.count) {
+                _ = enqueueNextAction()
             }
 
             var results: [(Int, AutomationActionResolutionResult)] = []
             for await result in group {
                 results.append(result)
+                _ = enqueueNextAction()
             }
             return results
         }

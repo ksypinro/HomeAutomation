@@ -32,6 +32,7 @@ public struct AgentExecutionPlan: Sendable {
 
 /// The component responsible for constructing an `AgentExecutionPlan` dynamically based
 /// on the user's input, the current context, and orchestrator policies.
+@available(*, deprecated, message: "Use GraphPlanner with .graph runtime mode")
 public struct AgentPlanner: Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AgentPlanner")
     private let policy: OrchestratorPolicyEngine

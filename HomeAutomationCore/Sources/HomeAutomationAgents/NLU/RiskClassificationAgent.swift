@@ -22,7 +22,7 @@ public struct RiskClassificationAgent: HomeAgent {
 
     public let id = AgentID.riskClassification
     public let capabilities: Set<AgentCapability> = [.riskClassification]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: RiskClassificationAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 

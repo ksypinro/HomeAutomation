@@ -16,7 +16,7 @@ public struct DomainAgent: HomeAgent {
 
     public let id = AgentID.domain
     public let capabilities: Set<AgentCapability> = [.domainClassification]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: DomainAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 

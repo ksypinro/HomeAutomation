@@ -9,7 +9,7 @@ public struct DraftGenerationAgent: HomeAgent {
 
     public let id = AgentID.draftGeneration
     public let capabilities: Set<AgentCapability> = [.draftGeneration]
-    public let timeoutNanoseconds: UInt64 = 20_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let generate: @Sendable (HomeModelInstructionPackage) async throws -> HomeCommandDraft
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.DraftGeneration")
 

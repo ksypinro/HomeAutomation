@@ -116,7 +116,7 @@ public struct OrchestratorPolicyEngine: Sendable {
         return .success(
             ResolutionContextPatch(
                 agentID: agentID,
-                updates: [ResolutionContextPatchKey.resolution: AnySendableValue(resolution)]
+                updates: [ResolutionContextPatchKey.resolution.rawValue: AnySendableValue(resolution)]
             )
         )
     }

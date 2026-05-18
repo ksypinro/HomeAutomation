@@ -8,7 +8,7 @@ public struct SafetyValidationAgent: HomeAgent {
 
     public let id = AgentID.safetyValidation
     public let capabilities: Set<AgentCapability> = [.safetyValidation]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let validate: @Sendable (SafetyValidationInput) async throws -> HomeCommandResolution
 
     public init(validate: @escaping @Sendable (SafetyValidationInput) async throws -> HomeCommandResolution) {

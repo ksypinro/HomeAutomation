@@ -23,7 +23,7 @@ public struct SlotExtractionAgent: HomeAgent {
 
     public let id = AgentID.slotExtraction
     public let capabilities: Set<AgentCapability> = [.slotExtraction]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: SlotExtractionAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 

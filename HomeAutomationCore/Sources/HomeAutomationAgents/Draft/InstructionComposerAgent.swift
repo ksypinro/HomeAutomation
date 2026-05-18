@@ -9,7 +9,7 @@ public struct InstructionComposerAgent: HomeAgent {
 
     public let id = AgentID.instructionComposer
     public let capabilities: Set<AgentCapability> = [.instructionComposition]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let compose: @Sendable (HomeFinalResolutionInput) async throws -> HomeModelInstructionPackage
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.InstructionComposer")
 

@@ -20,7 +20,7 @@ public struct LanguageAgent: HomeAgent {
 
     public let id = AgentID.language
     public let capabilities: Set<AgentCapability> = [.languageDetection]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: LanguageAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 

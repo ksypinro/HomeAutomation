@@ -9,7 +9,7 @@ public struct CandidateHydrationAgent: HomeAgent {
 
     public let id = AgentID.candidateHydration
     public let capabilities: Set<AgentCapability> = [.candidateHydration]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let hydrate: @Sendable (CandidateHydrationInput) async throws -> [HomeCandidateRecord]
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateHydration")
 

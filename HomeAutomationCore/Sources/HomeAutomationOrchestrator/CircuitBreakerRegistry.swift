@@ -12,6 +12,13 @@ public enum CircuitState: String, Sendable, Codable, Hashable {
     case halfOpen
 }
 
+public struct CircuitBreakerSnapshot: Codable, Sendable {
+    public let agentID: String
+    public let state: CircuitState
+    public let failureCount: Int
+    public let lastFailure: Date?
+}
+
 /// A mechanism to isolate failing agents from the rest of the orchestration pipeline.
 ///
 /// If an agent fails consecutively beyond its `threshold`, the breaker opens and skips 
@@ -25,10 +32,30 @@ public actor AgentCircuitBreaker {
     private var lastFailure: Date?
     private var state: CircuitState = .closed
 
-    public init(agentID: AgentID, threshold: Int = 3, recoveryInterval: Double = 30) {
+    public init(
+        agentID: AgentID,
+        threshold: Int = 3,
+        recoveryInterval: Double = 30,
+        snapshot: CircuitBreakerSnapshot? = nil
+    ) {
         self.agentID = agentID
         self.threshold = max(1, threshold)
         self.recoveryInterval = max(0, recoveryInterval)
+        
+        if let snapshot {
+            self.failureCount = snapshot.failureCount
+            self.state = snapshot.state
+            self.lastFailure = snapshot.lastFailure
+        }
+    }
+    
+    public func snapshot() -> CircuitBreakerSnapshot {
+        CircuitBreakerSnapshot(
+            agentID: agentID.rawValue,
+            state: state,
+            failureCount: failureCount,
+            lastFailure: lastFailure
+        )
     }
 
     /// Determines if the agent should be allowed to execute.
@@ -86,9 +113,35 @@ public actor CircuitBreakerRegistry {
     private let threshold: Int
     private let recoveryInterval: Double
 
+    private let persistenceKey = "com.homeautomation.circuitBreakers"
+
     public init(threshold: Int = 3, recoveryInterval: Double = 30) {
         self.threshold = max(1, threshold)
         self.recoveryInterval = max(0, recoveryInterval)
+        
+        if let data = UserDefaults.standard.data(forKey: "com.homeautomation.circuitBreakers"),
+           let snapshots = try? JSONDecoder().decode([CircuitBreakerSnapshot].self, from: data) {
+            for snapshot in snapshots {
+                let id = AgentID(snapshot.agentID)
+                let breaker = AgentCircuitBreaker(
+                    agentID: id,
+                    threshold: self.threshold,
+                    recoveryInterval: self.recoveryInterval,
+                    snapshot: snapshot
+                )
+                breakers[id] = breaker
+            }
+        }
+    }
+    
+    public func persist() async {
+        var snapshots: [CircuitBreakerSnapshot] = []
+        for (_, breaker) in breakers {
+            snapshots.append(await breaker.snapshot())
+        }
+        if let data = try? JSONEncoder().encode(snapshots) {
+            UserDefaults.standard.set(data, forKey: persistenceKey)
+        }
     }
 
     /// Retrieves or creates the circuit breaker for a specific agent.

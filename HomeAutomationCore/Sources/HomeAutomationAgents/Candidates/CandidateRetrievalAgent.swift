@@ -11,7 +11,7 @@ public struct CandidateRetrievalAgent: HomeAgent {
 
     public let id = AgentID.candidateRetrieval
     public let capabilities: Set<AgentCapability> = [.candidateRetrieval]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let retrieve: @Sendable (CandidateRetrievalInput) async throws -> [HomeCandidateRecord]
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateRetrieval")
 

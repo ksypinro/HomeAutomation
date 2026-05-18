@@ -304,7 +304,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
                 if operation.operation != .executeDeviceCommand {
                     let result = HomeAutomationResolverResult(
-                        state: Self.makeOperationState(for: trimmedText, operation: operation),
+                        state: HomeResolutionState.forOperation(text: trimmedText, operation: operation),
                         retrievedCandidates: [],
                         aggregation: HomeCandidateAggregationResult(
                             finalCandidateIDs: [],
@@ -445,6 +445,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
         switch runtimeMode {
         case .legacy:
+            logger.warning("Running in LEGACY mode. This mode is deprecated and will be removed.")
             let context = await contextStore.snapshot()
             let result = await resolveAutomationCreation(
                 text: text,
@@ -549,6 +550,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ) async -> DirectCommandExecutionResult {
         switch runtimeMode {
         case .legacy:
+            logger.warning("Running in LEGACY mode. This mode is deprecated and will be removed.")
             logger.debug("Generating legacy execution plan.")
             let plan = planner.plan(for: text, context: await contextStore.snapshot())
             logger.debug("Initializing AgentScheduler for runID: \(runID, privacy: .public)")
@@ -701,60 +703,4 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         )
     }
 
-    private static func makeOperationState(
-        for text: String,
-        operation: HomeOperationDetectionResult
-    ) -> HomeResolutionState {
-        HomeResolutionState(
-            rawText: text,
-            language: HomeLanguageDetectionResult(
-                languageCode: "en",
-                isMixedLanguage: false,
-                confidence: 0.75,
-                unsupportedLanguageLikely: false
-            ),
-            domain: HomeDomainClassificationResult(
-                domain: operation.domain,
-                confidence: operation.confidence
-            ),
-            intent: HomeIntentFamilyResult(
-                topFamilies: operation.operation == .automationCreation ? [.createAutomation] : [.unsupported],
-                confidence: operation.confidence
-            ),
-            deviceType: HomeDeviceTypeResult(deviceTypes: [], confidence: 0.4),
-            slots: HomeSlotExtractionResult(
-                rooms: [],
-                deviceNicknames: [],
-                values: [],
-                modes: [],
-                confidence: 0.4
-            ),
-            risk: HomeRiskClassificationResult(
-                riskLevel: .low,
-                requiresConfirmation: false,
-                reason: operation.reason,
-                confidence: operation.confidence
-            )
-        )
-    }
-
-    private func stableUnique(_ devices: [HomeCandidateRecord]) -> [HomeCandidateRecord] {
-        var seen = Set<String>()
-        var result: [HomeCandidateRecord] = []
-        for device in devices where !seen.contains(device.id) {
-            seen.insert(device.id)
-            result.append(device)
-        }
-        return result
-    }
-
-    private func stableUnique(_ values: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for value in values where !seen.contains(value) {
-            seen.insert(value)
-            result.append(value)
-        }
-        return result
-    }
 }

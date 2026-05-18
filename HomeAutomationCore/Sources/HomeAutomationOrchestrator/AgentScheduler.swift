@@ -7,6 +7,7 @@ import OSLog
 /// The scheduler is responsible for resolving agent dependencies, executing tasks in 
 /// sequence or parallel, managing circuit breaker policies, handling execution traces,
 /// and returning a unified `AgentRunResult` when a terminal action or failure occurs.
+@available(*, deprecated, message: "Use GraphScheduler with .graph runtime mode")
 public struct AgentScheduler: Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AgentScheduler")
     private let registry: AgentRegistry
@@ -136,21 +137,57 @@ public struct AgentScheduler: Sendable {
         )
 
         logger.debug("Agent \(task.agentID.rawValue, privacy: .public) running...")
-        let start = Date()
-        let result = await agent.run(context: context)
-        let end = Date()
-        logger.debug("Agent \(task.agentID.rawValue, privacy: .public) finished in \(end.timeIntervalSince(start), format: .fixed(precision: 3))s with result: \(String(describing: result), privacy: .public)")
+        var attemptCount = 0
+        var result: AgentRunResult
+        var start: Date
+        var end: Date
 
-        await record(result: result, breaker: breaker)
+        repeat {
+            attemptCount += 1
+            start = Date()
+            
+            do {
+                result = try await withAgentTimeout(
+                    agentID: task.agentID,
+                    timeoutNanoseconds: agent.timeoutNanoseconds
+                ) {
+                    await agent.run(context: context)
+                }
+            } catch is AgentTimeoutError {
+                result = .retryableFailure(AgentFailure(
+                    agentID: task.agentID,
+                    reason: "Agent timed out after \(agent.timeoutNanoseconds / 1_000_000)ms",
+                    isRetryable: true
+                ))
+            } catch {
+                result = .terminalFailure(AgentFailure(
+                    agentID: task.agentID,
+                    reason: error.localizedDescription,
+                    isRetryable: false
+                ))
+            }
+            
+            end = Date()
+            logger.debug("Agent \(task.agentID.rawValue, privacy: .public) finished attempt \(attemptCount) in \(end.timeIntervalSince(start), format: .fixed(precision: 3))s with result: \(String(describing: result), privacy: .public)")
 
-        await contextStore.appendTrace(
-            AgentTraceEntry(
-                agentID: task.agentID,
-                startedAt: start,
-                endedAt: end,
-                result: traceResult(for: result)
+            await record(result: result, breaker: breaker)
+
+            await contextStore.appendTrace(
+                AgentTraceEntry(
+                    agentID: task.agentID,
+                    startedAt: start,
+                    endedAt: end,
+                    result: traceResult(for: result)
+                )
             )
-        )
+            
+            if case .retryableFailure(let failure) = result,
+               policy.shouldRetry(failure: failure, attemptCount: attemptCount) {
+                logger.info("Retrying agent \(task.agentID.rawValue, privacy: .public) (attempt \(attemptCount + 1))")
+                continue
+            }
+            break
+        } while true
 
         if case .success(let patch) = result {
             await contextStore.apply(patch)
@@ -197,6 +234,7 @@ public struct AgentScheduler: Sendable {
         case .retryableFailure, .terminalFailure:
             await breaker.recordFailure()
         }
+        await circuitBreakers.persist()
     }
 
     private func failClosed(for agentID: AgentID, reason: String, context: ResolutionContext) async -> AgentRunResult {

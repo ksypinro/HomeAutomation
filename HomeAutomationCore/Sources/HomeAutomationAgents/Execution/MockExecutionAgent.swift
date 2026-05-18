@@ -9,7 +9,7 @@ public struct MockExecutionAgent: HomeAgent {
 
     public let id = AgentID.mockExecution
     public let capabilities: Set<AgentCapability> = [.execution]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let execute: @Sendable (HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord
 
     public init(execute: @escaping @Sendable (HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord) {

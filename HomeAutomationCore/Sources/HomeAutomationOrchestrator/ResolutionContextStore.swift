@@ -24,69 +24,10 @@ public actor ResolutionContextStore {
     /// - Parameter patch: The `ResolutionContextPatch` containing key-value updates.
     public func apply(_ patch: ResolutionContextPatch) {
         logger.debug("Applying patch from agent: \(patch.agentID.rawValue, privacy: .public)")
-        if let result = patch.updates[ResolutionContextPatchKey.resolverResult]?.get(HomeAutomationResolverResult.self) {
-            context.resolutionState = result.state
-            context.retrievedCandidates = result.retrievedCandidates
-            context.aggregation = result.aggregation
-            context.selectedCandidateIDs = result.aggregation.finalCandidateIDs
-            context.hydratedCandidates = result.hydratedCandidates
-            context.draft = result.draft
-            context.resolution = result.resolution
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.operation]?.get(HomeOperationDetectionResult.self) {
-            context.operation = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.language]?.get(HomeLanguageDetectionResult.self) {
-            context.language = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.domain]?.get(HomeDomainClassificationResult.self) {
-            context.domain = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.intent]?.get(HomeIntentFamilyResult.self) {
-            context.intent = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.deviceType]?.get(HomeDeviceTypeResult.self) {
-            context.deviceType = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.slots]?.get(HomeSlotExtractionResult.self) {
-            context.slots = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.risk]?.get(HomeRiskClassificationResult.self) {
-            context.risk = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.resolutionState]?.get(HomeResolutionState.self) {
-            context.resolutionState = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.retrievedCandidates]?.get([HomeCandidateRecord].self) {
-            context.retrievedCandidates = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.selectedCandidateIDs]?.get([String].self) {
-            context.selectedCandidateIDs = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.aggregation]?.get(HomeCandidateAggregationResult.self) {
-            context.aggregation = value
-            context.selectedCandidateIDs = value.finalCandidateIDs
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.hydratedCandidates]?.get([HomeCandidateRecord].self) {
-            context.hydratedCandidates = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.knowledgeSnippets]?.get([KnowledgeSnippet].self) {
-            context.knowledgeSnippets.append(contentsOf: value)
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.retrievalReports]?.get([KnowledgeRetrievalReport].self) {
-            context.retrievalReports.append(contentsOf: value)
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.instructionPackage]?.get(HomeModelInstructionPackage.self) {
-            context.instructionPackage = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.draft]?.get(HomeCommandDraft.self) {
-            context.draft = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.executionPlan]?.get(HomeAutomationExecutionPlan.self) {
-            context.executionPlan = value
-        }
-        if let value = patch.updates[ResolutionContextPatchKey.resolution]?.get(HomeCommandResolution.self) {
-            context.resolution = value
+        for (key, value) in patch.updates {
+            if let applicator = ResolutionContextPatchApplicators.registry[key] {
+                applicator(value, &context)
+            }
         }
         for (scope, values) in patch.scopedUpdates {
             context.mergeScopedValues(values, in: scope)

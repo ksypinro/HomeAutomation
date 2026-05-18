@@ -9,7 +9,7 @@ public struct RuleFallbackAgent: HomeAgent {
 
     public let id = AgentID.ruleFallback
     public let capabilities: Set<AgentCapability> = [.ruleFallback]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let resolve: @Sendable (RuleFallbackInput) async throws -> HomeAutomationResolverResult
 
     public init(resolve: @escaping @Sendable (RuleFallbackInput) async throws -> HomeAutomationResolverResult) {

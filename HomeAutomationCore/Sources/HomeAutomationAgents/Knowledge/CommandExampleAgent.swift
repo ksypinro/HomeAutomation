@@ -18,7 +18,7 @@ public struct CommandExampleAgent: HomeAgent {
 
     public let id = AgentID.commandExample
     public let capabilities: Set<AgentCapability> = [.knowledgeRetrieval]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let contextRetriever: ContextRetriever?
 
     public init(contextRetriever: ContextRetriever? = nil) {
