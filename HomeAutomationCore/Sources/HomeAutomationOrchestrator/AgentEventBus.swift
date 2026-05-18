@@ -1,4 +1,5 @@
 import Foundation
+import HomeAutomationCore
 import OSLog
 
 /// A pipeline event generated during the orchestration process.
@@ -54,9 +55,22 @@ public actor AgentEventBus {
     /// Publishes a new event to the bus and delivers it to all active continuations.
     ///
     /// - Parameter event: The `OrchestratorPipelineEvent` to broadcast.
-    public func publish(_ event: OrchestratorPipelineEvent) {
+    public func publish(_ event: OrchestratorPipelineEvent) async {
         guard !isFinished else { return }
         logger.debug("Publishing event for runID: \(event.runID, privacy: .public), stage: \(event.stage, privacy: .public), status: \(event.status.rawValue, privacy: .public)")
+        await HomeAutomationTelemetry.shared.log(
+            "pipeline.event",
+            context: HomeAutomationTelemetryContext(
+                runID: event.runID.uuidString,
+                stage: event.stage,
+                agentID: event.agentID
+            ),
+            status: event.status.rawValue,
+            payload: [
+                "eventID": event.id,
+                "detail": event.detail
+            ]
+        )
         events.append(event)
         for continuation in continuations.values {
             continuation.yield(event)

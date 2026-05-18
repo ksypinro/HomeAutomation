@@ -166,42 +166,33 @@ struct AutomationCreationFlowTests {
     }
 
     @Test
-    func graphNativeAutomationCreationMatchesLegacyServiceOutput() async throws {
+    func graphNativeAutomationCreationUsesGraphOnlyOutput() async throws {
         let command = "Turn on bedroom AC everyday at 7 AM"
-        let graphOrchestrator = HomeCommandOrchestrator(
+        let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
-        )
-        let legacyOrchestrator = HomeCommandOrchestrator(
-            deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .legacy
+            foundationModelAvailability: { false }
         )
 
-        let graphResult = try await graphOrchestrator.resolve(command, executeLowRiskCommands: true)
-        let legacyResult = try await legacyOrchestrator.resolve(command, executeLowRiskCommands: true)
+        let result = try await orchestrator.resolve(command, executeLowRiskCommands: true)
+        let metrics = try #require(await orchestrator.lastMetrics())
 
-        guard case .automationDrafted(let graphPlan) = graphResult.resolution,
-              case .automationDrafted(let legacyPlan) = legacyResult.resolution else {
-            Issue.record("Expected both graph and legacy automation paths to draft an automation.")
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected graph automation path to draft an automation.")
             return
         }
 
-        #expect(graphPlan.ruleDraft == legacyPlan.ruleDraft)
-        #expect(graphPlan.resolvedActions == legacyPlan.resolvedActions)
-        #expect(graphPlan.smartThingsRuleJSON == legacyPlan.smartThingsRuleJSON)
-        #expect(graphPlan.requiresConfirmation == legacyPlan.requiresConfirmation)
-        #expect(graphResult.aggregation.finalCandidateIDs == legacyResult.aggregation.finalCandidateIDs)
-        #expect(graphResult.draft == legacyResult.draft)
+        #expect(plan.ruleDraft.actionDescriptions == ["Turn on bedroom AC"])
+        #expect(plan.resolvedActions.first?.device?.id == "bedroom_ac")
+        #expect(plan.smartThingsRuleJSON?.contains("bedroom_ac") == true)
+        #expect(result.aggregation.finalCandidateIDs == ["bedroom_ac"])
+        #expect(metrics.graphRun?.graphID == "automation-creation-graph")
     }
 
     @Test
     func graphNativeAutomationCreationRecordsActualGraphMetrics() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
+            foundationModelAvailability: { false }
         )
 
         _ = try await orchestrator.resolve(
@@ -212,23 +203,22 @@ struct AutomationCreationFlowTests {
         let graphRun = try #require(metrics.graphRun)
 
         #expect(graphRun.graphID == "automation-creation-graph")
-        #expect(graphRun.nodeStatuses[AgentID.operationDetection.rawValue] == .completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationDraft.rawValue] == .completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationConditionOperandResolution.rawValue] == .completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationActionResolution.rawValue] == .completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationValidation.rawValue] == .completed)
-        #expect(graphRun.nodeStatuses[AgentID.smartThingsCompilation.rawValue] == .completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationResultAssembly.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.operationDetection.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationDraft.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationConditionOperandResolution.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationActionResolution.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationValidation.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.smartThingsCompilation.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationResultAssembly.rawValue] == GraphNodeRunStatus.completed)
         #expect(graphRun.nodeDurations.isEmpty == false)
-        #expect(metrics.automationMetrics.graphNodeStatuses == graphRun.nodeStatuses.mapValues(\.rawValue))
+        #expect(metrics.automationMetrics.graphNodeStatuses == graphRun.nodeStatuses.mapValues { $0.rawValue })
     }
 
     @Test
     func graphNativeAutomationCreationAddsDynamicFanOutMetrics() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
+            foundationModelAvailability: { false }
         )
 
         let result = try await orchestrator.resolve(
@@ -237,10 +227,10 @@ struct AutomationCreationFlowTests {
         )
 
         guard case .automationDrafted(let plan) = result.resolution else {
-            Issue.record("Expected automation draft, got \(result.resolution.displaySummary)")
+            Issue.record("Expected automation draft, got \(String(describing: result.resolution.displaySummary))")
             return
         }
-        #expect(plan.resolvedActions.map(\.originalText) == [
+        #expect(plan.resolvedActions.map { $0.originalText } == [
             "Turn on bedroom AC",
             "Turn off kitchen strip light"
         ])
@@ -251,11 +241,11 @@ struct AutomationCreationFlowTests {
 
         let metrics = try #require(await orchestrator.lastMetrics())
         let graphRun = try #require(metrics.graphRun)
-        #expect(graphRun.nodeStatuses["automationActionResolution:a1"] == .completed)
-        #expect(graphRun.nodeStatuses["automationActionResolution:a2"] == .completed)
-        #expect(graphRun.nodeStatuses["automationConditionOperandResolution:c1"] == .completed)
-        #expect(graphRun.nodeStatuses["automationConditionOperandResolution:c2"] == .completed)
-        #expect(metrics.automationMetrics.graphNodeStatuses == graphRun.nodeStatuses.mapValues(\.rawValue))
+        #expect(graphRun.nodeStatuses["automationActionResolution:a1"] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses["automationActionResolution:a2"] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses["automationConditionOperandResolution:c1"] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses["automationConditionOperandResolution:c2"] == GraphNodeRunStatus.completed)
+        #expect(metrics.automationMetrics.graphNodeStatuses == graphRun.nodeStatuses.mapValues { $0.rawValue })
     }
 
     @Test

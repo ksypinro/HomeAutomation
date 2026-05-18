@@ -73,27 +73,21 @@ public struct AutomationActionResolutionResult: Sendable {
 public struct AutomationActionResolver: Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AutomationActionResolver")
     private let registry: AgentRegistry
-    private let planner: AgentPlanner
     private let graphPlanner: GraphPlanner
     private let policy: OrchestratorPolicyEngine
-    private let runtimeMode: OrchestratorRuntimeMode
     private let circuitBreakers: CircuitBreakerRegistry
     private let maxConcurrentActions: Int
 
     public init(
         registry: AgentRegistry,
-        planner: AgentPlanner,
         graphPlanner: GraphPlanner,
         policy: OrchestratorPolicyEngine,
-        runtimeMode: OrchestratorRuntimeMode = .graph,
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
         maxConcurrentActions: Int = 1
     ) {
         self.registry = registry
-        self.planner = planner
         self.graphPlanner = graphPlanner
         self.policy = policy
-        self.runtimeMode = runtimeMode
         self.circuitBreakers = circuitBreakers
         self.maxConcurrentActions = max(1, maxConcurrentActions)
     }
@@ -205,6 +199,18 @@ public struct AutomationActionResolver: Sendable {
 
                 group.addTask {
                     let actionID = "a\(index + 1)"
+                    let inheritedContext = HomeAutomationTelemetryScope.current
+                    let actionContext = HomeAutomationTelemetryContext(
+                        runID: runID.uuidString,
+                        operation: inheritedContext?.operation,
+                        graphID: inheritedContext?.graphID,
+                        stage: "automationActionResolution:\(actionID)",
+                        graphNodeID: AgentID.automationActionResolution.rawValue,
+                        agentID: AgentID.automationActionResolution.rawValue,
+                        agentInvocationID: Self.actionInvocationID(runID: runID, actionID: actionID),
+                        actionID: actionID,
+                        runtimeMode: inheritedContext?.runtimeMode
+                    )
                     let childEventBus = AgentEventBus()
                     let eventForwarder = Task {
                         for await event in await childEventBus.stream() {
@@ -225,7 +231,32 @@ public struct AutomationActionResolver: Sendable {
                             detail: "[\(index + 1)/\(actionDescriptions.count)] \(actionText)"
                         )
                     )
-                    let result = await self.resolve(actionText, eventBus: childEventBus, runID: runID)
+                    let startedAt = Date()
+                    await HomeAutomationTelemetry.shared.log(
+                        "automation.action.started",
+                        context: actionContext,
+                        status: "running",
+                        payload: [
+                            "actionIndex": String(index + 1),
+                            "actionCount": String(actionDescriptions.count),
+                            "actionText": actionText
+                        ]
+                    )
+                    let result = await HomeAutomationTelemetryScope.$current.withValue(actionContext) {
+                        await self.resolve(actionText, eventBus: childEventBus, runID: runID)
+                    }
+                    await HomeAutomationTelemetry.shared.log(
+                        "automation.action.completed",
+                        context: actionContext,
+                        status: result.isResolved ? "completed" : "failed",
+                        durationMs: Date().timeIntervalSince(startedAt) * 1_000,
+                        payload: [
+                            "actionText": actionText,
+                            "resolved": String(result.isResolved),
+                            "resolution": result.resolution.displaySummary,
+                            "selectedCandidateIDs": result.selectedCandidateIDs.joined(separator: ",")
+                        ]
+                    )
                     await childEventBus.finish()
                     await eventForwarder.value
                     await eventBus.publish(
@@ -276,6 +307,10 @@ public struct AutomationActionResolver: Sendable {
         "\(AgentID.automationActionResolution.rawValue):\(actionID)"
     }
 
+    private static func actionInvocationID(runID: UUID, actionID: String) -> String {
+        "\(String(runID.uuidString.prefix(8)))-\(actionID)-\(AgentID.automationActionResolution.rawValue)"
+    }
+
     private static func namespacedPipelineEvent(
         _ event: OrchestratorPipelineEvent,
         actionID: String
@@ -296,33 +331,18 @@ public struct AutomationActionResolver: Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> (exit: AgentRunResult?, fallbackUsed: Bool) {
-        switch runtimeMode {
-        case .legacy:
-            let plan = planner.plan(for: text, context: await contextStore.snapshot())
-            let scheduler = AgentScheduler(
-                registry: registry,
-                contextStore: contextStore,
-                eventBus: eventBus,
-                policy: policy,
-                circuitBreakers: circuitBreakers,
-                runID: runID
-            )
-            let exit = await scheduler.execute(plan)
-            return (exit, plan.isFallbackOnly)
-        case .graph:
-            let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
-            let scheduler = GraphScheduler()
-            let result = await scheduler.execute(
-                plan.graph,
-                registry: registry,
-                contextStore: contextStore,
-                eventBus: eventBus,
-                policy: policy,
-                circuitBreakers: circuitBreakers,
-                runID: runID
-            )
-            return (result.exit, plan.isFallbackOnly)
-        }
+        let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
+        let scheduler = GraphScheduler()
+        let result = await scheduler.execute(
+            plan.graph,
+            registry: registry,
+            contextStore: contextStore,
+            eventBus: eventBus,
+            policy: policy,
+            circuitBreakers: circuitBreakers,
+            runID: runID
+        )
+        return (result.exit, plan.isFallbackOnly)
     }
 
     private static func resolution(from exit: AgentRunResult?) -> HomeCommandResolution {

@@ -1,6 +1,6 @@
 # HomeAutomationOrchestrator Source Module
 
-`HomeAutomationOrchestrator` is the runtime coordinator for the multi-agent architecture. It plans agent work, executes sequential and parallel stages, merges context patches, streams pipeline events, records metrics, applies conversation memory, tracks retrieval quality, and enforces fail-closed safety behavior.
+`HomeAutomationOrchestrator` is the graph-only runtime coordinator for the multi-agent architecture. It detects the requested operation, selects an operation graph, executes ready DAG nodes, merges context patches, streams pipeline events, records metrics, applies conversation memory, tracks retrieval quality, and enforces fail-closed safety behavior.
 
 This module answers the question: "How do specialized agents cooperate safely to produce one command resolution?"
 
@@ -11,10 +11,9 @@ flowchart TB
     UI["HomeAutomationViewModel"]
     Orchestrator["HomeCommandOrchestrator"]
 
-    subgraph Runtime["Orchestrator Runtime"]
-        Planner["AgentPlanner"]
+    subgraph Runtime["Graph Runtime"]
         GraphPlanner["GraphPlanner"]
-        Scheduler["AgentScheduler"]
+        Catalog["OperationGraphCatalog"]
         GraphScheduler["GraphScheduler"]
         Registry["AgentRegistry"]
         Context["ResolutionContextStore"]
@@ -30,17 +29,13 @@ flowchart TB
     RAG["HomeAutomationRAG"]
 
     UI --> Orchestrator
-    Orchestrator --> Planner
     Orchestrator --> GraphPlanner
-    Orchestrator --> Scheduler
+    GraphPlanner --> Catalog
     Orchestrator --> GraphScheduler
     Orchestrator --> Context
     Orchestrator --> Events
     Orchestrator --> Metrics
     Orchestrator --> Memory
-    Scheduler --> Registry
-    Scheduler --> Policy
-    Scheduler --> Breakers
     GraphScheduler --> Registry
     GraphScheduler --> Policy
     GraphScheduler --> Breakers
@@ -57,54 +52,25 @@ flowchart TD
     B --> C["Create CommandRequest and ResolutionContextStore"]
     C --> D["Attach memory hint when command references previous turn"]
     D --> E["Publish input event"]
-    E --> F["Operation detection selects command path"]
-    F --> G["GraphPlanner builds execution graph"]
+    E --> F["Foundation-model-backed operation detection"]
+    F --> G["GraphPlanner asks OperationGraphCatalog for a graph"]
     G --> H["GraphScheduler executes ready DAG nodes"]
     H --> I["Agents return patches or terminal exits"]
     I --> J["ResolutionContextStore applies patches"]
-    J --> K["Retrieval reports and metrics remain attached to context"]
-    K --> L{"Execution policy allows mock execution?"}
-    L -->|Yes| M["Run post-pipeline MockExecutionAgent"]
-    L -->|No| N["Keep ready/confirmation/clarification/unsupported result"]
-    M --> O["Assemble HomeAutomationResolverResult"]
-    N --> O
-    O --> P["Capture metrics and circuit states"]
-    P --> Q["Append conversation memory turn"]
-    Q --> R["Emit outcome event and final result"]
+    J --> K["Graph guards decide optional execution nodes"]
+    K --> L["Mandatory gates fail closed when blocked"]
+    L --> M["Assemble HomeAutomationResolverResult from graph context"]
+    M --> N["Capture metrics and circuit states"]
+    N --> O["Append conversation memory turn"]
+    O --> P["Emit outcome event and final result"]
 ```
 
-The graph runtime is the default. The legacy phased scheduler remains available as a rollback path by constructing `HomeCommandOrchestrator(runtimeMode: .legacy)` or setting `HOME_AUTOMATION_ORCHESTRATOR_RUNTIME=legacy` in the app environment.
+All command paths run through `GraphPlanner` plus `GraphScheduler`. There is no runtime-mode branching and no phased scheduler rollback path.
 
-## Legacy Runtime Flow
-
-```mermaid
-flowchart TD
-    A["resolveStream receives text"] --> B["Trim and validate command"]
-    B --> C["Create CommandRequest and ResolutionContextStore"]
-    C --> D["Attach memory hint when command references previous turn"]
-    D --> E["Publish input event"]
-    E --> F["AgentPlanner builds execution plan"]
-    F --> G["AgentScheduler executes phases"]
-    G --> H["Agents return patches or terminal exits"]
-    H --> I["ResolutionContextStore applies patches"]
-    I --> J["Retrieval reports and metrics remain attached to context"]
-    J --> K{"Execution policy allows mock execution?"}
-    K -->|Yes| L["Run post-pipeline MockExecutionAgent"]
-    K -->|No| M["Keep ready/confirmation/clarification/unsupported result"]
-    L --> N["Assemble HomeAutomationResolverResult"]
-    M --> N
-    N --> O["Capture metrics and circuit states"]
-    O --> P["Append conversation memory turn"]
-    P --> Q["Emit outcome event and final result"]
-```
-
-## Plan Shapes
+## Graph Shapes
 
 ```text
-Fallback-only plan:
-RuleFallbackAgent -> BixbyFallbackAgent -> UnsupportedCommandAgent
-
-Full model plan:
+Direct command graph:
 Parallel NLU agents
 -> Parallel knowledge agents + candidate retrieval
 -> RetrievalJudgeAgent
@@ -116,30 +82,45 @@ Parallel NLU agents
 -> ParameterValidationAgent
 -> ConfirmationPolicyAgent
 -> ExecutionPlanningAgent
--> post-pipeline MockExecutionAgent when allowed by policy
+-> MockExecutionAgent guarded by OrchestratorPolicyEngine.canExecute(context:)
 
-Graph runtime:
+Fallback graph:
+RuleFallbackAgent
+-> BixbyFallbackAgent
+-> UnsupportedCommandAgent
+
+Automation creation graph:
 OperationDetectionAgent
--> direct-command graph or automation-creation graph
--> GraphScheduler runs ready DAG nodes, records graph metrics, and fails closed on mandatory safety gates
+-> AutomationDraftAgent
+-> AutomationConditionOperandResolutionAgent and AutomationActionResolutionAgent in parallel
+-> AutomationValidationAgent
+-> SmartThingsCompilationAgent
+-> SmartThingsRuleCreationAgent
+-> AutomationResultAssemblyAgent
+
+Unsupported graph:
+UnsupportedCommandAgent
 ```
+
+`MockExecutionAgent` is part of the direct-command DAG. If `executeLowRiskCommands` is false, its graph guard skips the node and the result remains `.readyToExecute`. If execution is allowed and the plan is safe, the node runs inside `GraphScheduler` and produces `.executed`.
+
+Automation creation is also graph-native. If the automation graph cannot produce a final result, the orchestrator returns the graph-derived failure or unsupported outcome instead of running a second non-DAG resolver.
 
 ## Component Details
 
 | Component | Role |
 | --- | --- |
 | `OrchestratorUpdate` | Stream output enum: either an `OrchestratorPipelineEvent` or final `HomeAutomationResolverResult`. |
-| `HomeCommandOrchestrator` | Main resolver. Owns high-level lifecycle, stream creation, context store setup, memory hint injection, scheduling, result assembly, metrics storage, and memory append. |
+| `HomeCommandOrchestrator` | Main resolver. Owns high-level lifecycle, stream creation, context setup, operation detection, graph execution, result assembly, metrics storage, and memory append. |
 | `HomeCommandOrchestrator.makeRAGEnabled` | Convenience factory that indexes canonical knowledge and injects a `ContextRetriever` into the agent registry. |
-| `OrchestratorRuntimeConfiguration` | Runtime-mode configuration. Defaults to graph and supports a legacy rollback environment override. |
-| `AgentTask` | One planned agent call identified by `AgentID`. |
-| `AgentPhase` | Execution phase, either sequential or parallel. |
-| `AgentExecutionPlan` | Ordered plan of agent phases plus fallback-only marker. |
-| `AgentPlanner` | Builds fallback-only or full model execution plans based on `OrchestratorPolicyEngine.shouldUseModels`. |
-| `GraphPlanner` | Builds direct-command, fallback, and automation-creation DAGs. |
-| `AgentScheduler` | Executes phases, checks circuit breakers, publishes events, runs agents, applies patches, records traces, and returns terminal exits. |
-| `GraphScheduler` | Executes graph nodes when dependencies and guards are satisfied, records graph metrics, and respects mandatory fail-closed policy. |
-| `AgentRegistry` | Stores type-erased agents by ID and capability for scheduler lookup. |
+| `GraphPlanner` | Selects operation-specific DAGs via `OperationGraphCatalog`. |
+| `OperationGraphCatalog` | Maps operation kinds to direct-command, fallback, automation-creation, or unsupported graphs. |
+| `GraphScheduler` | Executes graph nodes when dependencies and guards are satisfied, records graph metrics, checks circuits, publishes events, applies patches, and respects fail-closed policy. |
+| `OrchestrationGraph` | Immutable graph definition containing nodes, edges, entry nodes, and orchestration goal. |
+| `GraphNode` | One executable graph node with an agent requirement, execution policy, and optional guard. |
+| `GraphGuard` | Predicate used to skip guarded nodes such as `mockExecution` when policy does not allow execution. |
+| `GraphRunMetrics` | Per-graph metrics containing node statuses, selected agents, skipped nodes, and node durations. |
+| `AgentRegistry` | Stores type-erased agents by ID and capability for graph lookup. |
 | `ContextualHomeAgent` | Adapts a typed `HomeAgent` to `AnyHomeAgent` by deriving input from context and mapping output to a patch. |
 | `DefaultAgentRegistryFactory` | Wires default agent instances, dependencies, RAG retriever, model availability closure, registry, validators, tools, and executors. |
 | `ResolutionContextPatchKey` | String constants for patch keys used by `ResolutionContextStore`. |
@@ -153,41 +134,38 @@ OperationDetectionAgent
 | `ConversationTurn` | Stored summary of a previous command, selected device, capability, confirmation status, and risk. |
 | `ConversationMemory` | Actor storing recent turns and returning last resolved device hints. |
 | `ConversationMemoryReferenceDetector` | Detects follow-up wording such as "it", "that", "same", or relative phrases. |
-| `OrchestratorContextMetrics` | Context and retrieval-related metrics. |
-| `OrchestratorSafetyMetrics` | Safety, confirmation, and execution-safety metrics. |
-| `OrchestratorCandidateMetrics` | Candidate count, shard, and ranking metrics. |
-| `RetrievalQualityMetrics` | Retrieval strategies, average/max score, low-score source count, judge invocation/skips, retry count, and reformulated-query count. |
-| `FoundationModelUsageMetrics` | Foundation Models availability, model-call, skipped-call, failure, tool, and context-budget metrics. |
-| `OrchestratorMetrics` | Full run metrics payload, including traces, fallback usage, retrieval quality, Foundation Models usage, circuit states, evaluation fields, and final outcome. |
+| `OrchestratorMetrics` | Full run metrics payload, including traces, fallback usage, retrieval quality, Foundation Models usage, graph metrics, circuit states, automation fields, and final outcome. |
 | `OrchestratorMetricsCollector` | Actor storing latest metrics and serializing them as JSON for the UI. |
+
+Telemetry and metrics keep `runtimeMode` as a string field for analytics continuity, but orchestration always writes `"graph"`.
 
 ## Scheduling Behavior
 
 ```mermaid
 flowchart TD
-    A["AgentScheduler phase"] --> B{"Sequential or parallel?"}
-    B -->|Sequential| C["Run one agent with current context"]
-    B -->|Parallel| D["Run all agents with same context snapshot"]
-    C --> E["Check registry and circuit breaker"]
-    D --> E
-    E --> F{"Mandatory gate unavailable or blocked?"}
-    F -->|Yes| G["Fail closed via policy"]
-    F -->|No| H["Run agent"]
-    H --> I["Record trace and breaker result"]
-    I --> J["Apply success patch or append error"]
-    J --> K["Publish pipeline event"]
-    K --> L{"Terminal exit or context resolution?"}
-    L -->|Yes| M["Stop plan and return exit"]
-    L -->|No| N["Continue next phase"]
+    A["GraphScheduler loop"] --> B["Find nodes with satisfied dependencies"]
+    B --> C{"Guard satisfied?"}
+    C -->|No| D["Mark node skipped"]
+    C -->|Yes| E["Resolve agent by ID or capability"]
+    E --> F{"Agent missing or circuit open?"}
+    F -->|Mandatory gate| G["Fail closed via policy"]
+    F -->|Non-mandatory| H["Mark skipped and continue"]
+    F -->|Available| I["Run agent with timeout and retry policy"]
+    I --> J["Record trace, telemetry, and breaker result"]
+    J --> K["Apply success patch or append error"]
+    K --> L["Publish pipeline event"]
+    L --> M{"Terminal exit or final context resolution?"}
+    M -->|Yes| N["Skip pending nodes and return"]
+    M -->|No| A
 ```
 
 ## Safety and Resilience Rules
 
-- `SafetyValidationAgent`, `ParameterValidationAgent`, `ConfirmationPolicyAgent`, `ExecutionPlanningAgent`, and `MockExecutionAgent` are mandatory gates.
+- `AutomationValidationAgent`, `SafetyValidationAgent`, `ParameterValidationAgent`, `ConfirmationPolicyAgent`, `ExecutionPlanningAgent`, and `MockExecutionAgent` are mandatory gates.
 - Mandatory gates fail closed if unavailable, failed, or blocked by an open circuit breaker.
-- Non-mandatory agents may be skipped when circuit breakers are open, allowing deterministic fallback to continue.
+- Non-mandatory agents may be skipped when circuit breakers are open, allowing later graph nodes or fallback nodes to determine the outcome.
 - `MockExecutionAgent` fail-closed behavior returns a ready plan instead of mutating the registry.
-- Conversation memory can add hints only before planning; it cannot bypass validation.
-- Every attempted agent should appear in traces, metrics, and pipeline events.
+- Conversation memory can add hints only before graph execution; it cannot bypass validation.
+- Every attempted or skipped graph node should appear in graph metrics and pipeline events.
 - Foundation Models availability, prompt budget, selected tools, skipped calls, and model failure categories are surfaced through metrics.
 - Retrieval judge behavior is observable through `RetrievalQualityMetrics`; weak retrieval can trigger at most one bounded reformulated retry.

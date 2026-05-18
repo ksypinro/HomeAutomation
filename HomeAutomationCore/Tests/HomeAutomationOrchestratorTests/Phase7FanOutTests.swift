@@ -29,7 +29,7 @@ struct Phase7FanOutTests {
         )
 
         guard case .automationDrafted(let plan) = result.resolution else {
-            Issue.record("Expected automationDrafted, got \(result.resolution.displaySummary)")
+            Issue.record("Expected automationDrafted, got \(String(describing: result.resolution.displaySummary))")
             return
         }
         // Actions must be present and ordered consistently.
@@ -299,8 +299,7 @@ struct Phase7FanOutTests {
     func graphMetricsContainPerActionAndPerConditionNodeStatuses() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
+            foundationModelAvailability: { false }
         )
 
         let result = try await orchestrator.resolve(
@@ -309,7 +308,7 @@ struct Phase7FanOutTests {
         )
 
         guard case .automationDrafted = result.resolution else {
-            Issue.record("Expected automationDrafted, got \(result.resolution.displaySummary)")
+            Issue.record("Expected automationDrafted, got \(String(describing: result.resolution.displaySummary))")
             return
         }
 

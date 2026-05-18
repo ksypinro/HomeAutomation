@@ -104,14 +104,14 @@ public struct GraphScheduler: Sendable {
 
             var runnable: [GraphNode] = []
             for node in candidates {
-                if evaluate(node.guardCondition, context: context, graph: graph) {
+                if evaluate(node.guardCondition, context: context, graph: graph, policy: policy) {
                     runnable.append(node)
                 } else {
                     pending.remove(node.id)
                     completed.insert(node.id)
                     await markSkipped(
                         node: node,
-                        selectedAgentID: nil,
+                        selectedAgentID: missingAgentID(for: node),
                         eventBus: eventBus,
                         runID: runID,
                         metrics: metrics,
@@ -261,6 +261,15 @@ public struct GraphScheduler: Sendable {
                 status: .running
             )
         )
+        let baseTelemetryContext = (HomeAutomationTelemetryScope.current ?? HomeAutomationTelemetryContext())
+            .merging(
+                runID: runID.uuidString,
+                operation: graph.goal.rawValue,
+                graphID: graph.id,
+                stage: node.id,
+                graphNodeID: node.id,
+                agentID: agentID.rawValue
+            )
 
         var attemptCount = 0
         var result: AgentRunResult
@@ -271,13 +280,34 @@ public struct GraphScheduler: Sendable {
             attemptCount += 1
             start = Date()
             await metrics.markRunning(nodeID: node.id, agentID: agentID, startedAt: start)
+            let telemetryContext = baseTelemetryContext.merging(
+                agentInvocationID: Self.agentInvocationID(
+                    runID: runID,
+                    actionID: baseTelemetryContext.actionID,
+                    conditionID: baseTelemetryContext.conditionID,
+                    agentID: agentID.rawValue,
+                    attempt: attemptCount
+                ),
+                attempt: attemptCount
+            )
+            await HomeAutomationTelemetry.shared.log(
+                "agent.started",
+                context: telemetryContext,
+                status: "running",
+                payload: [
+                    "timeoutMs": String(selection.agent.timeoutNanoseconds / 1_000_000),
+                    "manifestCapabilities": selection.manifest.capabilities.map(\.rawValue).sorted().joined(separator: ",")
+                ]
+            )
             
             do {
                 result = try await withAgentTimeout(
                     agentID: agentID,
                     timeoutNanoseconds: selection.agent.timeoutNanoseconds
                 ) {
-                    await selection.agent.run(context: context)
+                    await HomeAutomationTelemetryScope.$current.withValue(telemetryContext) {
+                        await selection.agent.run(context: context)
+                    }
                 }
             } catch is AgentTimeoutError {
                 result = .retryableFailure(AgentFailure(
@@ -294,6 +324,16 @@ public struct GraphScheduler: Sendable {
             }
             
             end = Date()
+            await HomeAutomationTelemetry.shared.log(
+                telemetryEventType(for: result),
+                context: telemetryContext,
+                status: eventStatus(for: result).rawValue,
+                durationMs: end.timeIntervalSince(start) * 1_000,
+                payload: [
+                    "result": traceResult(for: result).rawValue,
+                    "detail": detail(for: result)
+                ]
+            )
 
             await record(result: result, breaker: breaker, registry: circuitBreakers)
             await contextStore.appendTrace(
@@ -452,7 +492,8 @@ public struct GraphScheduler: Sendable {
     private func evaluate(
         _ guardCondition: GraphGuard?,
         context: ResolutionContext,
-        graph: OrchestrationGraph
+        graph: OrchestrationGraph,
+        policy: OrchestratorPolicyEngine
     ) -> Bool {
         guard let guardCondition else {
             return true
@@ -464,6 +505,8 @@ public struct GraphScheduler: Sendable {
             return !contextHasValue(key, context: context)
         case .operationType(let operation):
             return operationKind(for: graph.goal) == operation
+        case .canExecuteCommand:
+            return policy.canExecute(context: context)
         }
     }
 
@@ -616,6 +659,34 @@ public struct GraphScheduler: Sendable {
         case .retryableFailure(let failure), .terminalFailure(let failure):
             return failure.reason
         }
+    }
+
+    private func telemetryEventType(for result: AgentRunResult) -> String {
+        switch result {
+        case .success:
+            return "agent.completed"
+        case .clarification:
+            return "agent.clarification"
+        case .unsupported:
+            return "agent.unsupported"
+        case .retryableFailure(let failure), .terminalFailure(let failure):
+            if failure.reason.localizedCaseInsensitiveContains("timed out") {
+                return "agent.timeout"
+            }
+            return "agent.failed"
+        }
+    }
+
+    private static func agentInvocationID(
+        runID: UUID,
+        actionID: String?,
+        conditionID: String?,
+        agentID: String,
+        attempt: Int
+    ) -> String {
+        let runPrefix = String(runID.uuidString.prefix(8))
+        let scope = actionID ?? conditionID ?? "root"
+        return "\(runPrefix)-\(scope)-\(agentID)-\(String(format: "%02d", attempt))"
     }
 }
 

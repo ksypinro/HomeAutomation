@@ -121,19 +121,6 @@ public struct OrchestratorPolicyEngine: Sendable {
         )
     }
 
-    private func legacyFailClosedResult(for agentID: AgentID, reason: String) -> AgentRunResult {
-        if agentID == .executionPlanning {
-            return .terminalFailure(
-                AgentFailure(
-                    agentID: agentID,
-                    reason: "Execution planning blocked: \(reason)",
-                    isRetryable: false
-                )
-            )
-        }
-        return .clarification("I need confirmation or more information before this command can be executed safely.")
-    }
-
     private func maxRetries(for agentID: AgentID) -> Int {
         switch agentID {
         case .draftGeneration:

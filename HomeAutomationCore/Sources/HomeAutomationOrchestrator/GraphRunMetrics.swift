@@ -1,35 +1,6 @@
 import Foundation
 import HomeAutomationAgents
 
-public enum OrchestratorRuntimeMode: String, Sendable, Hashable, Codable {
-    case legacy
-    case graph
-}
-
-public struct OrchestratorRuntimeConfiguration: Sendable, Hashable, Codable {
-    public static let environmentVariableName = "HOME_AUTOMATION_ORCHESTRATOR_RUNTIME"
-    public static let graphDefault = OrchestratorRuntimeConfiguration(runtimeMode: .graph)
-    public static let legacyRollback = OrchestratorRuntimeConfiguration(runtimeMode: .legacy)
-
-    public let runtimeMode: OrchestratorRuntimeMode
-
-    public init(runtimeMode: OrchestratorRuntimeMode = .graph) {
-        self.runtimeMode = runtimeMode
-    }
-
-    public static func resolving(
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> OrchestratorRuntimeConfiguration {
-        guard let rawValue = environment[environmentVariableName]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased(),
-              let runtimeMode = OrchestratorRuntimeMode(rawValue: rawValue) else {
-            return graphDefault
-        }
-        return OrchestratorRuntimeConfiguration(runtimeMode: runtimeMode)
-    }
-}
-
 public enum GraphNodeRunStatus: String, Sendable, Hashable, Codable {
     case pending
     case running

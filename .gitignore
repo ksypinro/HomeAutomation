@@ -68,3 +68,7 @@ Carthage/Build/
 # Gcov-based coverage reporting
 *.gcno
 .build/
+
+# Runtime telemetry logs
+Logs/
+**/Logs/home-automation-*.txt

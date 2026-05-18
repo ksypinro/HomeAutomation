@@ -35,9 +35,9 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
-    func plannerChoosesFallbackPlanWhenModelsUnavailable() {
+    func graphPlannerChoosesFallbackGraphWhenModelsUnavailable() {
         let policy = OrchestratorPolicyEngine(isModelAvailable: { false })
-        let planner = AgentPlanner(policy: policy)
+        let planner = GraphPlanner(policy: policy)
         let context = ResolutionContext(
             request: CommandRequest(text: "turn on the light", executeLowRiskCommands: false)
         )
@@ -45,13 +45,18 @@ struct OrchestratorInfrastructureTests {
         let plan = planner.plan(for: "turn on the light", context: context)
 
         #expect(plan.isFallbackOnly)
-        #expect(plan.phases.count == 3)
+        #expect(plan.graph.id == "direct-command-fallback-graph")
+        #expect(plan.graph.nodes.map(\.id) == [
+            AgentID.ruleFallback.rawValue,
+            AgentID.bixbyFallback.rawValue,
+            AgentID.unsupportedCommand.rawValue
+        ])
     }
 
     @Test
-    func plannerIncludesRetrievalJudgeAfterKnowledgePhaseWhenModelsAvailable() {
+    func graphPlannerIncludesRetrievalJudgeAndMockExecutionWhenModelsAvailable() {
         let policy = OrchestratorPolicyEngine(isModelAvailable: { true })
-        let planner = AgentPlanner(policy: policy)
+        let planner = GraphPlanner(policy: policy)
         let context = ResolutionContext(
             request: CommandRequest(text: "turn on the light", executeLowRiskCommands: false)
         )
@@ -59,12 +64,13 @@ struct OrchestratorInfrastructureTests {
         let plan = planner.plan(for: "turn on the light", context: context)
 
         #expect(!plan.isFallbackOnly)
-        #expect(plan.phases.contains { phase in
-            if case .sequential(let task) = phase {
-                return task.agentID == .retrievalJudge
-            }
-            return false
+        #expect(plan.graph.nodes.contains { $0.id == AgentID.retrievalJudge.rawValue })
+        #expect(plan.graph.nodes.contains { node in
+            node.id == AgentID.mockExecution.rawValue &&
+                node.executionPolicy == .safetyGate &&
+                node.guardCondition == .canExecuteCommand
         })
+        #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.executionPlanning.rawValue, to: AgentID.mockExecution.rawValue)))
     }
 
     @Test
@@ -101,25 +107,6 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
-    func runtimeConfigurationDefaultsToGraphAndCanRollbackToLegacy() {
-        let defaultConfiguration = OrchestratorRuntimeConfiguration.resolving(environment: [:])
-        let rollbackConfiguration = OrchestratorRuntimeConfiguration.resolving(
-            environment: [
-                OrchestratorRuntimeConfiguration.environmentVariableName: OrchestratorRuntimeMode.legacy.rawValue
-            ]
-        )
-        let invalidConfiguration = OrchestratorRuntimeConfiguration.resolving(
-            environment: [
-                OrchestratorRuntimeConfiguration.environmentVariableName: "not-a-runtime"
-            ]
-        )
-
-        #expect(defaultConfiguration.runtimeMode == .graph)
-        #expect(rollbackConfiguration.runtimeMode == .legacy)
-        #expect(invalidConfiguration.runtimeMode == .graph)
-    }
-
-    @Test
     func orchestratorDefaultRuntimeUsesGraph() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
@@ -133,22 +120,17 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
-    func legacyRuntimeCanBeExplicitlySelectedAsRollback() async throws {
+    func orchestratorMetricsAlwaysUseGraphRuntimeLabel() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .legacy
+            foundationModelAvailability: { false }
         )
 
-        let result = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        _ = try await orchestrator.resolve("Turn on bedroom AC everyday at 7 AM", executeLowRiskCommands: true)
         let metrics = try #require(await orchestrator.lastMetrics())
 
-        guard case .readyToExecute = result.resolution else {
-            Issue.record("Expected legacy rollback runtime to keep direct commands working.")
-            return
-        }
-        #expect(metrics.graphRun == nil)
-        #expect(metrics.agentStatuses[AgentID.ruleFallback.rawValue] == "success")
+        #expect(metrics.automationMetrics.runtimeMode == "graph")
+        #expect(metrics.graphRun?.graphID == "automation-creation-graph")
     }
 
     @Test
@@ -310,7 +292,7 @@ struct OrchestratorInfrastructureTests {
         let metrics = try JSONDecoder().decode(OrchestratorMetrics.self, from: Data(metricsJSON.utf8))
 
         #expect(metrics.automationMetrics.operation == HomeAutomationOperationKind.automationCreation.rawValue)
-        #expect(metrics.automationMetrics.runtimeMode == OrchestratorRuntimeMode.graph.rawValue)
+        #expect(metrics.automationMetrics.runtimeMode == "graph")
         #expect(metrics.automationMetrics.graphID == "automation-creation-graph")
         #expect(metrics.automationMetrics.automationActionCount == 1)
         #expect(metrics.automationMetrics.automationCompilerTarget == "SmartThingsRulesV1")
@@ -387,32 +369,53 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
-    func schedulerSkipsOpenCircuitForNonMandatoryAgent() async {
+    func graphSchedulerSkipsOpenCircuitForNonMandatoryAgent() async {
         let circuitBreakers = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
         let registry = AgentRegistry(agents: [FailingAnyAgent(id: .language)])
         let contextStore = ResolutionContextStore(
             request: CommandRequest(text: "turn on light", executeLowRiskCommands: false)
         )
-        let scheduler = AgentScheduler(
+        let graph = OrchestrationGraph(
+            id: "non-mandatory-open-circuit",
+            goal: .executeDeviceCommand,
+            nodes: [
+                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language))
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.language.rawValue]
+        )
+        let scheduler = GraphScheduler()
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { true })
+        let runID = UUID()
+
+        _ = await scheduler.execute(
+            graph,
             registry: registry,
             contextStore: contextStore,
             eventBus: AgentEventBus(),
-            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            policy: policy,
             circuitBreakers: circuitBreakers,
             runID: UUID()
         )
-
-        _ = await scheduler.execute(AgentExecutionPlan(phases: [.sequential(AgentTask(.language))]))
-        let exit = await scheduler.execute(AgentExecutionPlan(phases: [.sequential(AgentTask(.language))]))
+        let result = await scheduler.execute(
+            graph,
+            registry: registry,
+            contextStore: contextStore,
+            eventBus: AgentEventBus(),
+            policy: policy,
+            circuitBreakers: circuitBreakers,
+            runID: runID
+        )
         let trace = await contextStore.snapshot().trace
 
-        #expect(exit == nil)
+        #expect(result.exit == nil)
         #expect(trace.last?.result == .skipped)
         #expect(await circuitBreakers.allStatuses()[.language] == .open)
+        #expect(result.metrics.nodeStatuses[AgentID.language.rawValue] == .skipped)
     }
 
     @Test
-    func schedulerFailsClosedWhenMandatoryCircuitIsOpen() async {
+    func graphSchedulerFailsClosedWhenMandatoryCircuitIsOpen() async {
         let circuitBreakers = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
         let breaker = await circuitBreakers.breaker(for: .confirmationPolicy)
         await breaker.recordFailure()
@@ -431,7 +434,22 @@ struct OrchestratorInfrastructureTests {
         )
         await contextStore.setDraft(draft)
 
-        let scheduler = AgentScheduler(
+        let graph = OrchestrationGraph(
+            id: "mandatory-open-circuit",
+            goal: .executeDeviceCommand,
+            nodes: [
+                GraphNode(
+                    id: AgentID.confirmationPolicy.rawValue,
+                    requirement: .byID(.confirmationPolicy),
+                    executionPolicy: .safetyGate
+                )
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.confirmationPolicy.rawValue]
+        )
+
+        _ = await GraphScheduler().execute(
+            graph,
             registry: AgentRegistry(agents: [SuccessfulAnyAgent(id: .confirmationPolicy)]),
             contextStore: contextStore,
             eventBus: AgentEventBus(),
@@ -439,8 +457,6 @@ struct OrchestratorInfrastructureTests {
             circuitBreakers: circuitBreakers,
             runID: UUID()
         )
-
-        _ = await scheduler.execute(AgentExecutionPlan(phases: [.sequential(AgentTask(.confirmationPolicy))]))
         let context = await contextStore.snapshot()
 
         guard case .requiresConfirmation(let blockedDraft) = context.resolution else {
