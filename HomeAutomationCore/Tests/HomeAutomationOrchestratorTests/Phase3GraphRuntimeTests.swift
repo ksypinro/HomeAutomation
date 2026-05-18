@@ -134,6 +134,45 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
+    func graphSchedulerAcceptsNearBoundaryAgentResult() async {
+        let graph = OrchestrationGraph(
+            id: "near-timeout-result",
+            goal: .executeDeviceCommand,
+            nodes: [
+                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language))
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.language.rawValue]
+        )
+        let contextStore = ResolutionContextStore(
+            request: CommandRequest(text: "turn on lamp", executeLowRiskCommands: false)
+        )
+
+        let result = await GraphScheduler().execute(
+            graph,
+            registry: AgentRegistry(
+                agents: [
+                    SlowSuccessGraphAgent(
+                        id: .language,
+                        timeoutNanoseconds: 50_000_000,
+                        delayNanoseconds: 75_000_000
+                    )
+                ]
+            ),
+            contextStore: contextStore,
+            eventBus: AgentEventBus(),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            circuitBreakers: CircuitBreakerRegistry(),
+            runID: UUID()
+        )
+
+        let context = await contextStore.snapshot()
+        #expect(result.exit == nil)
+        #expect(context.trace.map(\.agentID) == [.language])
+        #expect(result.metrics.nodeStatuses[AgentID.language.rawValue] == .completed)
+    }
+
+    @Test
     func graphSchedulerFailsClosedWhenMandatoryCircuitIsOpen() async {
         let circuitBreakers = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
         let breaker = await circuitBreakers.breaker(for: .confirmationPolicy)
@@ -332,6 +371,18 @@ private struct StubGraphAgent: AnyHomeAgent {
 
     func run(context: ResolutionContext) async -> AgentRunResult {
         .success(ResolutionContextPatch(agentID: id))
+    }
+}
+
+private struct SlowSuccessGraphAgent: AnyHomeAgent {
+    let id: AgentID
+    let timeoutNanoseconds: UInt64
+    let delayNanoseconds: UInt64
+    let capabilities: Set<AgentCapability> = []
+
+    func run(context: ResolutionContext) async -> AgentRunResult {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return .success(ResolutionContextPatch(agentID: id))
     }
 }
 

@@ -9,7 +9,7 @@ public struct DraftRepairAgent: HomeAgent {
 
     public let id = AgentID.draftRepair
     public let capabilities: Set<AgentCapability> = [.draftRepair]
-    public let timeoutNanoseconds: UInt64 = 25_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let repair: @Sendable (HomeModelInstructionPackage) async throws -> AgentDraftResolutionOutput
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.DraftRepair")
 

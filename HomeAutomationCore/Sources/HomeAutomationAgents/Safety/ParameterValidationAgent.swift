@@ -8,7 +8,7 @@ public struct ParameterValidationAgent: HomeAgent {
 
     public let id = AgentID.parameterValidation
     public let capabilities: Set<AgentCapability> = [.parameterValidation]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let validate: @Sendable (ParameterValidationInput) async throws -> Bool
 
     public init(validate: @escaping @Sendable (ParameterValidationInput) async throws -> Bool) {

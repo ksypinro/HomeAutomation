@@ -90,11 +90,14 @@ public enum ConversationMemoryReferenceDetector {
         let normalized = text
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()
-        let tokens = Set(
-            normalized
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                .filter { !$0.isEmpty }
-        )
-        return !tokens.isDisjoint(with: ["it", "that", "same", "there"])
+        
+        let actionPronouns = [
+            "turn it", "switch it", "set it", "dim it", "make it",
+            "turn that", "switch that", "set that", "make that",
+            "unlock it", "lock it", "open it", "close it",
+            "unlock that", "lock that", "open that", "close that",
+            "do same", "the same", "do that", "same thing"
+        ]
+        return actionPronouns.contains { normalized.contains($0) }
     }
 }

@@ -380,7 +380,7 @@ public struct BixbyFallbackAgent: HomeAgent {
 
     public let id = AgentID.bixbyFallback
     public let capabilities: Set<AgentCapability> = [.bixbyFallback]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let match: @Sendable (BixbyFallbackInput) async throws -> [AgentBixbyDraftMatch]
 
     public init(match: @escaping @Sendable (BixbyFallbackInput) async throws -> [AgentBixbyDraftMatch]) {

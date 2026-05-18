@@ -10,6 +10,13 @@ struct Phase7FanOutTests {
     // MARK: - Parallel Action Fan-Out
 
     @Test
+    func automationActionResolutionHasAggregateTimeoutBudget() {
+        let agent = AutomationActionResolutionAgent(resolverProvider: { nil })
+
+        #expect(agent.timeoutNanoseconds >= 240_000_000_000)
+    }
+
+    @Test
     func multipleActionsResolveWithStableOrdering() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),

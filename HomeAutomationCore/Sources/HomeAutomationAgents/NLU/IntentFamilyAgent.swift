@@ -18,7 +18,7 @@ public struct IntentFamilyAgent: HomeAgent {
 
     public let id = AgentID.intentFamily
     public let capabilities: Set<AgentCapability> = [.intentClassification]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: IntentFamilyAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 

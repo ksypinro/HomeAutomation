@@ -18,7 +18,7 @@ public struct DeviceTypeAgent: HomeAgent {
 
     public let id = AgentID.deviceType
     public let capabilities: Set<AgentCapability> = [.deviceTypeExtraction]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: DeviceTypeAgentWorkerSession
     private let contextRetriever: ContextRetriever?
 

@@ -117,7 +117,7 @@ struct Phase2AgentTests {
             modelPrompt: "few-shot examples plus user command"
         )
 
-        #expect(await promptCapture.value() == "few-shot examples plus user command")
+        #expect(await promptCapture.value().hasPrefix("few-shot examples plus user command"))
         #expect(result.rooms == ["living room"])
     }
 

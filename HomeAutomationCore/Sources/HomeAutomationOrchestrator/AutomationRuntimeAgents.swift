@@ -23,7 +23,7 @@ public enum AutomationRuntimeContextKeys {
     )
 
     public static let conditionOperandResolutionRecords = ScopedContextKey<[AutomationConditionOperandResolutionRecord]>(
-        ResolutionContextPatchKey.automationConditionOperandResolutionRecords,
+        ResolutionContextPatchKey.automationConditionOperandResolutionRecords.rawValue,
         scope: .root
     )
 
@@ -209,7 +209,7 @@ public struct AutomationDraftExtractionAgent: HomeAgent {
 
     public let id = AgentID.automationDraft
     public let capabilities: Set<AgentCapability> = [.automationDrafting]
-    public let timeoutNanoseconds: UInt64 = 2_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let draftAgent: AutomationDraftAgent
 
     public init(draftAgent: AutomationDraftAgent = AutomationDraftAgent()) {
@@ -234,7 +234,7 @@ public struct AutomationConditionOperandResolutionAgent: HomeAgent {
 
     public let id = AgentID.automationConditionOperandResolution
     public let capabilities: Set<AgentCapability> = [.automationConditionOperandResolution]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let resolver: AutomationConditionOperandResolver
 
     public init(resolver: AutomationConditionOperandResolver) {
@@ -255,7 +255,7 @@ public struct AutomationActionResolutionAgent: HomeAgent {
 
     public let id = AgentID.automationActionResolution
     public let capabilities: Set<AgentCapability> = [.automationActionResolution]
-    public let timeoutNanoseconds: UInt64 = 8_000_000_000
+    public let timeoutNanoseconds: UInt64 = 240_000_000_000
     private let resolverProvider: @Sendable () -> AutomationActionResolver?
 
     public init(resolverProvider: @escaping @Sendable () -> AutomationActionResolver?) {
@@ -291,7 +291,7 @@ public struct SmartThingsCompilationAgent: HomeAgent {
 
     public let id = AgentID.smartThingsCompilation
     public let capabilities: Set<AgentCapability> = [.smartThingsCompilation]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let compiler: SmartThingsRuleCompiler
 
     public init(compiler: SmartThingsRuleCompiler = SmartThingsRuleCompiler()) {
@@ -350,7 +350,7 @@ public struct SmartThingsRuleCreationAgent: HomeAgent {
 
     public let id = AgentID.smartThingsRuleCreation
     public let capabilities: Set<AgentCapability> = [.smartThingsRuleCreation]
-    public let timeoutNanoseconds: UInt64 = 2_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let creator: (any SmartThingsRuleCreating)?
 
     public init(creator: (any SmartThingsRuleCreating)? = nil) {
@@ -498,7 +498,7 @@ public struct AutomationResultAssemblyAgent: HomeAgent {
 
     public let id = AgentID.automationResultAssembly
     public let capabilities: Set<AgentCapability> = [.automationResultAssembly]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
 
     public init() {}
 
@@ -519,7 +519,7 @@ public struct AutomationResultAssemblyAgent: HomeAgent {
             confidence: ruleDraft.confidence,
             reason: "Automation creation graph"
         )
-        let state = Self.makeOperationState(for: input.request.text, operation: operation)
+        let state = HomeResolutionState.forOperation(text: input.request.text, operation: operation)
         let aggregate = input.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate)
         let validation = input.scopedValue(for: ScopedContextKeys.validation())
         let compilation = input.scopedValue(for: AutomationRuntimeContextKeys.smartThingsCompilation)
@@ -626,40 +626,5 @@ public struct AutomationResultAssemblyAgent: HomeAgent {
         )
     }
 
-    private static func makeOperationState(
-        for text: String,
-        operation: HomeOperationDetectionResult
-    ) -> HomeResolutionState {
-        HomeResolutionState(
-            rawText: text,
-            language: HomeLanguageDetectionResult(
-                languageCode: "en",
-                isMixedLanguage: false,
-                confidence: 0.75,
-                unsupportedLanguageLikely: false
-            ),
-            domain: HomeDomainClassificationResult(
-                domain: operation.domain,
-                confidence: operation.confidence
-            ),
-            intent: HomeIntentFamilyResult(
-                topFamilies: operation.operation == .automationCreation ? [.createAutomation] : [.unsupported],
-                confidence: operation.confidence
-            ),
-            deviceType: HomeDeviceTypeResult(deviceTypes: [], confidence: 0.4),
-            slots: HomeSlotExtractionResult(
-                rooms: [],
-                deviceNicknames: [],
-                values: [],
-                modes: [],
-                confidence: 0.4
-            ),
-            risk: HomeRiskClassificationResult(
-                riskLevel: .low,
-                requiresConfirmation: false,
-                reason: operation.reason,
-                confidence: operation.confidence
-            )
-        )
-    }
+
 }

@@ -59,7 +59,7 @@ public struct AutomationCreationResolver: Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> HomeAutomationResolverResult {
-        let state = Self.makeOperationState(for: text, operation: operation)
+        let state = HomeResolutionState.forOperation(text: text, operation: operation)
 
         // Step 1: Extract automation draft (trigger, conditions, action descriptions).
         let ruleDraft: HomeAutomationRuleDraft
@@ -389,7 +389,7 @@ public struct AutomationCreationResolver: Sendable {
         }
 
         let aggregation = HomeCandidateAggregationResult(
-            finalCandidateIDs: Self.stableUnique(selectedIDs),
+            finalCandidateIDs: selectedIDs.stableUnique(),
             needsClarification: false,
             confidence: resolvedActions.map(\.confidence).min() ?? ruleDraft.confidence
         )
@@ -400,9 +400,9 @@ public struct AutomationCreationResolver: Sendable {
 
         let result = HomeAutomationResolverResult(
             state: state,
-            retrievedCandidates: Self.stableUniqueDevices(retrievedCandidates),
+            retrievedCandidates: retrievedCandidates.stableUnique(),
             aggregation: aggregation,
-            hydratedCandidates: Self.stableUniqueDevices(hydratedCandidates),
+            hydratedCandidates: hydratedCandidates.stableUnique(),
             draft: firstDraft,
             resolution: resolution
         )
@@ -588,62 +588,7 @@ public struct AutomationCreationResolver: Sendable {
         )
     }
 
-    private static func makeOperationState(
-        for text: String,
-        operation: HomeOperationDetectionResult
-    ) -> HomeResolutionState {
-        HomeResolutionState(
-            rawText: text,
-            language: HomeLanguageDetectionResult(
-                languageCode: "en",
-                isMixedLanguage: false,
-                confidence: 0.75,
-                unsupportedLanguageLikely: false
-            ),
-            domain: HomeDomainClassificationResult(
-                domain: operation.domain,
-                confidence: operation.confidence
-            ),
-            intent: HomeIntentFamilyResult(
-                topFamilies: operation.operation == .automationCreation ? [.createAutomation] : [.unsupported],
-                confidence: operation.confidence
-            ),
-            deviceType: HomeDeviceTypeResult(deviceTypes: [], confidence: 0.4),
-            slots: HomeSlotExtractionResult(
-                rooms: [],
-                deviceNicknames: [],
-                values: [],
-                modes: [],
-                confidence: 0.4
-            ),
-            risk: HomeRiskClassificationResult(
-                riskLevel: .low,
-                requiresConfirmation: false,
-                reason: operation.reason,
-                confidence: operation.confidence
-            )
-        )
-    }
 
-    private static func stableUnique(_ values: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for value in values where !seen.contains(value) {
-            seen.insert(value)
-            result.append(value)
-        }
-        return result
-    }
-
-    private static func stableUniqueDevices(_ devices: [HomeCandidateRecord]) -> [HomeCandidateRecord] {
-        var seen = Set<String>()
-        var result: [HomeCandidateRecord] = []
-        for device in devices where !seen.contains(device.id) {
-            seen.insert(device.id)
-            result.append(device)
-        }
-        return result
-    }
 
     private static func conditionCount(_ condition: HomeAutomationCondition?) -> Int {
         guard let condition else { return 0 }

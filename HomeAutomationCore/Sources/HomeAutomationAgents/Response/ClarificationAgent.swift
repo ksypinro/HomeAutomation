@@ -13,7 +13,7 @@ public struct ClarificationAgent: HomeAgent {
 
     public let id = AgentID.clarification
     public let capabilities: Set<AgentCapability> = [.clarification]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
 
     public init() {}
 

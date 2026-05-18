@@ -9,7 +9,7 @@ public struct CandidateShardAgent: HomeAgent {
 
     public let id = AgentID.candidateShard
     public let capabilities: Set<AgentCapability> = [.candidateSharding]
-    public let timeoutNanoseconds: UInt64 = 10_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let shard: @Sendable (CandidateShardInput) async throws -> HomeCandidateShardSelection
     private let logger = Logger(subsystem: "HomeAutomation", category: "Agent.CandidateShard")
 

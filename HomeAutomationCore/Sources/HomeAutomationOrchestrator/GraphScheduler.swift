@@ -55,6 +55,22 @@ public struct GraphScheduler: Sendable {
             }
 
             guard !candidates.isEmpty else {
+                let blockedNodes = pending.compactMap { nodesByID[$0] }
+                let allOptional = blockedNodes.allSatisfy { $0.executionPolicy == .optional }
+                if allOptional {
+                    await markPendingSkipped(
+                        pending,
+                        nodesByID: nodesByID,
+                        registry: registry,
+                        graph: graph,
+                        eventBus: eventBus,
+                        runID: runID,
+                        metrics: metrics,
+                        reason: "Optional nodes blocked"
+                    )
+                    break
+                }
+                
                 let blocked = pending.sorted().joined(separator: ", ")
                 let failure = AgentFailure(
                     agentID: AgentID("graphScheduler"),
@@ -108,7 +124,6 @@ public struct GraphScheduler: Sendable {
                 continue
             }
 
-            let batchContext = await contextStore.snapshot()
             let firstExit = await withTaskGroup(of: GraphNodeOutcome.self) { group in
                 for node in runnable {
                     group.addTask {
@@ -116,7 +131,7 @@ public struct GraphScheduler: Sendable {
                             node,
                             graph: graph,
                             registry: registry,
-                            context: batchContext,
+                            context: context,
                             contextStore: contextStore,
                             eventBus: eventBus,
                             policy: policy,
@@ -247,20 +262,56 @@ public struct GraphScheduler: Sendable {
             )
         )
 
-        let start = Date()
-        await metrics.markRunning(nodeID: node.id, agentID: agentID, startedAt: start)
-        let result = await selection.agent.run(context: context)
-        let end = Date()
+        var attemptCount = 0
+        var result: AgentRunResult
+        var start: Date
+        var end: Date
 
-        await record(result: result, breaker: breaker)
-        await contextStore.appendTrace(
-            AgentTraceEntry(
-                agentID: agentID,
-                startedAt: start,
-                endedAt: end,
-                result: traceResult(for: result)
+        repeat {
+            attemptCount += 1
+            start = Date()
+            await metrics.markRunning(nodeID: node.id, agentID: agentID, startedAt: start)
+            
+            do {
+                result = try await withAgentTimeout(
+                    agentID: agentID,
+                    timeoutNanoseconds: selection.agent.timeoutNanoseconds
+                ) {
+                    await selection.agent.run(context: context)
+                }
+            } catch is AgentTimeoutError {
+                result = .retryableFailure(AgentFailure(
+                    agentID: agentID,
+                    reason: "Agent timed out after \(selection.agent.timeoutNanoseconds / 1_000_000)ms",
+                    isRetryable: true
+                ))
+            } catch {
+                result = .terminalFailure(AgentFailure(
+                    agentID: agentID,
+                    reason: error.localizedDescription,
+                    isRetryable: false
+                ))
+            }
+            
+            end = Date()
+
+            await record(result: result, breaker: breaker, registry: circuitBreakers)
+            await contextStore.appendTrace(
+                AgentTraceEntry(
+                    agentID: agentID,
+                    startedAt: start,
+                    endedAt: end,
+                    result: traceResult(for: result)
+                )
             )
-        )
+            
+            if case .retryableFailure(let failure) = result,
+               policy.shouldRetry(failure: failure, attemptCount: attemptCount) {
+                logger.info("Retrying agent \(agentID.rawValue, privacy: .public) (attempt \(attemptCount + 1))")
+                continue
+            }
+            break
+        } while true
 
         switch result {
         case .success(let patch):
@@ -362,13 +413,14 @@ public struct GraphScheduler: Sendable {
             policy.isMandatorySafetyGate(agentID)
     }
 
-    private func record(result: AgentRunResult, breaker: AgentCircuitBreaker) async {
+    private func record(result: AgentRunResult, breaker: AgentCircuitBreaker, registry: CircuitBreakerRegistry) async {
         switch result {
         case .success, .clarification, .unsupported:
             await breaker.recordSuccess()
         case .retryableFailure, .terminalFailure:
             await breaker.recordFailure()
         }
+        await registry.persist()
     }
 
     private func failClosed(
@@ -419,52 +471,52 @@ public struct GraphScheduler: Sendable {
         switch key {
         case "request.text":
             return !context.request.text.isEmpty
-        case ResolutionContextPatchKey.language:
+        case ResolutionContextPatchKey.language.rawValue:
             return context.language != nil
-        case ResolutionContextPatchKey.operation:
+        case ResolutionContextPatchKey.operation.rawValue:
             return context.operation != nil
-        case ResolutionContextPatchKey.domain:
+        case ResolutionContextPatchKey.domain.rawValue:
             return context.domain != nil
-        case ResolutionContextPatchKey.intent:
+        case ResolutionContextPatchKey.intent.rawValue:
             return context.intent != nil
-        case ResolutionContextPatchKey.deviceType:
+        case ResolutionContextPatchKey.deviceType.rawValue:
             return context.deviceType != nil
-        case ResolutionContextPatchKey.slots:
+        case ResolutionContextPatchKey.slots.rawValue:
             return context.slots != nil
-        case ResolutionContextPatchKey.risk:
+        case ResolutionContextPatchKey.risk.rawValue:
             return context.risk != nil
-        case ResolutionContextPatchKey.resolutionState:
+        case ResolutionContextPatchKey.resolutionState.rawValue:
             return context.resolutionState != nil
-        case ResolutionContextPatchKey.retrievedCandidates:
+        case ResolutionContextPatchKey.retrievedCandidates.rawValue:
             return !context.retrievedCandidates.isEmpty
-        case ResolutionContextPatchKey.selectedCandidateIDs:
+        case ResolutionContextPatchKey.selectedCandidateIDs.rawValue:
             return !context.selectedCandidateIDs.isEmpty
-        case ResolutionContextPatchKey.aggregation:
+        case ResolutionContextPatchKey.aggregation.rawValue:
             return context.aggregation != nil
-        case ResolutionContextPatchKey.hydratedCandidates:
+        case ResolutionContextPatchKey.hydratedCandidates.rawValue:
             return !context.hydratedCandidates.isEmpty
-        case ResolutionContextPatchKey.knowledgeSnippets:
+        case ResolutionContextPatchKey.knowledgeSnippets.rawValue:
             return !context.knowledgeSnippets.isEmpty
-        case ResolutionContextPatchKey.retrievalReports:
+        case ResolutionContextPatchKey.retrievalReports.rawValue:
             return !context.retrievalReports.isEmpty
-        case ResolutionContextPatchKey.instructionPackage:
+        case ResolutionContextPatchKey.instructionPackage.rawValue:
             return context.instructionPackage != nil
-        case ResolutionContextPatchKey.draft:
+        case ResolutionContextPatchKey.draft.rawValue:
             return context.draft != nil
-        case ResolutionContextPatchKey.executionPlan:
+        case ResolutionContextPatchKey.executionPlan.rawValue:
             return context.executionPlan != nil
-        case ResolutionContextPatchKey.resolution:
+        case ResolutionContextPatchKey.resolution.rawValue:
             return context.resolution != nil
-        case ResolutionContextPatchKey.automationDraft:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationDraft] != nil
-        case ResolutionContextPatchKey.automationResolvedActions:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationResolvedActions] != nil
-        case ResolutionContextPatchKey.automationValidation:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationValidation] != nil
-        case ResolutionContextPatchKey.smartThingsRule:
-            return context.scopedValues[.backend("smartthings")]?[ResolutionContextPatchKey.smartThingsRule] != nil
-        case ResolutionContextPatchKey.automationPlan:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationPlan] != nil
+        case ResolutionContextPatchKey.automationDraft.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationDraft.rawValue] != nil
+        case ResolutionContextPatchKey.automationResolvedActions.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationResolvedActions.rawValue] != nil
+        case ResolutionContextPatchKey.automationValidation.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationValidation.rawValue] != nil
+        case ResolutionContextPatchKey.smartThingsRule.rawValue:
+            return context.scopedValues[.backend("smartthings")]?[ResolutionContextPatchKey.smartThingsRule.rawValue] != nil
+        case ResolutionContextPatchKey.automationPlan.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationPlan.rawValue] != nil
         default:
             return false
         }

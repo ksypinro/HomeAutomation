@@ -1,30 +1,30 @@
 import Foundation
 
 /// String constants used as dictionary keys when agents patch the `ResolutionContext`.
-public enum ResolutionContextPatchKey {
-    public static let resolverResult = "resolverResult"
-    public static let operation = "operation"
-    public static let language = "language"
-    public static let domain = "domain"
-    public static let intent = "intent"
-    public static let deviceType = "deviceType"
-    public static let slots = "slots"
-    public static let risk = "risk"
-    public static let resolutionState = "resolutionState"
-    public static let retrievedCandidates = "retrievedCandidates"
-    public static let selectedCandidateIDs = "selectedCandidateIDs"
-    public static let aggregation = "aggregation"
-    public static let hydratedCandidates = "hydratedCandidates"
-    public static let knowledgeSnippets = "knowledgeSnippets"
-    public static let retrievalReports = "retrievalReports"
-    public static let instructionPackage = "instructionPackage"
-    public static let draft = "draft"
-    public static let executionPlan = "executionPlan"
-    public static let resolution = "resolution"
-    public static let automationDraft = "automationDraft"
-    public static let automationResolvedActions = "automationResolvedActions"
-    public static let automationConditionOperandResolutionRecords = "automationConditionOperandResolutionRecords"
-    public static let automationValidation = "automationValidation"
-    public static let smartThingsRule = "smartThingsRule"
-    public static let automationPlan = "automationPlan"
+public enum ResolutionContextPatchKey: String, CaseIterable, Sendable {
+    case resolverResult
+    case operation
+    case language
+    case domain
+    case intent
+    case deviceType
+    case slots
+    case risk
+    case resolutionState
+    case retrievedCandidates
+    case selectedCandidateIDs
+    case aggregation
+    case hydratedCandidates
+    case knowledgeSnippets
+    case retrievalReports
+    case instructionPackage
+    case draft
+    case executionPlan
+    case resolution
+    case automationDraft
+    case automationResolvedActions
+    case automationConditionOperandResolutionRecords
+    case automationValidation
+    case smartThingsRule
+    case automationPlan
 }

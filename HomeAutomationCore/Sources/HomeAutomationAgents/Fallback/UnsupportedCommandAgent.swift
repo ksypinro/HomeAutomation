@@ -8,7 +8,7 @@ public struct UnsupportedCommandAgent: HomeAgent {
 
     public let id = AgentID.unsupportedCommand
     public let capabilities: Set<AgentCapability> = [.unsupported]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let reasonBuilder: @Sendable (String) -> String
 
     public init(reasonBuilder: @escaping @Sendable (String) -> String = { _ in "This command is not supported." }) {

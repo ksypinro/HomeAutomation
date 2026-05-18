@@ -17,7 +17,7 @@ public struct RetrievalJudgeAgent: HomeAgent {
 
     public let id = AgentID.retrievalJudge
     public let capabilities: Set<AgentCapability> = [.knowledgeRetrieval]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
 
     private let contextRetriever: ContextRetriever?
     private let foundationModelAvailability: @Sendable () -> Bool

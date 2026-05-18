@@ -212,10 +212,10 @@ struct OrchestratorInfrastructureTests {
             #expect(agent != nil)
             #expect(manifest?.supportedOperations.contains(.automationCreation) == true)
         }
-        #expect(registry.manifest(for: .automationActionResolution)?.produces.contains(ResolutionContextPatchKey.automationResolvedActions) == true)
-        #expect(registry.manifest(for: .smartThingsCompilation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
-        #expect(registry.manifest(for: .smartThingsRuleCreation)?.produces.contains(ResolutionContextPatchKey.automationPlan) == true)
-        #expect(registry.manifest(for: .automationResultAssembly)?.produces.contains(ResolutionContextPatchKey.resolverResult) == true)
+        #expect(registry.manifest(for: .automationActionResolution)?.produces.contains(ResolutionContextPatchKey.automationResolvedActions.rawValue) == true)
+        #expect(registry.manifest(for: .smartThingsCompilation)?.produces.contains(ResolutionContextPatchKey.automationPlan.rawValue) == true)
+        #expect(registry.manifest(for: .smartThingsRuleCreation)?.produces.contains(ResolutionContextPatchKey.automationPlan.rawValue) == true)
+        #expect(registry.manifest(for: .automationResultAssembly)?.produces.contains(ResolutionContextPatchKey.resolverResult.rawValue) == true)
     }
 
 

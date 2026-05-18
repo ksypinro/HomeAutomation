@@ -12,7 +12,7 @@ public struct ResultSummaryAgent: HomeAgent {
 
     public let id = AgentID.resultSummary
     public let capabilities: Set<AgentCapability> = [.resultSummary]
-    public let timeoutNanoseconds: UInt64 = 1_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
 
     public init() {}
 

@@ -24,7 +24,7 @@ public struct OperationDetectionAgent: HomeAgent {
 
     public let id = AgentID.operationDetection
     public let capabilities: Set<AgentCapability> = [.operationDetection]
-    public let timeoutNanoseconds: UInt64 = 3_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: OperationDetectionWorkerSession
 
     public init(
@@ -138,7 +138,7 @@ public enum DefaultAgentRegistryFactory {
                     )
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.operationDetection, [ResolutionContextPatchKey.operation: output]) }
+                makePatch: { output, _ in patch(.operationDetection, [ResolutionContextPatchKey.operation.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: LanguageAgent(
@@ -146,7 +146,7 @@ public enum DefaultAgentRegistryFactory {
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.language, [ResolutionContextPatchKey.language: output]) }
+                makePatch: { output, _ in patch(.language, [ResolutionContextPatchKey.language.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: DomainAgent(
@@ -154,7 +154,7 @@ public enum DefaultAgentRegistryFactory {
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.domain, [ResolutionContextPatchKey.domain: output]) }
+                makePatch: { output, _ in patch(.domain, [ResolutionContextPatchKey.domain.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: IntentFamilyAgent(
@@ -162,7 +162,7 @@ public enum DefaultAgentRegistryFactory {
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.intentFamily, [ResolutionContextPatchKey.intent: output]) }
+                makePatch: { output, _ in patch(.intentFamily, [ResolutionContextPatchKey.intent.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: DeviceTypeAgent(
@@ -170,7 +170,7 @@ public enum DefaultAgentRegistryFactory {
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.deviceType, [ResolutionContextPatchKey.deviceType: output]) }
+                makePatch: { output, _ in patch(.deviceType, [ResolutionContextPatchKey.deviceType.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: SlotExtractionAgent(
@@ -178,7 +178,7 @@ public enum DefaultAgentRegistryFactory {
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.slotExtraction, [ResolutionContextPatchKey.slots: output]) }
+                makePatch: { output, _ in patch(.slotExtraction, [ResolutionContextPatchKey.slots.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: RiskClassificationAgent(
@@ -186,7 +186,7 @@ public enum DefaultAgentRegistryFactory {
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk: output]) }
+                makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: AutomationDraftExtractionAgent(
@@ -207,7 +207,7 @@ public enum DefaultAgentRegistryFactory {
                     ResolutionContextPatch(
                         agentID: .automationDraft,
                         updates: [
-                            ResolutionContextPatchKey.retrievalReports: AnySendableValue(output.retrievalReports)
+                            ResolutionContextPatchKey.retrievalReports.rawValue: AnySendableValue(output.retrievalReports)
                         ],
                         scopedUpdates: [
                             .root: [
@@ -317,7 +317,7 @@ public enum DefaultAgentRegistryFactory {
                 agent: AutomationResultAssemblyAgent(),
                 makeInput: { $0 },
                 makePatch: { output, _ in
-                    patch(.automationResultAssembly, [ResolutionContextPatchKey.resolverResult: output])
+                    patch(.automationResultAssembly, [ResolutionContextPatchKey.resolverResult.rawValue: output])
                 }
             ),
             ContextualHomeAgent(
@@ -357,7 +357,7 @@ public enum DefaultAgentRegistryFactory {
                         memoryHints: context.memoryHints
                     )
                 },
-                makePatch: { output, _ in patch(.candidateRetrieval, [ResolutionContextPatchKey.retrievedCandidates: output]) }
+                makePatch: { output, _ in patch(.candidateRetrieval, [ResolutionContextPatchKey.retrievedCandidates.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: CandidateRankingAgent(resolver: candidateResolver),
@@ -371,11 +371,11 @@ public enum DefaultAgentRegistryFactory {
                 },
                 makePatch: { output, _ in
                     var updates: [String: any Sendable] = [
-                        ResolutionContextPatchKey.aggregation: output,
-                        ResolutionContextPatchKey.selectedCandidateIDs: output.finalCandidateIDs
+                        ResolutionContextPatchKey.aggregation.rawValue: output,
+                        ResolutionContextPatchKey.selectedCandidateIDs.rawValue: output.finalCandidateIDs
                     ]
                     if output.needsClarification {
-                        updates[ResolutionContextPatchKey.resolution] = HomeCommandResolution.needsClarification(
+                        updates[ResolutionContextPatchKey.resolution.rawValue] = HomeCommandResolution.needsClarification(
                             output.clarificationQuestion ?? "Which device do you want to control?"
                         )
                     }
@@ -392,19 +392,19 @@ public enum DefaultAgentRegistryFactory {
                         memoryHints: context.memoryHints
                     )
                 },
-                makePatch: { output, _ in patch(.candidateShard, [ResolutionContextPatchKey.selectedCandidateIDs: output.selectedCandidateIDs]) }
+                makePatch: { output, _ in patch(.candidateShard, [ResolutionContextPatchKey.selectedCandidateIDs.rawValue: output.selectedCandidateIDs]) }
             ),
             ContextualHomeAgent(
                 agent: CandidateHydrationAgent(registry: registry),
                 makeInput: { context in
                     CandidateHydrationInput(candidateIDs: context.aggregation?.finalCandidateIDs ?? context.selectedCandidateIDs)
                 },
-                makePatch: { output, _ in patch(.candidateHydration, [ResolutionContextPatchKey.hydratedCandidates: output]) }
+                makePatch: { output, _ in patch(.candidateHydration, [ResolutionContextPatchKey.hydratedCandidates.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: InstructionComposerAgent(factory: instructionFactory),
                 makeInput: finalInput,
-                makePatch: { output, _ in patch(.instructionComposer, [ResolutionContextPatchKey.instructionPackage: output]) }
+                makePatch: { output, _ in patch(.instructionComposer, [ResolutionContextPatchKey.instructionPackage.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: DraftGenerationAgent(resolver: draftResolver),
@@ -414,7 +414,7 @@ public enum DefaultAgentRegistryFactory {
                     }
                     return package
                 },
-                makePatch: { output, _ in patch(.draftGeneration, [ResolutionContextPatchKey.draft: output]) }
+                makePatch: { output, _ in patch(.draftGeneration, [ResolutionContextPatchKey.draft.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: DraftRepairAgent(resolver: draftResolver),
@@ -424,7 +424,7 @@ public enum DefaultAgentRegistryFactory {
                     }
                     return package
                 },
-                makePatch: { output, _ in patch(.draftRepair, [ResolutionContextPatchKey.draft: output.draft]) }
+                makePatch: { output, _ in patch(.draftRepair, [ResolutionContextPatchKey.draft.rawValue: output.draft]) }
             ),
             ContextualHomeAgent(
                 agent: SafetyValidationAgent(validator: commandValidator),
@@ -435,9 +435,9 @@ public enum DefaultAgentRegistryFactory {
                     return SafetyValidationInput(draft: draft, finalInput: try finalInput(context))
                 },
                 makePatch: { output, _ in
-                    var updates: [String: any Sendable] = [ResolutionContextPatchKey.resolution: output]
+                    var updates: [String: any Sendable] = [ResolutionContextPatchKey.resolution.rawValue: output]
                     if case .readyToExecute(let plan) = output {
-                        updates[ResolutionContextPatchKey.executionPlan] = plan
+                        updates[ResolutionContextPatchKey.executionPlan.rawValue] = plan
                     }
                     return patch(.safetyValidation, updates)
                 }
@@ -461,7 +461,7 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: { output, _ in
                     output
                         ? patch(.parameterValidation, [:])
-                        : patch(.parameterValidation, [ResolutionContextPatchKey.resolution: HomeCommandResolution.needsClarification("Some command values are invalid or missing.")])
+                        : patch(.parameterValidation, [ResolutionContextPatchKey.resolution.rawValue: HomeCommandResolution.needsClarification("Some command values are invalid or missing.")])
                 }
             ),
             ContextualHomeAgent(
@@ -482,7 +482,7 @@ public enum DefaultAgentRegistryFactory {
                 },
                 makePatch: { output, context in
                     if output, let draft = context.draft {
-                        return patch(.confirmationPolicy, [ResolutionContextPatchKey.resolution: HomeCommandResolution.requiresConfirmation(draft)])
+                        return patch(.confirmationPolicy, [ResolutionContextPatchKey.resolution.rawValue: HomeCommandResolution.requiresConfirmation(draft)])
                     }
                     return patch(.confirmationPolicy, [:])
                 }
@@ -500,8 +500,8 @@ public enum DefaultAgentRegistryFactory {
                     patch(
                         .executionPlanning,
                         [
-                            ResolutionContextPatchKey.executionPlan: output,
-                            ResolutionContextPatchKey.resolution: HomeCommandResolution.readyToExecute(output)
+                            ResolutionContextPatchKey.executionPlan.rawValue: output,
+                            ResolutionContextPatchKey.resolution.rawValue: HomeCommandResolution.readyToExecute(output)
                         ]
                     )
                 }
@@ -516,7 +516,7 @@ public enum DefaultAgentRegistryFactory {
                 },
                 makePatch: { output, context in
                     let plan = context.executionPlan ?? HomeAutomationExecutionPlan(steps: [], requiresConfirmation: false)
-                    return patch(.mockExecution, [ResolutionContextPatchKey.resolution: HomeCommandResolution.executed(plan, updatedDevice: output)])
+                    return patch(.mockExecution, [ResolutionContextPatchKey.resolution.rawValue: HomeCommandResolution.executed(plan, updatedDevice: output)])
                 }
             ),
             ContextualHomeAgent(
@@ -528,7 +528,7 @@ public enum DefaultAgentRegistryFactory {
                         memoryHints: $0.memoryHints
                     )
                 },
-                makePatch: { output, _ in patch(.ruleFallback, [ResolutionContextPatchKey.resolverResult: output]) }
+                makePatch: { output, _ in patch(.ruleFallback, [ResolutionContextPatchKey.resolverResult.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: BixbyFallbackAgent(mapper: bixbyMapper),
@@ -547,9 +547,9 @@ public enum DefaultAgentRegistryFactory {
                     return patch(
                         .bixbyFallback,
                         [
-                            ResolutionContextPatchKey.aggregation: aggregation,
-                            ResolutionContextPatchKey.hydratedCandidates: [first.device],
-                            ResolutionContextPatchKey.draft: first.draft
+                            ResolutionContextPatchKey.aggregation.rawValue: aggregation,
+                            ResolutionContextPatchKey.hydratedCandidates.rawValue: [first.device],
+                            ResolutionContextPatchKey.draft.rawValue: first.draft
                         ]
                     )
                 }
@@ -557,12 +557,12 @@ public enum DefaultAgentRegistryFactory {
             ContextualHomeAgent(
                 agent: UnsupportedCommandAgent(),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.unsupportedCommand, [ResolutionContextPatchKey.resolution: output]) }
+                makePatch: { output, _ in patch(.unsupportedCommand, [ResolutionContextPatchKey.resolution.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: ClarificationAgent(),
                 makeInput: { context in context.aggregation?.clarificationQuestion ?? "Which device do you want to control?" },
-                makePatch: { output, _ in patch(.clarification, [ResolutionContextPatchKey.resolution: output]) }
+                makePatch: { output, _ in patch(.clarification, [ResolutionContextPatchKey.resolution.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: ResultSummaryAgent(),
@@ -590,8 +590,8 @@ public enum DefaultAgentRegistryFactory {
         patch(
             agentID,
             [
-                ResolutionContextPatchKey.knowledgeSnippets: output.snippets,
-                ResolutionContextPatchKey.retrievalReports: output.reports
+                ResolutionContextPatchKey.knowledgeSnippets.rawValue: output.snippets,
+                ResolutionContextPatchKey.retrievalReports.rawValue: output.reports
             ]
         )
     }
@@ -639,7 +639,7 @@ public enum DefaultAgentRegistryFactory {
         var scopedUpdates: [ContextScope: [String: AnySendableValue]] = [
             .root: [
                 AutomationRuntimeContextKeys.actionResolutionAggregate.name: AnySendableValue(output),
-                ResolutionContextPatchKey.automationResolvedActions: AnySendableValue(output.resolvedActions)
+                ResolutionContextPatchKey.automationResolvedActions.rawValue: AnySendableValue(output.resolvedActions)
             ]
         ]
 

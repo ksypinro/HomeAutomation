@@ -46,7 +46,7 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
 public actor AgentEventBus {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AgentEventBus")
     private var events: [OrchestratorPipelineEvent] = []
-    private var continuations: [AsyncStream<OrchestratorPipelineEvent>.Continuation] = []
+    private var continuations: [UUID: AsyncStream<OrchestratorPipelineEvent>.Continuation] = [:]
     private var isFinished = false
 
     public init() {}
@@ -58,7 +58,7 @@ public actor AgentEventBus {
         guard !isFinished else { return }
         logger.debug("Publishing event for runID: \(event.runID, privacy: .public), stage: \(event.stage, privacy: .public), status: \(event.status.rawValue, privacy: .public)")
         events.append(event)
-        for continuation in continuations {
+        for continuation in continuations.values {
             continuation.yield(event)
         }
     }
@@ -77,15 +77,23 @@ public actor AgentEventBus {
                 continuation.finish()
                 return
             }
-            addContinuation(continuation)
+            let id = UUID()
+            self.continuations[id] = continuation
+            continuation.onTermination = { @Sendable _ in
+                Task { await self.removeContinuation(id: id) }
+            }
         }
+    }
+    
+    private func removeContinuation(id: UUID) {
+        continuations.removeValue(forKey: id)
     }
 
     /// Resets the event history and terminates active continuations.
     public func reset() {
         logger.debug("Resetting event bus. Clearing \(self.events.count, privacy: .public) events and \(self.continuations.count, privacy: .public) active continuations.")
         events = []
-        continuations = []
+        continuations = [:]
         isFinished = false
     }
 
@@ -93,13 +101,9 @@ public actor AgentEventBus {
     public func finish() {
         isFinished = true
         logger.debug("Finishing \(self.continuations.count, privacy: .public) active event stream(s).")
-        for continuation in continuations {
+        for continuation in continuations.values {
             continuation.finish()
         }
-        continuations = []
-    }
-
-    private func addContinuation(_ continuation: AsyncStream<OrchestratorPipelineEvent>.Continuation) {
-        continuations.append(continuation)
+        continuations.removeAll()
     }
 }

@@ -8,7 +8,7 @@ public struct ExecutionPlanningAgent: HomeAgent {
 
     public let id = AgentID.executionPlanning
     public let capabilities: Set<AgentCapability> = [.executionPlanning]
-    public let timeoutNanoseconds: UInt64 = 5_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let plan: @Sendable (ExecutionPlanningInput) async throws -> HomeAutomationExecutionPlan
 
     public init(plan: @escaping @Sendable (ExecutionPlanningInput) async throws -> HomeAutomationExecutionPlan) {
