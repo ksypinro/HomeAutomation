@@ -35,9 +35,17 @@ public struct DomainAgentWorkerSession: Sendable {
             logger.info("[Availability] Foundation model unavailable, using fallback.")
             return fallback
         }
-        guard modelCallPolicy.shouldUseModel(task: .domain, deterministicState: deterministicState) else {
-            logger.info("[Policy] Deterministic confidence (\(fallback.confidence, privacy: .public)) >= threshold, skipping model.")
-            return fallback
+
+        let hintText: String
+        if modelCallPolicy.shouldProvideHint(task: .domain, deterministicState: deterministicState) {
+            hintText = """
+            
+            Deterministic analysis suggests: domain=\(fallback.domain), \
+            confidence=\(fallback.confidence). Verify or correct this classification.
+            """
+            logger.info("[Hint] Providing deterministic hint to model (confidence: \(fallback.confidence, privacy: .public)).")
+        } else {
+            hintText = ""
         }
 
         let instructionsText = """
@@ -49,12 +57,13 @@ public struct DomainAgentWorkerSession: Sendable {
 
         let session = LanguageModelSession(instructions: Instructions(instructionsText))
         do {
-            let result = try await session.respond(to: Prompt(text), generating: HomeDomainClassificationResult.self).content
+            let prompt = text + hintText
+            let result = try await session.respond(to: Prompt(prompt), generating: HomeDomainClassificationResult.self).content
             logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
             return result
         } catch {
-            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public)")
-            throw error
+            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public), using deterministic fallback.")
+            return fallback
         }
     }
 }

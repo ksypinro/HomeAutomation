@@ -42,11 +42,22 @@ public struct SlotExtractionAgentWorkerSession: Sendable {
             logger.info("[Availability] Foundation model unavailable, using fallback.")
             return fallback
         }
-        let needsModelCall = modelCallPolicy.shouldUseModel(task: .slotExtraction, deterministicState: deterministicState)
-        let needsConfirmation = Self.needsModelConfirmation(fallback)
-        guard needsModelCall || needsConfirmation else {
-            logger.info("[Policy] Deterministic confidence (\(fallback.confidence, privacy: .public)) >= threshold, skipping model.")
-            return fallback
+
+        let hintText: String
+        if modelCallPolicy.shouldProvideHint(task: .slotExtraction, deterministicState: deterministicState) {
+            hintText = """
+
+            Deterministic slot extraction suggests:
+            - rooms: \(fallback.rooms)
+            - deviceNicknames: \(fallback.deviceNicknames)
+            - values: \(fallback.values.map { "\($0.name)=\($0.rawValue)" })
+            - modes: \(fallback.modes)
+            - confidence: \(fallback.confidence)
+            Verify and correct these extractions. Add any slots the deterministic analysis missed.
+            """
+            logger.info("[Hint] Providing deterministic slot hint to model (confidence: \(fallback.confidence, privacy: .public)).")
+        } else {
+            hintText = ""
         }
 
         let instructionsText = """
@@ -63,23 +74,29 @@ public struct SlotExtractionAgentWorkerSession: Sendable {
         do {
             let result: HomeSlotExtractionResult
             if let modelExtract {
-                result = try await modelExtract(modelPrompt)
+                result = try await modelExtract(modelPrompt + hintText)
             } else {
                 let session = LanguageModelSession(instructions: Instructions(instructionsText))
                 result = try await session
                     .respond(
-                        to: Prompt(modelPrompt),
+                        to: Prompt(modelPrompt + hintText),
                         generating: HomeSlotExtractionResult.self
                     )
                     .content
             }
             logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
-            return needsConfirmation
-                ? Self.confirmedFallback(fallback, with: result)
-                : result
+
+            // Post-model validation: if deterministic had high-confidence slots, cross-validate
+            let needsConfirmation = Self.needsModelConfirmation(fallback)
+            if needsConfirmation {
+                let confirmed = Self.confirmedFallback(fallback, with: result)
+                logger.debug("[PostValidation] Confirmed result after cross-validation: \(String(describing: confirmed), privacy: .public)")
+                return confirmed
+            }
+            return result
         } catch {
-            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public)")
-            throw error
+            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public), using deterministic fallback.")
+            return fallback
         }
     }
 

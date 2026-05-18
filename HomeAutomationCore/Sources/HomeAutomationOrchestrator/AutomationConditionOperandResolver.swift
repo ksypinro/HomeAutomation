@@ -1,5 +1,7 @@
 import Foundation
+import FoundationModels
 import HomeAutomationCore
+import os
 
 public struct AutomationConditionOperandResolutionRecord: Sendable, Hashable, Codable {
     public let id: String
@@ -54,11 +56,32 @@ public struct AutomationConditionResolutionOutput: Sendable, Hashable, Codable {
     }
 }
 
+/// FM output model for condition operand resolution.
+@Generable
+struct ConditionOperandFMResult: Sendable, Hashable, Codable {
+    @Guide(description: "The device ID from the provided device list.")
+    let deviceID: String
+    @Guide(description: "The SmartThings capability name (e.g. temperatureMeasurement, motionSensor, switch).")
+    let capability: String
+    @Guide(description: "The attribute name for the capability (e.g. temperature, motion, switch).")
+    let attribute: String
+    @Guide(description: "Confidence from 0.0 to 1.0.", .range(0.0...1.0))
+    let confidence: Double
+}
+
 public struct AutomationConditionOperandResolver: Sendable {
     private let registry: MockHomeDeviceRegistry
+    private let foundationModelAvailability: @Sendable () -> Bool
+    private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ConditionOperandResolver")
 
-    public init(registry: MockHomeDeviceRegistry) {
+    public init(
+        registry: MockHomeDeviceRegistry,
+        foundationModelAvailability: @escaping @Sendable () -> Bool = {
+            SystemLanguageModel.default.isAvailable
+        }
+    ) {
         self.registry = registry
+        self.foundationModelAvailability = foundationModelAvailability
     }
 
     public func resolve(_ condition: HomeAutomationCondition?) async -> HomeAutomationCondition? {
@@ -193,7 +216,7 @@ public struct AutomationConditionOperandResolver: Sendable {
         let records = await withTaskGroup(of: AutomationConditionOperandResolutionRecord.self) { group in
             for item in workItems {
                 group.addTask {
-                    let output = self.resolve(
+                    let output = await self.resolveOperand(
                         item.operand,
                         devices: devices,
                         comparison: item.comparison
@@ -274,7 +297,126 @@ public struct AutomationConditionOperandResolver: Sendable {
         return isEmpty(deviceID) || isEmpty(capability) || isEmpty(attribute)
     }
 
-    private func resolve(
+    // MARK: - Model-First Resolution
+
+    /// Resolves an operand using FM when available, with deterministic scoring as hint and fallback.
+    private func resolveOperand(
+        _ operand: HomeAutomationConditionOperand,
+        devices: [HomeCandidateRecord],
+        comparison: HomeAutomationComparisonCondition
+    ) async -> HomeAutomationConditionOperand {
+        guard case .deviceAttribute(let description, let deviceID, let capability, let attribute) = operand,
+              deviceID == nil || capability == nil || attribute == nil else {
+            return operand
+        }
+
+        // Compute deterministic result for hint and fallback
+        let deterministicResult = resolveDeterministic(
+            operand,
+            devices: devices,
+            comparison: comparison
+        )
+        logger.debug("[Deterministic] description=\(description, privacy: .public) result=\(String(describing: deterministicResult), privacy: .public)")
+
+        // If FM unavailable, use deterministic
+        guard foundationModelAvailability() else {
+            logger.info("[Availability] Foundation model unavailable, using deterministic result.")
+            return deterministicResult
+        }
+
+        // Build FM prompt
+        let deviceList = devices.map { device in
+            let caps = device.capabilities.joined(separator: ", ")
+            let room = device.room ?? "unknown"
+            return "- id=\(device.id), name=\(device.displayName), type=\(device.deviceType), room=\(room), capabilities=[\(caps)]"
+        }.joined(separator: "\n")
+
+        let comparisonContext: String
+        switch comparison.right {
+        case .literalString(let value):
+            comparisonContext = "The right-hand value is '\(value)' (string)."
+        case .literalNumber(let value, let unit):
+            comparisonContext = "The right-hand value is \(value)\(unit.map { " \($0)" } ?? "") (number)."
+        case .literalRange(let start, let end, let unit):
+            comparisonContext = "The right-hand value is between \(start) and \(end)\(unit.map { " \($0)" } ?? "") (range)."
+        default:
+            comparisonContext = ""
+        }
+
+        var hintText = ""
+        if case .deviceAttribute(_, let hintDeviceID, let hintCapability, let hintAttribute) = deterministicResult,
+           hintDeviceID != nil {
+            hintText = """
+
+            Deterministic scoring suggests: deviceID=\(hintDeviceID ?? "nil"), \
+            capability=\(hintCapability ?? "nil"), attribute=\(hintAttribute ?? "nil"). \
+            Verify or correct.
+            """
+        }
+
+        let instructionsText = """
+        Resolve a condition operand description to a specific device, capability, and attribute.
+        You MUST select a deviceID from the provided device list.
+        Select the capability that best matches the operand description and comparison context.
+        Select the attribute name for that capability.
+        """
+
+        let prompt = """
+        Operand description: "\(description)"
+        Operator: \(comparison.operatorName.rawValue)
+        \(comparisonContext)
+
+        Available devices:
+        \(deviceList)
+        \(hintText)
+        """
+
+        logger.debug("[FoundationModelInput] prompt: \(prompt.prefix(300), privacy: .public)...")
+
+        do {
+            let session = LanguageModelSession(instructions: Instructions(instructionsText))
+            let fmResult = try await session.respond(
+                to: Prompt(prompt),
+                generating: ConditionOperandFMResult.self
+            ).content
+            logger.debug("[FoundationModelOutput] result: \(String(describing: fmResult), privacy: .public)")
+
+            // Validate FM output against device registry
+            guard let matchedDevice = devices.first(where: { $0.id == fmResult.deviceID }),
+                  matchedDevice.capabilities.contains(fmResult.capability) else {
+                logger.warning("[Validation] FM result deviceID or capability not found in registry, using deterministic fallback.")
+                return deterministicResult
+            }
+
+            // Validate attribute exists for the capability
+            let validAttribute: String
+            if let definition = HomeCapabilityRegistry.definitions[fmResult.capability],
+               definition.attributeNames.contains(fmResult.attribute) {
+                validAttribute = fmResult.attribute
+            } else if let definition = HomeCapabilityRegistry.definitions[fmResult.capability],
+                      let firstAttr = definition.attributeNames.first {
+                validAttribute = firstAttr
+                logger.info("[Validation] FM attribute '\(fmResult.attribute, privacy: .public)' not found, using '\(firstAttr, privacy: .public)'.")
+            } else {
+                logger.warning("[Validation] No valid attribute for capability, using deterministic fallback.")
+                return deterministicResult
+            }
+
+            return .deviceAttribute(
+                description: description,
+                deviceID: fmResult.deviceID,
+                capability: fmResult.capability,
+                attribute: validAttribute
+            )
+        } catch {
+            logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public), using deterministic fallback.")
+            return deterministicResult
+        }
+    }
+
+    // MARK: - Deterministic Resolution (preserved as fallback/hint)
+
+    private func resolveDeterministic(
         _ operand: HomeAutomationConditionOperand,
         devices: [HomeCandidateRecord],
         comparison: HomeAutomationComparisonCondition
