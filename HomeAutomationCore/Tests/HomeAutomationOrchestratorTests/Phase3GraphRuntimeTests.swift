@@ -37,7 +37,13 @@ struct Phase3GraphRuntimeTests {
         #expect(!plan.isFallbackOnly)
         #expect(plan.graph.id == "direct-command-graph")
         #expect(plan.graph.nodes.contains { $0.id == AgentID.retrievalJudge.rawValue })
+        #expect(plan.graph.nodes.contains { node in
+            node.id == AgentID.mockExecution.rawValue &&
+                node.executionPolicy == .safetyGate &&
+                node.guardCondition == .canExecuteCommand
+        })
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.retrievalJudge.rawValue, to: AgentID.candidateRanking.rawValue)))
+        #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.executionPlanning.rawValue, to: AgentID.mockExecution.rawValue)))
         #expect(plan.graph.entryNodeIDs.contains(AgentID.language.rawValue))
     }
 
@@ -234,34 +240,26 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
-    func graphRuntimeMatchesLegacyFallbackDirectCommand() async throws {
-        let legacy = HomeCommandOrchestrator(
+    func graphRuntimeResolvesFallbackDirectCommand() async throws {
+        let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .legacy
-        )
-        let graph = HomeCommandOrchestrator(
-            deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
+            foundationModelAvailability: { false }
         )
 
-        let legacyResult = try await legacy.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
-        let graphResult = try await graph.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        let result = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
 
-        #expect(graphResult.aggregation.finalCandidateIDs == legacyResult.aggregation.finalCandidateIDs)
-        #expect(graphResult.draft == legacyResult.draft)
-        guard case .readyToExecute(let legacyPlan) = legacyResult.resolution,
-              case .readyToExecute(let graphPlan) = graphResult.resolution else {
-            Issue.record("Expected both runtimes to produce ready-to-execute resolutions.")
+        #expect(result.aggregation.finalCandidateIDs == ["bedroom_lamp"])
+        #expect(result.draft?.targetDeviceID == "bedroom_lamp")
+        guard case .readyToExecute(let plan) = result.resolution else {
+            Issue.record("Expected graph fallback to produce a ready-to-execute resolution.")
             return
         }
-        #expect(graphPlan.requiresConfirmation == legacyPlan.requiresConfirmation)
-        #expect(graphPlan.steps.map(ComparableExecutionStep.init) == legacyPlan.steps.map(ComparableExecutionStep.init))
+        #expect(!plan.requiresConfirmation)
+        #expect(plan.steps.first?.deviceID == "bedroom_lamp")
     }
 
     @Test
-    func directCommandMatrixMatchesLegacyAndGraphRuntimes() async throws {
+    func directCommandMatrixResolvesThroughGraphRuntime() async throws {
         let commands = [
             "Turn on the TV",
             "Set the bedroom lamp to 40 percent",
@@ -271,23 +269,16 @@ struct Phase3GraphRuntimeTests {
         ]
 
         for command in commands {
-            let legacy = HomeCommandOrchestrator(
+            let orchestrator = HomeCommandOrchestrator(
                 deviceRegistry: MockHomeDeviceRegistry(),
-                foundationModelAvailability: { false },
-                runtimeMode: .legacy
-            )
-            let graph = HomeCommandOrchestrator(
-                deviceRegistry: MockHomeDeviceRegistry(),
-                foundationModelAvailability: { false },
-                runtimeMode: .graph
+                foundationModelAvailability: { false }
             )
 
-            let legacyResult = try await legacy.resolve(command, executeLowRiskCommands: false)
-            let graphResult = try await graph.resolve(command, executeLowRiskCommands: false)
+            let result = try await orchestrator.resolve(command, executeLowRiskCommands: false)
+            let metrics = try #require(await orchestrator.lastMetrics())
 
-            #expect(graphResult.aggregation.finalCandidateIDs == legacyResult.aggregation.finalCandidateIDs)
-            #expect(graphResult.draft == legacyResult.draft)
-            #expect(Self.resolutionKind(graphResult.resolution) == Self.resolutionKind(legacyResult.resolution))
+            #expect(metrics.graphRun != nil)
+            #expect(Self.resolutionKind(result.resolution) != "unsupported")
         }
     }
 
@@ -295,8 +286,7 @@ struct Phase3GraphRuntimeTests {
     func graphRuntimeMetricsCaptureNodeStatusesAndSelectedAgents() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
+            foundationModelAvailability: { false }
         )
 
         _ = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
@@ -315,8 +305,7 @@ struct Phase3GraphRuntimeTests {
     func graphRuntimeRequiresConfirmationForHighRiskCommand() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
-            foundationModelAvailability: { false },
-            runtimeMode: .graph
+            foundationModelAvailability: { false }
         )
 
         let result = try await orchestrator.resolve("Unlock the front door", executeLowRiskCommands: false)
@@ -335,7 +324,6 @@ struct Phase3GraphRuntimeTests {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),
             foundationModelAvailability: { false },
-            runtimeMode: .graph,
             conversationMemory: memory
         )
 
@@ -344,6 +332,39 @@ struct Phase3GraphRuntimeTests {
 
         #expect(result.draft?.targetDeviceID == "bedroom_ac")
         #expect(result.retrievedCandidates.contains { $0.id == "bedroom_ac" })
+    }
+
+    @Test
+    func graphSchedulerSkipsMockExecutionWhenPolicyCannotExecute() async {
+        let contextStore = ResolutionContextStore(
+            request: CommandRequest(text: "turn on lamp", executeLowRiskCommands: false)
+        )
+        let result = await runMockExecutionGraph(contextStore: contextStore)
+        let context = await contextStore.snapshot()
+
+        guard case .readyToExecute = context.resolution else {
+            Issue.record("Expected skipped mock execution to preserve ready-to-execute resolution.")
+            return
+        }
+        #expect(result.metrics.nodeStatuses[AgentID.executionPlanning.rawValue] == GraphNodeRunStatus.completed)
+        #expect(result.metrics.nodeStatuses[AgentID.mockExecution.rawValue] == GraphNodeRunStatus.skipped)
+    }
+
+    @Test
+    func graphSchedulerRunsMockExecutionWhenPolicyCanExecute() async {
+        let contextStore = ResolutionContextStore(
+            request: CommandRequest(text: "turn on lamp", executeLowRiskCommands: true)
+        )
+        let result = await runMockExecutionGraph(contextStore: contextStore)
+        let context = await contextStore.snapshot()
+
+        guard case .executed(let plan, let updatedDevice) = context.resolution else {
+            Issue.record("Expected mock execution to produce executed resolution.")
+            return
+        }
+        #expect(plan.steps.first?.deviceID == "bedroom_lamp")
+        #expect(updatedDevice.id == "bedroom_lamp")
+        #expect(result.metrics.nodeStatuses[AgentID.mockExecution.rawValue] == GraphNodeRunStatus.completed)
     }
 }
 
@@ -386,6 +407,52 @@ private struct SlowSuccessGraphAgent: AnyHomeAgent {
     }
 }
 
+private struct ReadyExecutionGraphAgent: AnyHomeAgent {
+    let id = AgentID.executionPlanning
+    let capabilities: Set<AgentCapability> = [.executionPlanning]
+    let timeoutNanoseconds: UInt64 = 1_000_000_000
+
+    func run(context: ResolutionContext) async -> AgentRunResult {
+        let plan = Phase3GraphRuntimeTests.singleLampPlan()
+        return .success(
+            ResolutionContextPatch(
+                agentID: id,
+                updates: [
+                    ResolutionContextPatchKey.executionPlan.rawValue: AnySendableValue(plan),
+                    ResolutionContextPatchKey.resolution.rawValue: AnySendableValue(HomeCommandResolution.readyToExecute(plan))
+                ]
+            )
+        )
+    }
+}
+
+private struct ExecutedMockGraphAgent: AnyHomeAgent {
+    let id = AgentID.mockExecution
+    let capabilities: Set<AgentCapability> = [.execution]
+    let timeoutNanoseconds: UInt64 = 1_000_000_000
+
+    func run(context: ResolutionContext) async -> AgentRunResult {
+        let plan = context.executionPlan ?? Phase3GraphRuntimeTests.singleLampPlan()
+        let device = HomeCandidateRecord(
+            id: "bedroom_lamp",
+            displayName: "Bedroom Lamp",
+            deviceType: "light",
+            room: "bedroom",
+            capabilities: ["switch"],
+            supportedCommands: ["switch": ["on", "off"]],
+            currentState: ["switch": "on"]
+        )
+        return .success(
+            ResolutionContextPatch(
+                agentID: id,
+                updates: [
+                    ResolutionContextPatchKey.resolution.rawValue: AnySendableValue(HomeCommandResolution.executed(plan, updatedDevice: device))
+                ]
+            )
+        )
+    }
+}
+
 private struct ComparableExecutionStep: Equatable {
     let type: String
     let deviceID: String
@@ -409,6 +476,54 @@ private struct ComparableExecutionStep: Equatable {
 }
 
 private extension Phase3GraphRuntimeTests {
+    static func singleLampPlan() -> HomeAutomationExecutionPlan {
+        HomeAutomationExecutionPlan(
+            steps: [
+                HomeAutomationExecutionStep(
+                    type: "command",
+                    deviceID: "bedroom_lamp",
+                    deviceName: "Bedroom Lamp",
+                    capability: "switch",
+                    command: "on"
+                )
+            ],
+            requiresConfirmation: false
+        )
+    }
+
+    func runMockExecutionGraph(contextStore: ResolutionContextStore) async -> GraphSchedulerResult {
+        let graph = OrchestrationGraph(
+            id: "mock-execution-policy",
+            goal: .executeDeviceCommand,
+            nodes: [
+                GraphNode(id: AgentID.executionPlanning.rawValue, requirement: .byID(.executionPlanning)),
+                GraphNode(
+                    id: AgentID.mockExecution.rawValue,
+                    requirement: .byID(.mockExecution),
+                    executionPolicy: .safetyGate,
+                    guardCondition: .canExecuteCommand
+                )
+            ],
+            edges: [
+                GraphEdge(from: AgentID.executionPlanning.rawValue, to: AgentID.mockExecution.rawValue)
+            ],
+            entryNodeIDs: [AgentID.executionPlanning.rawValue]
+        )
+
+        return await GraphScheduler().execute(
+            graph,
+            registry: AgentRegistry(agents: [
+                ReadyExecutionGraphAgent(),
+                ExecutedMockGraphAgent()
+            ]),
+            contextStore: contextStore,
+            eventBus: AgentEventBus(),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            circuitBreakers: CircuitBreakerRegistry(),
+            runID: UUID()
+        )
+    }
+
     static func resolutionKind(_ resolution: HomeCommandResolution) -> String {
         switch resolution {
         case .readyToExecute:

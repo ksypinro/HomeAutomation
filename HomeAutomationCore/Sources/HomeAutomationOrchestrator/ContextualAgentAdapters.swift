@@ -74,17 +74,41 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
     /// Executes the underlying agent by converting the context into its required input,
     /// and then mapping its output back to a `ResolutionContextPatch`.
     public func run(context: ResolutionContext) async -> AgentRunResult {
+        let startedAt = Date()
         do {
             logger.debug("Generating input for agent: \(self.id.rawValue, privacy: .public)")
             let input = try makeInput(context)
+            await HomeAutomationTelemetry.shared.logAgentInput(
+                String(describing: input),
+                inputType: String(reflecting: Agent.Input.self)
+            )
             
             logger.debug("Running agent: \(self.id.rawValue, privacy: .public)")
             let output = try await agent.run(input, context: context)
+            await HomeAutomationTelemetry.shared.logAgentOutput(
+                String(describing: output),
+                outputType: String(reflecting: Agent.Output.self),
+                durationMs: Date().timeIntervalSince(startedAt) * 1_000
+            )
             
             let patch = makePatch(output, context)
+            await HomeAutomationTelemetry.shared.log(
+                "agent.patch",
+                payload: [
+                    "patch": String(describing: patch)
+                ]
+            )
             logger.debug("Agent \(self.id.rawValue, privacy: .public) produced patch successfully.")
             return .success(patch)
         } catch {
+            await HomeAutomationTelemetry.shared.log(
+                "agent.failed",
+                status: "failed",
+                durationMs: Date().timeIntervalSince(startedAt) * 1_000,
+                payload: [
+                    "error": error.localizedDescription
+                ]
+            )
             logger.error("Agent \(self.id.rawValue, privacy: .public) failed with error: \(error.localizedDescription, privacy: .public)")
             return .terminalFailure(
                 AgentFailure(
@@ -239,14 +263,10 @@ public enum DefaultAgentRegistryFactory {
                         }
                         return AutomationActionResolver(
                             registry: agentRegistry,
-                            planner: AgentPlanner(
-                                policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
-                            ),
                             graphPlanner: GraphPlanner(
                                 policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
                             ),
-                            policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability),
-                            runtimeMode: .graph
+                            policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
                         )
                     }
                 ),

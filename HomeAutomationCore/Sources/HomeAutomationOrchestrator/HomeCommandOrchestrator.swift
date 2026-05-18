@@ -32,23 +32,18 @@ private struct AutomationCreationExecutionResult: Sendable {
 public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "HomeCommandOrchestrator")
     private let registry: AgentRegistry
-    private let planner: AgentPlanner
     private let graphPlanner: GraphPlanner
     private let policy: OrchestratorPolicyEngine
-    private let runtimeMode: OrchestratorRuntimeMode
     private let metricsCollector: OrchestratorMetricsCollector
     private let conversationMemory: ConversationMemory
     private let circuitBreakers: CircuitBreakerRegistry
     private let deviceRegistry: MockHomeDeviceRegistry
     private let operationDetector: OperationDetectionWorkerSession
-    private let automationCreationResolver: AutomationCreationResolver
     private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
 
     public init(
         registry: AgentRegistry,
-        planner: AgentPlanner,
         policy: OrchestratorPolicyEngine,
-        runtimeMode: OrchestratorRuntimeMode = .graph,
         deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
@@ -60,10 +55,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         }
     ) {
         self.registry = registry
-        self.planner = planner
         self.graphPlanner = GraphPlanner(policy: policy)
         self.policy = policy
-        self.runtimeMode = runtimeMode
         self.deviceRegistry = deviceRegistry
         self.metricsCollector = metricsCollector
         self.conversationMemory = conversationMemory
@@ -75,20 +68,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         )
         self.smartThingsRuleCreator = smartThingsRuleCreator
 
-        let actionResolver = AutomationActionResolver(
-            registry: registry,
-            planner: planner,
-            graphPlanner: GraphPlanner(policy: policy),
-            policy: policy,
-            runtimeMode: runtimeMode,
-            circuitBreakers: circuitBreakers
-        )
-        self.automationCreationResolver = AutomationCreationResolver(
-            automationDraftAgent: automationDraftAgent,
-            actionResolver: actionResolver,
-            conditionOperandResolver: AutomationConditionOperandResolver(registry: deviceRegistry),
-            smartThingsRuleCreator: smartThingsRuleCreator
-        )
     }
 
     public convenience init(
@@ -98,7 +77,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
-        runtimeMode: OrchestratorRuntimeMode = .graph,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
@@ -115,9 +93,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 foundationModelAvailability: foundationModelAvailability,
                 smartThingsRuleCreator: smartThingsRuleCreator
             ),
-            planner: AgentPlanner(policy: policy),
             policy: policy,
-            runtimeMode: runtimeMode,
             deviceRegistry: deviceRegistry,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
@@ -143,7 +119,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
-        runtimeMode: OrchestratorRuntimeMode = .graph,
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         indexCache: VectorIndexCache = VectorIndexCache(),
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
@@ -158,7 +133,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             contextRetriever: retriever,
             foundationModelAvailability: foundationModelAvailability,
             foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
-            runtimeMode: runtimeMode,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
             circuitBreakers: circuitBreakers,
@@ -233,6 +207,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 }
                 let eventBus = AgentEventBus()
                 let runID = UUID()
+                let runTelemetryContext = HomeAutomationTelemetryContext(
+                    runID: runID.uuidString,
+                    stage: "input",
+                    runtimeMode: "graph"
+                )
                 let eventForwarder = Task {
                     for await event in await eventBus.stream() {
                         continuation.yield(.event(event))
@@ -246,12 +225,52 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     detail: trimmedText
                 )
                 await eventBus.publish(inputEvent)
+                await HomeAutomationTelemetry.shared.log(
+                    "run.started",
+                    context: runTelemetryContext,
+                    status: "running",
+                    payload: [
+                        "command": trimmedText,
+                        "executeLowRiskCommands": String(executeLowRiskCommands),
+                        "automationCreationMode": automationCreationOptions.mode.rawValue
+                    ]
+                )
 
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
 
-                let detectedOperation = try await operationDetector.detectOperation(trimmedText)
+                let operationDetectionContext = runTelemetryContext.merging(
+                    stage: "operationDetection",
+                    agentID: AgentID.operationDetection.rawValue
+                )
+                let operationDetectionStartedAt = Date()
+                await HomeAutomationTelemetry.shared.log(
+                    "agent.input",
+                    context: operationDetectionContext,
+                    payload: [
+                        "inputType": String(reflecting: String.self),
+                        "input": trimmedText
+                    ]
+                )
+                let detectedOperation = try await HomeAutomationTelemetryScope.$current.withValue(operationDetectionContext) {
+                    try await operationDetector.detectOperation(trimmedText)
+                }
+                await HomeAutomationTelemetry.shared.log(
+                    "agent.output",
+                    context: operationDetectionContext,
+                    status: "completed",
+                    durationMs: Date().timeIntervalSince(operationDetectionStartedAt) * 1_000,
+                    payload: [
+                        "outputType": String(reflecting: HomeOperationDetectionResult.self),
+                        "output": String(describing: detectedOperation)
+                    ]
+                )
                 let operation = Self.supportedOperation(from: detectedOperation)
+                let pipelineTelemetryContext = HomeAutomationTelemetryContext(
+                    runID: runID.uuidString,
+                    operation: operation.operation.rawValue,
+                    runtimeMode: "graph"
+                )
                 let operationEvent = OrchestratorPipelineEvent(
                     runID: runID,
                     stage: "operationDetection",
@@ -263,16 +282,33 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                 )
                 await eventBus.publish(operationEvent)
+                await HomeAutomationTelemetry.shared.log(
+                    "run.operationDetected",
+                    context: pipelineTelemetryContext.merging(
+                        stage: "operationDetection",
+                        agentID: AgentID.operationDetection.rawValue
+                    ),
+                    status: "completed",
+                    payload: [
+                        "detectedOperation": detectedOperation.operation.rawValue,
+                        "routedOperation": operation.operation.rawValue,
+                        "domain": String(describing: operation.domain),
+                        "confidence": String(operation.confidence),
+                        "reason": operation.reason
+                    ]
+                )
 
                 if operation.operation == .automationCreation {
                     let started = Date()
-                    let execution = await executeAutomationCreationPipeline(
-                        text: trimmedText,
-                        operation: operation,
-                        contextStore: contextStore,
-                        eventBus: eventBus,
-                        runID: runID
-                    )
+                    let execution = await HomeAutomationTelemetryScope.$current.withValue(pipelineTelemetryContext) {
+                        await executeAutomationCreationPipeline(
+                            text: trimmedText,
+                            operation: operation,
+                            contextStore: contextStore,
+                            eventBus: eventBus,
+                            runID: runID
+                        )
+                    }
                     let result = execution.result
                     metrics.finishedAt = Date()
                     metrics.agentTraces = await contextStore.snapshot().trace
@@ -281,7 +317,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     metrics.circuitStates = await circuitBreakers.allStatusStrings()
                     metrics.captureAutomationFields(
                         operation: operation,
-                        runtimeMode: runtimeMode,
                         graph: execution.graph,
                         result: result,
                         graphRun: execution.graphRun
@@ -295,6 +330,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         detail: result.resolution.displaySummary
                     )
                     await eventBus.publish(outcomeEvent)
+                    await HomeAutomationTelemetry.shared.log(
+                        "run.completed",
+                        context: pipelineTelemetryContext.merging(stage: "outcome"),
+                        status: "completed",
+                        durationMs: metrics.totalDuration.map { $0 * 1_000 },
+                        payload: [
+                            "outcome": metrics.outcome,
+                            "resolution": result.resolution.displaySummary
+                        ]
+                    )
                     await eventBus.finish()
                     await eventForwarder.value
                     continuation.yield(.result(result))
@@ -328,6 +373,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         detail: result.resolution.displaySummary
                     )
                     await eventBus.publish(outcomeEvent)
+                    await HomeAutomationTelemetry.shared.log(
+                        "run.completed",
+                        context: pipelineTelemetryContext.merging(stage: "outcome"),
+                        status: "completed",
+                        durationMs: metrics.totalDuration.map { $0 * 1_000 },
+                        payload: [
+                            "outcome": metrics.outcome,
+                            "resolution": result.resolution.displaySummary
+                        ]
+                    )
                     await eventBus.finish()
                     await eventForwarder.value
                     continuation.yield(.result(result))
@@ -335,30 +390,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     return
                 }
 
-                let execution = await executeDirectCommandPipeline(
-                    text: trimmedText,
-                    contextStore: contextStore,
-                    eventBus: eventBus,
-                    runID: runID
-                )
-                let exit = execution.exit
-
-                if exit == nil, policy.canExecute(context: await contextStore.snapshot()) {
-                    logger.info("Executing post-pipeline mock execution.")
-                    let scheduler = AgentScheduler(
-                        registry: registry,
+                let execution = await HomeAutomationTelemetryScope.$current.withValue(pipelineTelemetryContext) {
+                    await executeDirectCommandPipeline(
+                        text: trimmedText,
                         contextStore: contextStore,
                         eventBus: eventBus,
-                        policy: policy,
-                        circuitBreakers: circuitBreakers,
                         runID: runID
                     )
-                    _ = await scheduler.execute(
-                        AgentExecutionPlan(phases: [
-                            .sequential(AgentTask(.mockExecution))
-                        ])
-                    )
                 }
+                let exit = execution.exit
 
                 let ctx = await contextStore.snapshot()
                 let resolution = ctx.resolution ?? Self.resolution(from: exit)
@@ -393,6 +433,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     detail: result.resolution.displaySummary
                 )
                 await eventBus.publish(outcomeEvent)
+                await HomeAutomationTelemetry.shared.log(
+                    "run.completed",
+                    context: pipelineTelemetryContext.merging(stage: "outcome"),
+                    status: "completed",
+                    durationMs: metrics.totalDuration.map { $0 * 1_000 },
+                    payload: [
+                        "outcome": metrics.outcome,
+                        "resolution": result.resolution.displaySummary
+                    ]
+                )
                 await eventBus.finish()
                 await eventForwarder.value
                 continuation.yield(.result(result))
@@ -414,22 +464,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         await circuitBreakers.allStatusStrings()
     }
 
-    private func resolveAutomationCreation(
-        text: String,
-        operation: HomeOperationDetectionResult,
-        creationOptions: SmartThingsRuleCreationOptions,
-        eventBus: AgentEventBus,
-        runID: UUID
-    ) async -> HomeAutomationResolverResult {
-        await automationCreationResolver.resolve(
-            text: text,
-            operation: operation,
-            creationOptions: creationOptions,
-            eventBus: eventBus,
-            runID: runID
-        )
-    }
-
     private func executeAutomationCreationPipeline(
         text: String,
         operation: HomeOperationDetectionResult,
@@ -443,78 +477,42 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             operation: operation.operation
         ).graph
 
-        switch runtimeMode {
-        case .legacy:
-            logger.warning("Running in LEGACY mode. This mode is deprecated and will be removed.")
-            let context = await contextStore.snapshot()
-            let result = await resolveAutomationCreation(
-                text: text,
-                operation: operation,
-                creationOptions: context.request.automationCreationOptions,
-                eventBus: eventBus,
-                runID: runID
-            )
-            return AutomationCreationExecutionResult(
-                result: result,
-                graph: graph,
-                graphRun: nil
-            )
-
-        case .graph:
-            await contextStore.setScopedValue(
-                AutomationPipelineEventBridge(eventBus: eventBus, runID: runID),
-                for: AutomationRuntimeContextKeys.pipelineEventBridge
-            )
-            let schedulerResult = await GraphScheduler().execute(
-                graph,
-                registry: registry,
-                contextStore: contextStore,
-                eventBus: eventBus,
-                policy: policy,
-                circuitBreakers: circuitBreakers,
-                runID: runID
-            )
-            let context = await contextStore.snapshot()
-            let graphRun = Self.automationFanOutGraphRun(
-                from: schedulerResult.metrics,
-                context: context
-            )
-
-            if let resolution = context.resolution,
-               let state = context.resolutionState {
-                let result = HomeAutomationResolverResult(
-                    state: state,
-                    retrievedCandidates: context.retrievedCandidates,
-                    aggregation: context.aggregation ?? HomeCandidateAggregationResult(
-                        finalCandidateIDs: context.selectedCandidateIDs,
-                        needsClarification: false,
-                        confidence: 0
-                    ),
-                    hydratedCandidates: context.hydratedCandidates,
-                    draft: context.draft,
-                    resolution: resolution
-                )
-                return AutomationCreationExecutionResult(
-                    result: result,
-                    graph: graph,
-                    graphRun: graphRun
-                )
-            }
-
-            logger.warning("Automation graph did not produce a final result. Falling back to service resolver.")
-            let fallbackResult = await resolveAutomationCreation(
-                text: text,
-                operation: operation,
-                creationOptions: context.request.automationCreationOptions,
-                eventBus: eventBus,
-                runID: runID
-            )
-            return AutomationCreationExecutionResult(
-                result: fallbackResult,
-                graph: graph,
-                graphRun: graphRun
-            )
-        }
+        await contextStore.setScopedValue(
+            AutomationPipelineEventBridge(eventBus: eventBus, runID: runID),
+            for: AutomationRuntimeContextKeys.pipelineEventBridge
+        )
+        let schedulerResult = await GraphScheduler().execute(
+            graph,
+            registry: registry,
+            contextStore: contextStore,
+            eventBus: eventBus,
+            policy: policy,
+            circuitBreakers: circuitBreakers,
+            runID: runID
+        )
+        let context = await contextStore.snapshot()
+        let graphRun = Self.automationFanOutGraphRun(
+            from: schedulerResult.metrics,
+            context: context
+        )
+        let resolution = context.resolution ?? Self.resolution(from: schedulerResult.exit)
+        let result = HomeAutomationResolverResult(
+            state: context.resolutionState ?? HomeResolutionState.forOperation(text: text, operation: operation),
+            retrievedCandidates: context.retrievedCandidates,
+            aggregation: context.aggregation ?? HomeCandidateAggregationResult(
+                finalCandidateIDs: context.selectedCandidateIDs,
+                needsClarification: false,
+                confidence: 0
+            ),
+            hydratedCandidates: context.hydratedCandidates,
+            draft: context.draft,
+            resolution: resolution
+        )
+        return AutomationCreationExecutionResult(
+            result: result,
+            graph: graph,
+            graphRun: graphRun
+        )
     }
 
     private static func automationFanOutGraphRun(
@@ -548,45 +546,23 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> DirectCommandExecutionResult {
-        switch runtimeMode {
-        case .legacy:
-            logger.warning("Running in LEGACY mode. This mode is deprecated and will be removed.")
-            logger.debug("Generating legacy execution plan.")
-            let plan = planner.plan(for: text, context: await contextStore.snapshot())
-            logger.debug("Initializing AgentScheduler for runID: \(runID, privacy: .public)")
-            let scheduler = AgentScheduler(
-                registry: registry,
-                contextStore: contextStore,
-                eventBus: eventBus,
-                policy: policy,
-                circuitBreakers: circuitBreakers,
-                runID: runID
-            )
-            let exit = await scheduler.execute(plan)
-            return DirectCommandExecutionResult(
-                exit: exit,
-                fallbackUsed: plan.isFallbackOnly,
-                graphRun: nil
-            )
-        case .graph:
-            logger.debug("Generating graph execution plan.")
-            let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
-            let scheduler = GraphScheduler()
-            let result = await scheduler.execute(
-                plan.graph,
-                registry: registry,
-                contextStore: contextStore,
-                eventBus: eventBus,
-                policy: policy,
-                circuitBreakers: circuitBreakers,
-                runID: runID
-            )
-            return DirectCommandExecutionResult(
-                exit: result.exit,
-                fallbackUsed: plan.isFallbackOnly,
-                graphRun: result.metrics
-            )
-        }
+        logger.debug("Generating graph execution plan.")
+        let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
+        let scheduler = GraphScheduler()
+        let result = await scheduler.execute(
+            plan.graph,
+            registry: registry,
+            contextStore: contextStore,
+            eventBus: eventBus,
+            policy: policy,
+            circuitBreakers: circuitBreakers,
+            runID: runID
+        )
+        return DirectCommandExecutionResult(
+            exit: result.exit,
+            fallbackUsed: plan.isFallbackOnly,
+            graphRun: result.metrics
+        )
     }
 
     private static func resolution(from exit: AgentRunResult?) -> HomeCommandResolution {

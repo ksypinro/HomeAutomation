@@ -340,7 +340,6 @@ public struct OrchestratorMetrics: Sendable, Codable {
 
     public mutating func captureAutomationFields(
         operation: HomeOperationDetectionResult,
-        runtimeMode: OrchestratorRuntimeMode,
         graph: OrchestrationGraph,
         result: HomeAutomationResolverResult,
         graphRun: GraphRunMetrics? = nil
@@ -353,7 +352,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
 
         automationMetrics = OrchestratorAutomationMetrics(
             operation: operation.operation.rawValue,
-            runtimeMode: runtimeMode.rawValue,
+            runtimeMode: "graph",
             graphID: graph.id,
             automationActionCount: plan?.resolvedActions.count ?? 0,
             automationConditionCount: plan?.ruleDraft.condition.map(Self.conditionCount) ?? 0,

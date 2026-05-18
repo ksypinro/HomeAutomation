@@ -23,6 +23,30 @@ public final class AgentToolOutputSizeStore: @unchecked Sendable {
     }
 }
 
+private func startToolTelemetry<T>(toolName: String, arguments: T) async -> Date {
+    let startedAt = Date()
+    await HomeAutomationTelemetry.shared.logToolInput(
+        toolName: toolName,
+        arguments: String(describing: arguments)
+    )
+    return startedAt
+}
+
+private func finishToolTelemetry(
+    toolName: String,
+    output: String,
+    outputSizeStore: AgentToolOutputSizeStore,
+    startedAt: Date
+) async -> String {
+    outputSizeStore.record(toolName: toolName, characterCount: output.count)
+    await HomeAutomationTelemetry.shared.logToolOutput(
+        toolName: toolName,
+        output: output,
+        durationMs: Date().timeIntervalSince(startedAt) * 1_000
+    )
+    return output
+}
+
 public struct AgentFindDevicesTool: Tool {
     public let name = "findDeviceCandidates"
     public let description = "Finds smart-home device candidates by query, room, or device type."
@@ -57,6 +81,7 @@ public struct AgentFindDevicesTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         let devices = await registry.allDevices()
         let query = arguments.query.agentNormalizedHomeTokenString
         let room = arguments.room?.agentNormalizedHomeTokenString
@@ -82,12 +107,16 @@ public struct AgentFindDevicesTool: Tool {
         }
         .prefix(limit)
 
-        return recordOutput(AgentToolFormatting.records(Array(matches)))
+        return await recordOutput(AgentToolFormatting.records(Array(matches)), startedAt: startedAt)
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 
@@ -112,8 +141,9 @@ public struct AgentGetCapabilitiesTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         guard let device = await device(arguments.deviceID, in: registry) else {
-            return recordOutput(#"{"error":"device unavailable"}"#)
+            return await recordOutput(#"{"error":"device unavailable"}"#, startedAt: startedAt)
         }
 
         let payload: [[String: String]] = device.capabilities.map { capability in
@@ -137,12 +167,16 @@ public struct AgentGetCapabilitiesTool: Tool {
                 "risk": risk
             ]
         }
-        return recordOutput(AgentToolFormatting.jsonLines(payload))
+        return await recordOutput(AgentToolFormatting.jsonLines(payload), startedAt: startedAt)
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 
@@ -167,15 +201,20 @@ public struct AgentGetDeviceStateTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         guard let device = await device(arguments.deviceID, in: registry) else {
-            return recordOutput(#"{"error":"device unavailable"}"#)
+            return await recordOutput(#"{"error":"device unavailable"}"#, startedAt: startedAt)
         }
-        return recordOutput(AgentToolFormatting.dictionary(device.currentState))
+        return await recordOutput(AgentToolFormatting.dictionary(device.currentState), startedAt: startedAt)
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 
@@ -202,18 +241,23 @@ public struct AgentGetSupportedModesTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         guard let device = await device(arguments.deviceID, in: registry),
               device.capabilities.contains(arguments.capability) else {
-            return recordOutput(#"{"error":"capability unavailable"}"#)
+            return await recordOutput(#"{"error":"capability unavailable"}"#, startedAt: startedAt)
         }
 
         let modes = HomeCapabilityRegistry.definitions[arguments.capability]?.enumValues ?? device.supportedModes
-        return recordOutput(AgentToolFormatting.array(modes))
+        return await recordOutput(AgentToolFormatting.array(modes), startedAt: startedAt)
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 
@@ -242,23 +286,28 @@ public struct AgentValidateCommandTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         guard let device = await device(arguments.deviceID, in: registry) else {
-            return recordOutput(#"{"valid":false,"reason":"device unavailable"}"#)
+            return await recordOutput(#"{"valid":false,"reason":"device unavailable"}"#, startedAt: startedAt)
         }
         guard device.capabilities.contains(arguments.capability) else {
-            return recordOutput(#"{"valid":false,"reason":"capability unavailable","supportedCapabilities":"\#(device.capabilities.joined(separator: ","))"}"#)
+            return await recordOutput(#"{"valid":false,"reason":"capability unavailable","supportedCapabilities":"\#(device.capabilities.joined(separator: ","))"}"#, startedAt: startedAt)
         }
         let supportedCommands = device.supportedCommands[arguments.capability, default: []]
         guard arguments.command == "getStatus" || supportedCommands.contains(arguments.command) else {
-            return recordOutput(#"{"valid":false,"reason":"command unavailable","supportedCommands":"\#(supportedCommands.joined(separator: ","))"}"#)
+            return await recordOutput(#"{"valid":false,"reason":"command unavailable","supportedCommands":"\#(supportedCommands.joined(separator: ","))"}"#, startedAt: startedAt)
         }
         let risk = HomeCapabilityRegistry.riskLevel(for: arguments.capability)
-        return recordOutput(#"{"valid":true,"reason":"supported","risk":"\#(risk)"}"#)
+        return await recordOutput(#"{"valid":true,"reason":"supported","risk":"\#(risk)"}"#, startedAt: startedAt)
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 
@@ -283,14 +332,19 @@ public struct AgentHydrateCandidatesTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         let devices = await registry.allDevices()
         let idSet = Set(arguments.candidateIDs)
-        return recordOutput(AgentToolFormatting.records(devices.filter { idSet.contains($0.id) }))
+        return await recordOutput(AgentToolFormatting.records(devices.filter { idSet.contains($0.id) }), startedAt: startedAt)
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 
@@ -327,8 +381,9 @@ public struct AgentInspectCandidateCommandTool: Tool {
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let startedAt = await startToolTelemetry(toolName: name, arguments: arguments)
         guard let device = await device(arguments.deviceID, in: registry) else {
-            return recordOutput(#"{"valid":false,"reason":"device unavailable"}"#)
+            return await recordOutput(#"{"valid":false,"reason":"device unavailable"}"#, startedAt: startedAt)
         }
 
         let inspectedCapabilities = arguments.capability.map { [$0] } ?? device.capabilities
@@ -355,7 +410,7 @@ public struct AgentInspectCandidateCommandTool: Tool {
             ]
         }
 
-        return recordOutput(AgentToolFormatting.jsonLines(payload))
+        return await recordOutput(AgentToolFormatting.jsonLines(payload), startedAt: startedAt)
     }
 
     private func validationReason(capabilityValid: Bool, commandValid: Bool, commandProvided: Bool) -> String {
@@ -364,9 +419,13 @@ public struct AgentInspectCandidateCommandTool: Tool {
         return commandValid ? "supported" : "command unavailable"
     }
 
-    private func recordOutput(_ output: String) -> String {
-        outputSizeStore.record(toolName: name, characterCount: output.count)
-        return output
+    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+        await finishToolTelemetry(
+            toolName: name,
+            output: output,
+            outputSizeStore: outputSizeStore,
+            startedAt: startedAt
+        )
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import HomeAutomationCore
 import OSLog
 
 public actor OrchestratorMetricsCollector {
@@ -7,9 +8,24 @@ public actor OrchestratorMetricsCollector {
 
     public init() {}
 
-    public func store(_ metrics: OrchestratorMetrics) {
+    public func store(_ metrics: OrchestratorMetrics) async {
         last = metrics
         logger.info("Outcome: \(metrics.outcome)")
+        let metricsJSON: String
+        if let data = try? JSONEncoder().encode(metrics),
+           let json = String(data: data, encoding: .utf8) {
+            metricsJSON = json
+        } else {
+            metricsJSON = "<encoding failed>"
+        }
+        await HomeAutomationTelemetry.shared.log(
+            "run.metrics",
+            status: "completed",
+            payload: [
+                "outcome": metrics.outcome,
+                "metrics": metricsJSON
+            ]
+        )
     }
 
     public func lastJSON() -> String? {

@@ -63,7 +63,8 @@ public struct GraphPlanner: Sendable {
             .safetyValidation,
             .parameterValidation,
             .confirmationPolicy,
-            .executionPlanning
+            .executionPlanning,
+            .mockExecution
         ]
 
         let allAgents = phaseOne + phaseTwo + sequential
@@ -71,7 +72,8 @@ public struct GraphPlanner: Sendable {
             GraphNode(
                 id: id.rawValue,
                 requirement: .byID(id),
-                executionPolicy: executionPolicy(for: id)
+                executionPolicy: executionPolicy(for: id),
+                guardCondition: guardCondition(for: id)
             )
         }
 
@@ -171,10 +173,19 @@ public struct GraphPlanner: Sendable {
 
     private static func executionPolicy(for id: AgentID) -> NodeExecutionPolicy {
         switch id {
-        case .automationValidation, .safetyValidation, .parameterValidation, .confirmationPolicy:
+        case .automationValidation, .safetyValidation, .parameterValidation, .confirmationPolicy, .mockExecution:
             return .safetyGate
         default:
             return .required
+        }
+    }
+
+    private static func guardCondition(for id: AgentID) -> GraphGuard? {
+        switch id {
+        case .mockExecution:
+            return .canExecuteCommand
+        default:
+            return nil
         }
     }
 }

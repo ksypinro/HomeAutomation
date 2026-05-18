@@ -74,4 +74,5 @@ public enum GraphGuard: Sendable, Hashable {
     case contextKeyPresent(String)
     case contextKeyAbsent(String)
     case operationType(HomeAutomationOperationKind)
+    case canExecuteCommand
 }

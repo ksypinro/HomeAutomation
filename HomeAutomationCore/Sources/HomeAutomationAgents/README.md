@@ -67,7 +67,7 @@ flowchart TD
     D -->|clarification| F["Clarification exit"]
     D -->|unsupported| G["Unsupported exit"]
     D -->|failure| H["AgentFailure"]
-    E --> I["AgentScheduler applies patch"]
+    E --> I["GraphScheduler applies patch"]
     F --> J["Orchestrator assembles final result"]
     G --> J
     H --> K["Trace, metrics, retry/fallback policy"]
@@ -93,7 +93,7 @@ flowchart TD
 | `AgentID` | Stable identity for each agent. These IDs are used by plans, registry lookup, circuit breakers, traces, and UI dashboard rows. |
 | `AgentCapability` | Capability taxonomy used by registries and future dynamic planning. |
 | `HomeAgent` | Strongly typed agent protocol with associated `Input` and `Output`. |
-| `AnyHomeAgent` | Type-erased async agent interface consumed by `AgentScheduler`. |
+| `AnyHomeAgent` | Type-erased async agent interface consumed by `GraphScheduler`. |
 | `AgentFailure` | Structured failure with agent ID, reason, and retryability. |
 | `AgentTraceEntry` | Per-agent timing and result record. |
 | `ResolutionContext` | Shared state snapshot read by agents. |
