@@ -15,11 +15,17 @@ public struct GraphScheduler: Sendable {
         eventBus: AgentEventBus,
         policy: OrchestratorPolicyEngine,
         circuitBreakers: CircuitBreakerRegistry,
-        runID: UUID
+        runID: UUID,
+        options: GraphSchedulerExecutionOptions = GraphSchedulerExecutionOptions()
     ) async -> GraphSchedulerResult {
         logger.info("Starting graph \(graph.id, privacy: .public) for runID: \(runID, privacy: .public)")
         let metrics = GraphRunMetricsRecorder(graph: graph)
-        let validationErrors = GraphValidator().validate(graph, registry: registry)
+        let initialContext = await contextStore.snapshot()
+        let validationErrors = GraphValidator().validate(
+            graph,
+            registry: registry,
+            initialContext: initialContext
+        )
         guard validationErrors.isEmpty else {
             let detail = validationErrors.map(\.description).joined(separator: "; ")
             let failure = AgentFailure(
@@ -42,25 +48,26 @@ public struct GraphScheduler: Sendable {
             )
         }
 
-        let nodesByID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0) })
-        let dependencies = dependencyMap(for: graph)
-        var pending = Set(graph.nodes.map(\.id))
-        var completed = Set<String>()
+        let resumedNodeIDs = resumeNodeIDs(from: options.resumeFromCheckpoint, graph: graph, runID: runID)
+        var dependencies = GraphDependencyTracker(graph: graph, completedNodeIDs: resumedNodeIDs)
+        await metrics.markResumedCompleted(nodeIDs: dependencies.completedNodeIDs)
+        let guardEvaluator = GraphGuardEvaluator()
+        let agentSelector = GraphAgentSelector()
+        let retryController = GraphRetryController()
+        let safetyGateHandler = GraphSafetyGateHandler()
 
-        while !pending.isEmpty {
+        while dependencies.hasPendingNodes {
             let context = await contextStore.snapshot()
-            let candidates = graph.nodes.filter { node in
-                pending.contains(node.id) &&
-                    dependencies[node.id, default: []].isSubset(of: completed)
-            }
+            let candidates = dependencies.readyNodes(in: graph)
 
             guard !candidates.isEmpty else {
-                let blockedNodes = pending.compactMap { nodesByID[$0] }
+                let blockedNodes = dependencies.blockedNodes()
                 let allOptional = blockedNodes.allSatisfy { $0.executionPolicy == .optional }
                 if allOptional {
                     await markPendingSkipped(
-                        pending,
-                        nodesByID: nodesByID,
+                        dependencies.pendingNodeIDs,
+                        nodesByID: dependencies.nodesByID,
+                        agentSelector: agentSelector,
                         registry: registry,
                         graph: graph,
                         eventBus: eventBus,
@@ -71,7 +78,7 @@ public struct GraphScheduler: Sendable {
                     break
                 }
                 
-                let blocked = pending.sorted().joined(separator: ", ")
+                let blocked = dependencies.pendingNodeIDs.sorted().joined(separator: ", ")
                 let failure = AgentFailure(
                     agentID: AgentID("graphScheduler"),
                     reason: "No ready graph nodes. Blocked nodes: \(blocked)",
@@ -87,8 +94,9 @@ public struct GraphScheduler: Sendable {
                     )
                 )
                 await markPendingSkipped(
-                    pending,
-                    nodesByID: nodesByID,
+                    dependencies.pendingNodeIDs,
+                    nodesByID: dependencies.nodesByID,
+                    agentSelector: agentSelector,
                     registry: registry,
                     graph: graph,
                     eventBus: eventBus,
@@ -104,18 +112,25 @@ public struct GraphScheduler: Sendable {
 
             var runnable: [GraphNode] = []
             for node in candidates {
-                if evaluate(node.guardCondition, context: context, graph: graph, policy: policy) {
+                if guardEvaluator.evaluate(node.guardCondition, context: context, graph: graph, policy: policy) {
                     runnable.append(node)
                 } else {
-                    pending.remove(node.id)
-                    completed.insert(node.id)
+                    dependencies.complete(node.id)
                     await markSkipped(
                         node: node,
-                        selectedAgentID: missingAgentID(for: node),
+                        selectedAgentID: agentSelector.missingAgentID(for: node),
                         eventBus: eventBus,
                         runID: runID,
                         metrics: metrics,
                         detail: "Graph guard not satisfied"
+                    )
+                    await saveCheckpoint(
+                        options: options,
+                        graph: graph,
+                        runID: runID,
+                        dependencies: dependencies,
+                        context: await contextStore.snapshot(),
+                        lastCompletedNodeID: node.id
                     )
                 }
             }
@@ -124,12 +139,62 @@ public struct GraphScheduler: Sendable {
                 continue
             }
 
+            if let interruptNode = runnable.first(where: { options.shouldInterrupt(before: $0) }) {
+                let checkpoint = await makeCheckpoint(
+                    graph: graph,
+                    runID: runID,
+                    dependencies: dependencies,
+                    context: await contextStore.snapshot(),
+                    lastCompletedNodeID: dependencies.completedNodeIDs.sorted().last,
+                    interruptedBeforeNodeID: interruptNode.id,
+                    interrupt: interruptNode.interrupt ?? GraphInterrupt(
+                        kind: .confirmation,
+                        reason: "Caller requested interruption before \(interruptNode.id)."
+                    )
+                )
+                await options.checkpointStore?.save(checkpoint)
+                await eventBus.publish(
+                    OrchestratorPipelineEvent(
+                        runID: runID,
+                        stage: interruptNode.id,
+                        agentID: agentSelector.missingAgentID(for: interruptNode)?.rawValue,
+                        status: .skipped,
+                        detail: checkpoint.interrupt?.reason ?? "Graph interrupted"
+                    )
+                )
+                await HomeAutomationTelemetry.shared.log(
+                    "graph.interrupted",
+                    context: HomeAutomationTelemetryScope.current?.merging(
+                        runID: runID.uuidString,
+                        operation: graph.goal.rawValue,
+                        graphID: graph.id,
+                        stage: interruptNode.id,
+                        graphNodeID: interruptNode.id,
+                        runtimeMode: "graph"
+                    ),
+                    status: "paused",
+                    payload: [
+                        "interruptedBeforeNodeID": interruptNode.id,
+                        "interruptKind": checkpoint.interrupt?.kind.rawValue ?? "",
+                        "reason": checkpoint.interrupt?.reason ?? ""
+                    ]
+                )
+                return GraphSchedulerResult(
+                    exit: nil,
+                    metrics: await metrics.finish(),
+                    interruption: checkpoint
+                )
+            }
+
             let firstExit = await withTaskGroup(of: GraphNodeOutcome.self) { group in
                 for node in runnable {
                     group.addTask {
                         await self.runNode(
                             node,
                             graph: graph,
+                            agentSelector: agentSelector,
+                            retryController: retryController,
+                            safetyGateHandler: safetyGateHandler,
                             registry: registry,
                             context: context,
                             contextStore: contextStore,
@@ -144,8 +209,15 @@ public struct GraphScheduler: Sendable {
 
                 var firstExit: AgentRunResult?
                 for await outcome in group {
-                    pending.remove(outcome.nodeID)
-                    completed.insert(outcome.nodeID)
+                    dependencies.complete(outcome.nodeID)
+                    await saveCheckpoint(
+                        options: options,
+                        graph: graph,
+                        runID: runID,
+                        dependencies: dependencies,
+                        context: await contextStore.snapshot(),
+                        lastCompletedNodeID: outcome.nodeID
+                    )
                     if firstExit == nil, let exit = outcome.exit {
                         firstExit = exit
                     }
@@ -155,8 +227,9 @@ public struct GraphScheduler: Sendable {
 
             if let firstExit {
                 await markPendingSkipped(
-                    pending,
-                    nodesByID: nodesByID,
+                    dependencies.pendingNodeIDs,
+                    nodesByID: dependencies.nodesByID,
+                    agentSelector: agentSelector,
                     registry: registry,
                     graph: graph,
                     eventBus: eventBus,
@@ -169,12 +242,107 @@ public struct GraphScheduler: Sendable {
         }
 
         logger.info("Graph \(graph.id, privacy: .public) completed without terminal exit.")
+        await saveCheckpoint(
+            options: options,
+            graph: graph,
+            runID: runID,
+            dependencies: dependencies,
+            context: await contextStore.snapshot(),
+            lastCompletedNodeID: dependencies.completedNodeIDs.sorted().last
+        )
         return GraphSchedulerResult(exit: nil, metrics: await metrics.finish())
+    }
+
+    private func resumeNodeIDs(
+        from checkpoint: GraphCheckpointRecord?,
+        graph: OrchestrationGraph,
+        runID: UUID
+    ) -> Set<String> {
+        guard let checkpoint,
+              checkpoint.runID == runID.uuidString,
+              checkpoint.graphID == graph.id else {
+            return []
+        }
+        return Set(checkpoint.completedNodeIDs)
+    }
+
+    private func saveCheckpoint(
+        options: GraphSchedulerExecutionOptions,
+        graph: OrchestrationGraph,
+        runID: UUID,
+        dependencies: GraphDependencyTracker,
+        context: ResolutionContext,
+        lastCompletedNodeID: String?
+    ) async {
+        guard let checkpointStore = options.checkpointStore else { return }
+        let checkpoint = await makeCheckpoint(
+            graph: graph,
+            runID: runID,
+            dependencies: dependencies,
+            context: context,
+            lastCompletedNodeID: lastCompletedNodeID
+        )
+        await checkpointStore.save(checkpoint)
+    }
+
+    private func makeCheckpoint(
+        graph: OrchestrationGraph,
+        runID: UUID,
+        dependencies: GraphDependencyTracker,
+        context: ResolutionContext,
+        lastCompletedNodeID: String?,
+        interruptedBeforeNodeID: String? = nil,
+        interrupt: GraphInterrupt? = nil
+    ) async -> GraphCheckpointRecord {
+        GraphCheckpointRecord(
+            runID: runID.uuidString,
+            graphID: graph.id,
+            goal: graph.goal.rawValue,
+            completedNodeIDs: Array(dependencies.completedNodeIDs),
+            pendingNodeIDs: Array(dependencies.pendingNodeIDs),
+            lastCompletedNodeID: lastCompletedNodeID,
+            interruptedBeforeNodeID: interruptedBeforeNodeID,
+            interrupt: interrupt,
+            contextKeys: contextKeys(in: context)
+        )
+    }
+
+    private func contextKeys(in context: ResolutionContext) -> [String] {
+        var keys: [String] = ["request.text", "request.executeLowRiskCommands"]
+        if context.operation != nil { keys.append(ResolutionContextPatchKey.operation.rawValue) }
+        if context.language != nil { keys.append(ResolutionContextPatchKey.language.rawValue) }
+        if context.domain != nil { keys.append(ResolutionContextPatchKey.domain.rawValue) }
+        if context.intent != nil { keys.append(ResolutionContextPatchKey.intent.rawValue) }
+        if context.deviceType != nil { keys.append(ResolutionContextPatchKey.deviceType.rawValue) }
+        if context.slots != nil { keys.append(ResolutionContextPatchKey.slots.rawValue) }
+        if context.risk != nil { keys.append(ResolutionContextPatchKey.risk.rawValue) }
+        if context.resolutionState != nil { keys.append(ResolutionContextPatchKey.resolutionState.rawValue) }
+        if !context.retrievedCandidates.isEmpty { keys.append(ResolutionContextPatchKey.retrievedCandidates.rawValue) }
+        if !context.selectedCandidateIDs.isEmpty { keys.append(ResolutionContextPatchKey.selectedCandidateIDs.rawValue) }
+        if context.aggregation != nil { keys.append(ResolutionContextPatchKey.aggregation.rawValue) }
+        if !context.hydratedCandidates.isEmpty { keys.append(ResolutionContextPatchKey.hydratedCandidates.rawValue) }
+        if context.capabilityDecision != nil { keys.append(ResolutionContextPatchKey.capabilityDecision.rawValue) }
+        if !context.knowledgeSnippets.isEmpty { keys.append(ResolutionContextPatchKey.knowledgeSnippets.rawValue) }
+        if !context.retrievalReports.isEmpty { keys.append(ResolutionContextPatchKey.retrievalReports.rawValue) }
+        if !context.memoryHints.isEmpty { keys.append("memoryHints") }
+        if context.instructionPackage != nil { keys.append(ResolutionContextPatchKey.instructionPackage.rawValue) }
+        if context.draft != nil { keys.append(ResolutionContextPatchKey.draft.rawValue) }
+        if context.executionPlan != nil { keys.append(ResolutionContextPatchKey.executionPlan.rawValue) }
+        if context.resolution != nil { keys.append(ResolutionContextPatchKey.resolution.rawValue) }
+        for (scope, values) in context.scopedValues {
+            for key in values.keys {
+                keys.append("scope.\(scope.description).\(key)")
+            }
+        }
+        return keys
     }
 
     private func runNode(
         _ node: GraphNode,
         graph: OrchestrationGraph,
+        agentSelector: GraphAgentSelector,
+        retryController: GraphRetryController,
+        safetyGateHandler: GraphSafetyGateHandler,
         registry: AgentRegistry,
         context: ResolutionContext,
         contextStore: ResolutionContextStore,
@@ -184,7 +352,7 @@ public struct GraphScheduler: Sendable {
         runID: UUID,
         metrics: GraphRunMetricsRecorder
     ) async -> GraphNodeOutcome {
-        let selection = selectAgent(for: node, graph: graph, registry: registry)
+        let selection = agentSelector.selectAgent(for: node, graph: graph, registry: registry)
         guard let selection else {
             await markSkipped(
                 node: node,
@@ -195,9 +363,9 @@ public struct GraphScheduler: Sendable {
                 detail: "Agent unavailable"
             )
 
-            if let missingID = missingAgentID(for: node),
+            if let missingID = agentSelector.missingAgentID(for: node),
                policy.isMandatorySafetyGate(missingID) || node.executionPolicy == .safetyGate {
-                let exit = await failClosed(
+                let exit = await safetyGateHandler.failClosed(
                     for: missingID,
                     reason: "agent unavailable",
                     context: context,
@@ -240,8 +408,8 @@ public struct GraphScheduler: Sendable {
                 metrics: metrics,
                 detail: "Circuit breaker open"
             )
-            if isSafetyGate(node: node, agentID: agentID, manifest: selection.manifest, policy: policy) {
-                let exit = await failClosed(
+            if safetyGateHandler.isSafetyGate(node: node, agentID: agentID, manifest: selection.manifest, policy: policy) {
+                let exit = await safetyGateHandler.failClosed(
                     for: agentID,
                     reason: "circuit breaker open",
                     context: context,
@@ -345,8 +513,7 @@ public struct GraphScheduler: Sendable {
                 )
             )
             
-            if case .retryableFailure(let failure) = result,
-               policy.shouldRetry(failure: failure, attemptCount: attemptCount) {
+            if retryController.shouldRetry(result: result, policy: policy, attemptCount: attemptCount) {
                 logger.info("Retrying agent \(agentID.rawValue, privacy: .public) (attempt \(attemptCount + 1))")
                 continue
             }
@@ -378,12 +545,12 @@ public struct GraphScheduler: Sendable {
             endedAt: end
         )
 
-        if isSafetyGate(node: node, agentID: agentID, manifest: selection.manifest, policy: policy) {
+        if safetyGateHandler.isSafetyGate(node: node, agentID: agentID, manifest: selection.manifest, policy: policy) {
             switch result {
             case .success:
                 break
             default:
-                let exit = await failClosed(
+                let exit = await safetyGateHandler.failClosed(
                     for: agentID,
                     reason: "mandatory gate failed",
                     context: await contextStore.snapshot(),
@@ -405,54 +572,6 @@ public struct GraphScheduler: Sendable {
         return GraphNodeOutcome(nodeID: node.id, exit: nil)
     }
 
-    private func selectAgent(
-        for node: GraphNode,
-        graph: OrchestrationGraph,
-        registry: AgentRegistry
-    ) -> GraphAgentSelection? {
-        switch node.requirement {
-        case .byID(let id):
-            guard let agent = registry.agent(for: id) else {
-                return nil
-            }
-            let manifest = registry.manifest(for: id) ?? agent.manifest
-            if let operation = operationKind(for: graph.goal),
-               !manifest.supportedOperations.contains(operation) {
-                return nil
-            }
-            return GraphAgentSelection(agent: agent, manifest: manifest)
-        case .byCapability(let capability):
-            let candidates: [any AnyHomeAgent]
-            if let operation = operationKind(for: graph.goal) {
-                candidates = registry.agents(for: capability, operation: operation)
-            } else {
-                candidates = registry.agents(for: capability)
-            }
-            guard let agent = candidates.first else {
-                return nil
-            }
-            return GraphAgentSelection(agent: agent, manifest: registry.manifest(for: agent.id) ?? agent.manifest)
-        }
-    }
-
-    private func missingAgentID(for node: GraphNode) -> AgentID? {
-        if case .byID(let id) = node.requirement {
-            return id
-        }
-        return nil
-    }
-
-    private func isSafetyGate(
-        node: GraphNode,
-        agentID: AgentID,
-        manifest: AgentManifest,
-        policy: OrchestratorPolicyEngine
-    ) -> Bool {
-        node.executionPolicy == .safetyGate ||
-            manifest.safetyRole != .none ||
-            policy.isMandatorySafetyGate(agentID)
-    }
-
     private func record(result: AgentRunResult, breaker: AgentCircuitBreaker, registry: CircuitBreakerRegistry) async {
         switch result {
         case .success, .clarification, .unsupported:
@@ -461,20 +580,6 @@ public struct GraphScheduler: Sendable {
             await breaker.recordFailure()
         }
         await registry.persist()
-    }
-
-    private func failClosed(
-        for agentID: AgentID,
-        reason: String,
-        context: ResolutionContext,
-        contextStore: ResolutionContextStore,
-        policy: OrchestratorPolicyEngine
-    ) async -> AgentRunResult {
-        let result = policy.failClosedResult(for: agentID, reason: reason, context: context)
-        if case .success(let patch) = result {
-            await contextStore.apply(patch)
-        }
-        return result
     }
 
     private func shouldStopAfterContextResolution(_ context: ResolutionContext, after agentID: AgentID) -> Bool {
@@ -486,99 +591,6 @@ public struct GraphScheduler: Sendable {
             return true
         case .readyToExecute:
             return agentID == .ruleFallback || agentID == .bixbyFallback
-        }
-    }
-
-    private func evaluate(
-        _ guardCondition: GraphGuard?,
-        context: ResolutionContext,
-        graph: OrchestrationGraph,
-        policy: OrchestratorPolicyEngine
-    ) -> Bool {
-        guard let guardCondition else {
-            return true
-        }
-        switch guardCondition {
-        case .contextKeyPresent(let key):
-            return contextHasValue(key, context: context)
-        case .contextKeyAbsent(let key):
-            return !contextHasValue(key, context: context)
-        case .operationType(let operation):
-            return operationKind(for: graph.goal) == operation
-        case .canExecuteCommand:
-            return policy.canExecute(context: context)
-        }
-    }
-
-    private func contextHasValue(_ key: String, context: ResolutionContext) -> Bool {
-        switch key {
-        case "request.text":
-            return !context.request.text.isEmpty
-        case ResolutionContextPatchKey.language.rawValue:
-            return context.language != nil
-        case ResolutionContextPatchKey.operation.rawValue:
-            return context.operation != nil
-        case ResolutionContextPatchKey.domain.rawValue:
-            return context.domain != nil
-        case ResolutionContextPatchKey.intent.rawValue:
-            return context.intent != nil
-        case ResolutionContextPatchKey.deviceType.rawValue:
-            return context.deviceType != nil
-        case ResolutionContextPatchKey.slots.rawValue:
-            return context.slots != nil
-        case ResolutionContextPatchKey.risk.rawValue:
-            return context.risk != nil
-        case ResolutionContextPatchKey.resolutionState.rawValue:
-            return context.resolutionState != nil
-        case ResolutionContextPatchKey.retrievedCandidates.rawValue:
-            return !context.retrievedCandidates.isEmpty
-        case ResolutionContextPatchKey.selectedCandidateIDs.rawValue:
-            return !context.selectedCandidateIDs.isEmpty
-        case ResolutionContextPatchKey.aggregation.rawValue:
-            return context.aggregation != nil
-        case ResolutionContextPatchKey.hydratedCandidates.rawValue:
-            return !context.hydratedCandidates.isEmpty
-        case ResolutionContextPatchKey.knowledgeSnippets.rawValue:
-            return !context.knowledgeSnippets.isEmpty
-        case ResolutionContextPatchKey.retrievalReports.rawValue:
-            return !context.retrievalReports.isEmpty
-        case ResolutionContextPatchKey.instructionPackage.rawValue:
-            return context.instructionPackage != nil
-        case ResolutionContextPatchKey.draft.rawValue:
-            return context.draft != nil
-        case ResolutionContextPatchKey.executionPlan.rawValue:
-            return context.executionPlan != nil
-        case ResolutionContextPatchKey.resolution.rawValue:
-            return context.resolution != nil
-        case ResolutionContextPatchKey.automationDraft.rawValue:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationDraft.rawValue] != nil
-        case ResolutionContextPatchKey.automationResolvedActions.rawValue:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationResolvedActions.rawValue] != nil
-        case ResolutionContextPatchKey.automationValidation.rawValue:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationValidation.rawValue] != nil
-        case ResolutionContextPatchKey.smartThingsRule.rawValue:
-            return context.scopedValues[.backend("smartthings")]?[ResolutionContextPatchKey.smartThingsRule.rawValue] != nil
-        case ResolutionContextPatchKey.automationPlan.rawValue:
-            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationPlan.rawValue] != nil
-        default:
-            return false
-        }
-    }
-
-    private func operationKind(for goal: OrchestrationGoal) -> HomeAutomationOperationKind? {
-        switch goal {
-        case .executeDeviceCommand:
-            return .executeDeviceCommand
-        case .automationCreation:
-            return .automationCreation
-        case .unsupported:
-            return nil
-        }
-    }
-
-    private func dependencyMap(for graph: OrchestrationGraph) -> [String: Set<String>] {
-        graph.edges.reduce(into: [:]) { partial, edge in
-            partial[edge.to, default: []].insert(edge.from)
         }
     }
 
@@ -605,6 +617,7 @@ public struct GraphScheduler: Sendable {
     private func markPendingSkipped(
         _ pending: Set<String>,
         nodesByID: [String: GraphNode],
+        agentSelector: GraphAgentSelector,
         registry: AgentRegistry,
         graph: OrchestrationGraph,
         eventBus: AgentEventBus,
@@ -614,7 +627,7 @@ public struct GraphScheduler: Sendable {
     ) async {
         for nodeID in pending.sorted() {
             guard let node = nodesByID[nodeID] else { continue }
-            let agentID = selectAgent(for: node, graph: graph, registry: registry)?.agent.id
+            let agentID = agentSelector.selectAgent(for: node, graph: graph, registry: registry)?.agent.id
             await markSkipped(
                 node: node,
                 selectedAgentID: agentID,
@@ -690,7 +703,7 @@ public struct GraphScheduler: Sendable {
     }
 }
 
-private struct GraphAgentSelection: Sendable {
+struct GraphAgentSelection: Sendable {
     let agent: any AnyHomeAgent
     let manifest: AgentManifest
 }
@@ -713,6 +726,12 @@ private actor GraphRunMetricsRecorder {
             goal: graph.goal,
             nodeStatuses: nodeStatuses
         )
+    }
+
+    func markResumedCompleted(nodeIDs: Set<String>) {
+        for nodeID in nodeIDs {
+            metrics.nodeStatuses[nodeID] = .completed
+        }
     }
 
     func markRunning(nodeID: String, agentID: AgentID, startedAt: Date) {

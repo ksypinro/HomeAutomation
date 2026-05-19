@@ -18,6 +18,7 @@ flowchart TB
 
     subgraph Groups["Agent Groups"]
         NLU["NLU"]
+        OperationDetection["OperationDetection"]
         Knowledge["Knowledge + Retrieval Judge"]
         Candidates["Candidates"]
         Draft["Draft"]
@@ -45,16 +46,67 @@ flowchart TB
 ```text
 HomeAutomationAgents/
 |-- Protocols/
+|-- Runtime/
+|-- OperationDetection/
+|   |-- OperationDetectionAgent.swift
+|   |-- OperationDetectionWorkerSession.swift
+|   |-- HomeOperationDetectionService.swift
+|   `-- Tools/
 |-- NLU/
+|   |-- Domain/
+|   |-- Language/
+|   |-- IntentFamily/
+|   |-- DeviceType/
+|   |   `-- Tools/
+|   |-- SlotExtraction/
+|   |-- RiskClassification/
+|   `-- Shared/
+|-- AutomationRuntime/
+|-- AutomationDraftExtraction/
+|-- AutomationActionResolution/
+|-- AutomationConditionOperandResolution/
+|-- AutomationResultAssembly/
+|-- SmartThingsCompilation/
+|-- SmartThingsRuleCreation/
 |-- Knowledge/
+|   |-- Bixby/
+|   |-- Capability/
+|   |-- CommandExample/
+|   |-- RetrievalJudge/
+|   `-- Support/
 |-- Candidates/
+|   |-- Retrieval/
+|   |-- Ranking/
+|   |-- Shard/
+|   |-- Hydration/
+|   `-- Support/
 |-- Draft/
+|   |-- InstructionComposer/
+|   |-- DraftGeneration/
+|   |-- DraftRepair/
+|   |-- Resolver/
+|   |-- Tools/
+|   `-- Types/
 |-- Safety/
+|   |-- Validation/
+|   |-- ParameterValidation/
+|   |-- ConfirmationPolicy/
+|   `-- Support/
 |-- Execution/
+|   |-- Planning/
+|   |-- Mock/
+|   `-- Support/
 |-- Fallback/
+|   |-- Rule/
+|   |-- Bixby/
+|   `-- Unsupported/
 |-- Response/
+|   |-- Clarification/
+|   `-- ResultSummary/
 `-- RAG/
 ```
+
+The directory layout intentionally separates agent boundaries from shared support code. Multi-agent domains such as `NLU`, `Candidates`, `Draft`, `Knowledge`, `Safety`, `Execution`, and `Fallback` use one subfolder per agent responsibility, while cross-agent DTOs and deterministic helpers live under `Support`, `Shared`, `Types`, or `Runtime`. Foundation Models tools are kept in `Tools` folders instead of being embedded in worker/session or resolver files.
 
 ## Agent Flow
 
@@ -77,7 +129,11 @@ flowchart TD
 
 | Group | Agents | Responsibility |
 | --- | --- | --- |
+| Runtime | `AgentEventBus`, `ResolutionContextPatchKey` | Shared agent runtime utilities and patch/event types used by graph execution. |
+| OperationDetection | `OperationDetectionAgent` | Classifies the requested operation, such as direct device command vs automation creation, using a Foundation Model-backed worker with semantic analyzer fallback. |
 | NLU | `LanguageAgent`, `DomainAgent`, `IntentFamilyAgent`, `DeviceTypeAgent`, `SlotExtractionAgent`, `RiskClassificationAgent` | Extract parallel language, domain, intent, device, slot, and risk signals from the user command. |
+| Automation | `AutomationDraftExtractionAgent`, `AutomationActionResolutionAgent`, `AutomationConditionOperandResolutionAgent`, `AutomationResultAssemblyAgent` | Extract automation drafts, resolve action/condition sub-work, and assemble final automation outcomes. |
+| SmartThings | `SmartThingsCompilationAgent`, `SmartThingsRuleCreationAgent` | Compile SmartThings Rule JSON and optionally call the SmartThings rule creation backend. |
 | Knowledge | `CapabilityKnowledgeAgent`, `BixbyKnowledgeAgent`, `CommandExampleAgent`, `RetrievalJudgeAgent` | Retrieve relevant context, hydrate canonical capability/Bixby/example facts, and report or retry weak retrieval. |
 | Candidates | `CandidateRetrievalAgent`, `CandidateRankingAgent`, `CandidateShardAgent`, `CandidateHydrationAgent` | Find, scope, rank, shard, and hydrate candidate devices/routines. |
 | Draft | `InstructionComposerAgent`, `DraftGenerationAgent`, `DraftRepairAgent` | Build prompt/tool packages and produce or repair `HomeCommandDraft` values. |
@@ -109,6 +165,9 @@ flowchart TD
 
 | Component | Role |
 | --- | --- |
+| `OperationDetectionAgent` | Produces `HomeOperationDetectionResult` for orchestration routing. |
+| `OperationDetectionWorkerSession` | Foundation Models worker session owned by `OperationDetectionAgent`; can call `OperationSemanticAnalyzerTool` for deterministic semantic grounding. |
+| `HomeOperationDetectionService` | Deterministic semantic analyzer used as the operation-detection fallback and optional model tool. |
 | `LanguageAgentWorkerSession` | Foundation Models worker session owned by `LanguageAgent`, with deterministic parser fallback. |
 | `DomainAgentWorkerSession` | Foundation Models worker session owned by `DomainAgent`, with deterministic parser fallback. |
 | `IntentFamilyAgentWorkerSession` | Foundation Models worker session owned by `IntentFamilyAgent`, with deterministic parser fallback. |

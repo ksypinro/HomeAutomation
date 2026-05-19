@@ -27,6 +27,8 @@ The central safety rule is that model output and memory hints are advisory. Dete
 
 ## 3. High-Level Architecture
 
+Current architecture source of truth: orchestration is graph-only. `HomeCommandOrchestrator` runs `root-command-graph` first, then `GraphPlanner`, `OperationGraphCatalog`, and `GraphScheduler` own operation-specific execution.
+
 ```mermaid
 flowchart TB
     User["User"]
@@ -36,8 +38,9 @@ flowchart TB
     Orchestrator["HomeCommandOrchestrator"]
 
     subgraph OrchestratorLayer["HomeAutomationOrchestrator"]
-        Planner["AgentPlanner"]
-        Scheduler["AgentScheduler"]
+        Planner["GraphPlanner"]
+        Catalog["OperationGraphCatalog"]
+        Scheduler["GraphScheduler"]
         Registry["AgentRegistry"]
         ContextStore["ResolutionContextStore"]
         EventBus["AgentEventBus"]
@@ -116,6 +119,7 @@ flowchart TB
 
     User --> App --> View --> VM --> Orchestrator
     Orchestrator --> Planner
+    Planner --> Catalog
     Orchestrator --> Scheduler
     Orchestrator --> ContextStore
     Orchestrator --> EventBus
@@ -197,14 +201,15 @@ flowchart TD
     C --> D["Create CommandRequest and ResolutionContextStore"]
     D --> E["Attach ConversationMemory hint when text references prior context"]
     E --> F["Emit input event"]
-    F --> G{"Foundation Models available?"}
+    F --> ROOT["Root command graph: OperationDetectionAgent"]
+    ROOT --> G{"Detected operation and model policy"}
 
-    G -->|No| H["Fallback-only plan"]
+    G -->|Direct command + models unavailable| H["Fallback graph"]
     H --> H1["RuleFallbackAgent"]
     H1 --> H2["BixbyFallbackAgent"]
     H2 --> H3["UnsupportedCommandAgent if needed"]
 
-    G -->|Yes| I["Full agent plan"]
+    G -->|Direct command + models available| I["Direct command graph"]
     I --> J["Run NLU agents in parallel"]
     J --> K["Merge language, domain, intent, device type, slot, and risk patches"]
     K --> L["Run NLU-informed knowledge agents and candidate retrieval in parallel"]
@@ -220,13 +225,23 @@ flowchart TD
     U --> V["ConfirmationPolicyAgent"]
     V --> W["ExecutionPlanningAgent"]
     W --> X{"Can execute low-risk commands?"}
-    X -->|Yes| Y["Post-pipeline MockExecutionAgent"]
+    X -->|Yes| Y["MockExecutionAgent graph node"]
     X -->|No| YA["Return ready/confirmation/query result"]
+
+    G -->|Automation creation| AUTO["Automation creation graph"]
+    AUTO --> AD["AutomationDraftAgent"]
+    AD --> AR["Action and condition resolution in parallel"]
+    AR --> AV["AutomationValidationAgent"]
+    AV --> ST["SmartThingsCompilationAgent"]
+    ST --> ASSEMBLE["AutomationResultAssemblyAgent"]
+
+    G -->|Unsupported operation| H3
 
     H3 --> Z["Assemble resolver result"]
     P --> Z
     Y --> Z
     YA --> Z
+    ASSEMBLE --> Z
     Z --> AA["Store metrics, append memory turn, emit outcome"]
 ```
 
@@ -238,7 +253,7 @@ sequenceDiagram
     participant View as HomeAutomationView
     participant VM as HomeAutomationViewModel
     participant Orch as HomeCommandOrchestrator
-    participant Scheduler as AgentScheduler
+    participant Scheduler as GraphScheduler
     participant Agents as Specialist Agents
     participant Core as Core Registries and Policies
     participant RAG as ContextRetriever
@@ -248,8 +263,8 @@ sequenceDiagram
     View->>VM: resolveCommand()
     VM->>Orch: resolveStream(text, executeLowRiskCommands)
     Orch-->>VM: OrchestratorPipelineEvent(input)
-    Orch->>Scheduler: execute(AgentExecutionPlan)
-    Scheduler->>Agents: Run sequential/parallel agent phases
+    Orch->>Scheduler: execute(OrchestrationGraph)
+    Scheduler->>Agents: Run ready DAG nodes
     Agents->>RAG: Retrieve relevant examples, capabilities, devices, or Bixby context
     Agents->>Core: Hydrate canonical devices, capabilities, commands, risk, and parameters
     Agents-->>Scheduler: ResolutionContextPatch or terminal result
@@ -262,7 +277,7 @@ sequenceDiagram
 
 ## 7. Context Model
 
-`ResolutionContext` is the central mutable-by-patch state object. Agents do not mutate it directly; they return `ResolutionContextPatch` values and `AgentScheduler` applies those patches through `ResolutionContextStore`.
+`ResolutionContext` is the central mutable-by-patch state object. Agents do not mutate it directly; they return `ResolutionContextPatch` values and `GraphScheduler` applies those patches through `ResolutionContextStore`.
 
 | Field | Purpose |
 | --- | --- |
@@ -316,15 +331,18 @@ The implemented system has 27 specialist agents.
 | 26 | `ClarificationAgent` | Response | Converts ambiguity into a user-facing clarification result. |
 | 27 | `ResultSummaryAgent` | Response | Formats final result summaries from `HomeCommandResolution`. |
 
-## 9. Agent Execution Plan
+## 9. Graph Execution Plan
 
-`AgentPlanner` builds one of two plan shapes:
+`GraphPlanner` builds operation-specific DAGs. `HomeCommandOrchestrator` first executes the root routing graph, then executes the graph selected for the detected operation:
 
 ```text
-Fallback-only:
+Root routing:
+OperationDetectionAgent
+
+Fallback graph:
 RuleFallbackAgent -> BixbyFallbackAgent -> UnsupportedCommandAgent
 
-Full model path:
+Direct command graph:
 Parallel NLU group
 -> Parallel knowledge/candidate retrieval group
 -> RetrievalJudgeAgent
@@ -336,10 +354,18 @@ Parallel NLU group
 -> ParameterValidationAgent
 -> ConfirmationPolicyAgent
 -> ExecutionPlanningAgent
--> post-pipeline MockExecutionAgent when policy permits execution
+-> MockExecutionAgent when policy permits execution
+
+Automation creation graph:
+AutomationDraftAgent
+-> AutomationConditionOperandResolutionAgent + AutomationActionResolutionAgent
+-> AutomationValidationAgent
+-> SmartThingsCompilationAgent
+-> SmartThingsRuleCreationAgent
+-> AutomationResultAssemblyAgent
 ```
 
-The full plan can still reach fallback or terminal results through agent outputs, policy checks, and deterministic safety behavior.
+Every command path is graph-owned. The direct command graph still reaches fallback or terminal results through graph nodes, agent outputs, policy checks, and deterministic safety behavior.
 
 ## 10. RAG Architecture
 
@@ -716,11 +742,11 @@ HomeAutomation/
 | --- | --- |
 | `OrchestratorUpdate` | Stream update enum: event or final result. |
 | `HomeCommandOrchestrator` | Main orchestrated resolver. |
-| `AgentTask` | One planned agent call. |
-| `AgentPhase` | Sequential or parallel plan phase. |
-| `AgentExecutionPlan` | Ordered plan of phases. |
-| `AgentPlanner` | Builds fallback-only or full model execution plan. |
-| `AgentScheduler` | Runs agents, handles circuit checks, applies patches, emits events, and fails closed. |
+| `GraphExecutionPlan` | Selected operation graph plus fallback metadata. |
+| `OrchestrationGraph` | DAG of graph nodes, dependencies, guards, and execution policies. |
+| `GraphPlanner` | Builds root routing, direct command, fallback, automation creation, and unsupported graphs. |
+| `OperationGraphCatalog` | Maps operation kinds to graph providers. |
+| `GraphScheduler` | Runs graph nodes, handles circuit checks, applies patches, emits events, and fails closed. |
 | `AgentRegistry` | Stores type-erased agents by identity/capability. |
 | `ContextualHomeAgent` | Adapts a typed `HomeAgent` into `AnyHomeAgent` with context input and patch mapping. |
 | `DefaultAgentRegistryFactory` | Wires default agent implementations and dependencies. |

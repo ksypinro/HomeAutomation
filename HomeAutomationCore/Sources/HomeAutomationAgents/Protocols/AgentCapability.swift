@@ -34,6 +34,7 @@ public extension AgentID {
     static let candidateRanking = AgentID("candidateRanking")
     static let candidateShard = AgentID("candidateShard")
     static let candidateHydration = AgentID("candidateHydration")
+    static let capabilityResolution = AgentID("capabilityResolution")
 
     // Draft
     static let automationDraft = AgentID("automationDraft")
@@ -80,6 +81,7 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case candidateRanking
     case candidateSharding
     case candidateHydration
+    case capabilityResolution
     case instructionComposition
     case draftGeneration
     case draftRepair

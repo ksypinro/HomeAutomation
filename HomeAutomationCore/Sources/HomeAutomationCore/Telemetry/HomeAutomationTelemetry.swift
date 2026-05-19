@@ -173,11 +173,13 @@ public actor HomeAutomationTelemetry {
 
     private let configuration: HomeAutomationTelemetryConfiguration
     private let writer: DailyTextLogWriter
+    private let jsonlWriter: DailyJSONLLogWriter
     private let redactor: TelemetryRedactor
 
     public init(configuration: HomeAutomationTelemetryConfiguration = .environment()) {
         self.configuration = configuration
         self.writer = DailyTextLogWriter(directoryURL: configuration.logDirectoryURL)
+        self.jsonlWriter = DailyJSONLLogWriter(directoryURL: configuration.logDirectoryURL)
         self.redactor = TelemetryRedactor(
             mode: configuration.payloadMode,
             maxPayloadCharacters: configuration.maxPayloadCharacters
@@ -200,6 +202,7 @@ public actor HomeAutomationTelemetry {
             payload: redactor.redact(payload)
         )
         await writer.append(event)
+        await jsonlWriter.append(event)
     }
 
     public func logAgentInput(_ input: String, inputType: String) async {
@@ -251,4 +254,3 @@ public actor HomeAutomationTelemetry {
         )
     }
 }
-

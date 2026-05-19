@@ -708,6 +708,42 @@ struct Phase2AgentTests {
         #expect(summary == "Which lamp?")
     }
 
+    @Test
+    func capabilityResolutionAgentSelectsPowerCapabilityWithEvidence() async throws {
+        let agent = CapabilityResolutionAgent()
+        let device = try #require(await Self.devices(ids: ["bedroom_ac"]).first)
+        let state = Self.state("Turn on bedroom AC")
+        let aggregation = HomeCandidateAggregationResult(
+            finalCandidateIDs: ["bedroom_ac"],
+            needsClarification: false,
+            confidence: 0.95
+        )
+
+        let decision = try await agent.run(
+            CapabilityResolutionInput(
+                rawText: "Turn on bedroom AC",
+                resolutionState: state,
+                hydratedCandidates: [device],
+                aggregation: aggregation,
+                knowledgeSnippets: [
+                    KnowledgeSnippet(
+                        sourceID: "capability:switch",
+                        content: "switch supports on and off commands",
+                        score: 1
+                    )
+                ]
+            ),
+            context: Self.context(text: "Turn on bedroom AC")
+        )
+
+        #expect(decision.targetDeviceID == "bedroom_ac")
+        #expect(decision.selectedCapability == "switch")
+        #expect(decision.selectedCommand == "on")
+        #expect(decision.confidence >= 0.9)
+        #expect(!decision.evidence.isEmpty)
+        #expect(decision.alternatives.contains { $0.capability == "switch" && $0.command == "on" })
+    }
+
     private static func context(text: String = "turn on the light") -> ResolutionContext {
         ResolutionContext(request: CommandRequest(text: text, executeLowRiskCommands: false))
     }

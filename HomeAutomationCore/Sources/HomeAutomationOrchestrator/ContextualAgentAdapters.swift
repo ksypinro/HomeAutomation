@@ -18,31 +18,17 @@ private final class AgentRegistryBox: @unchecked Sendable {
     var registry: AgentRegistry?
 }
 
-public struct OperationDetectionAgent: HomeAgent {
-    public typealias Input = String
-    public typealias Output = HomeOperationDetectionResult
+private protocol AgentModule: Sendable {
+    var name: String { get }
+    func makeAgents() -> [any AnyHomeAgent]
+}
 
-    public let id = AgentID.operationDetection
-    public let capabilities: Set<AgentCapability> = [.operationDetection]
-    public let timeoutNanoseconds: UInt64 = 60_000_000_000
-    private let worker: OperationDetectionWorkerSession
+private struct StaticAgentModule: AgentModule {
+    let name: String
+    let agents: [any AnyHomeAgent]
 
-    public init(
-        worker: OperationDetectionWorkerSession = OperationDetectionWorkerSession(
-            ruleDetect: { text in HomeOperationDetectionService().detect(text) }
-        )
-    ) {
-        self.worker = worker
-    }
-
-    public func run(
-        _ input: String,
-        context: ResolutionContext
-    ) async throws -> HomeOperationDetectionResult {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? context.request.text
-            : input
-        return try await worker.detectOperation(text)
+    func makeAgents() -> [any AnyHomeAgent] {
+        agents
     }
 }
 
@@ -85,18 +71,28 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
             
             logger.debug("Running agent: \(self.id.rawValue, privacy: .public)")
             let output = try await agent.run(input, context: context)
+            let evaluationPayload = Self.evaluationPayload(for: output)
             await HomeAutomationTelemetry.shared.logAgentOutput(
                 String(describing: output),
                 outputType: String(reflecting: Agent.Output.self),
                 durationMs: Date().timeIntervalSince(startedAt) * 1_000
             )
+            if !evaluationPayload.isEmpty {
+                await HomeAutomationTelemetry.shared.log(
+                    "agent.evaluationOutput",
+                    status: "completed",
+                    durationMs: Date().timeIntervalSince(startedAt) * 1_000,
+                    payload: evaluationPayload
+                )
+            }
             
             let patch = makePatch(output, context)
             await HomeAutomationTelemetry.shared.log(
                 "agent.patch",
-                payload: [
-                    "patch": String(describing: patch)
-                ]
+                payload: Self.patchEvaluationPayload(for: patch).merging(
+                    ["patch": String(describing: patch)],
+                    uniquingKeysWith: { current, _ in current }
+                )
             )
             logger.debug("Agent \(self.id.rawValue, privacy: .public) produced patch successfully.")
             return .success(patch)
@@ -118,6 +114,67 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
                 )
             )
         }
+    }
+
+    private static func evaluationPayload(for output: Agent.Output) -> [String: String] {
+        if let decision = output as? HomeCapabilityDecision {
+            var payload: [String: String] = [
+                "selectedCapability": decision.selectedCapability ?? "",
+                "selectedCommand": decision.selectedCommand ?? "",
+                "targetDeviceID": decision.targetDeviceID ?? "",
+                "confidence": String(decision.confidence),
+                "alternativeCount": String(decision.alternatives.count)
+            ]
+            payload["evidence"] = decision.evidence.joined(separator: " | ")
+            return payload
+        }
+        if let aggregation = output as? HomeCandidateAggregationResult {
+            return [
+                "selectedCandidateIDs": aggregation.finalCandidateIDs.joined(separator: ","),
+                "needsClarification": String(aggregation.needsClarification),
+                "confidence": String(aggregation.confidence)
+            ]
+        }
+        if let validation = output as? AutomationValidationResult {
+            return [
+                "validationResult": validation.status.rawValue,
+                "requiresConfirmation": String(validation.requiresConfirmation),
+                "issueCount": String(validation.issues.count)
+            ]
+        }
+        if let resolution = output as? HomeCommandResolution {
+            return [
+                "finalOutcome": resolution.displaySummary
+            ]
+        }
+        if let creation = output as? SmartThingsRuleCreationOutput {
+            let status = creation.receipt?.status.rawValue ?? (creation.plan.requiresConfirmation ? "confirmationRequired" : "skipped")
+            return [
+                "validationResult": status,
+                "requiresConfirmation": String(creation.plan.requiresConfirmation),
+                "finalOutcome": status
+            ]
+        }
+        return [:]
+    }
+
+    private static func patchEvaluationPayload(for patch: ResolutionContextPatch) -> [String: String] {
+        var payload: [String: String] = [:]
+        if let aggregation = patch.updates[ResolutionContextPatchKey.aggregation.rawValue]?.get(HomeCandidateAggregationResult.self) {
+            payload["selectedCandidateIDs"] = aggregation.finalCandidateIDs.joined(separator: ",")
+        }
+        if let decision = patch.updates[ResolutionContextPatchKey.capabilityDecision.rawValue]?.get(HomeCapabilityDecision.self) {
+            payload["selectedCapability"] = decision.selectedCapability ?? ""
+            payload["selectedCommand"] = decision.selectedCommand ?? ""
+            payload["targetDeviceID"] = decision.targetDeviceID ?? ""
+        }
+        if let resolution = patch.updates[ResolutionContextPatchKey.resolution.rawValue]?.get(HomeCommandResolution.self) {
+            payload["finalOutcome"] = resolution.displaySummary
+        }
+        if let validation = patch.scopedUpdates[.root]?[ResolutionContextPatchKey.automationValidation.rawValue]?.get(AutomationValidationResult.self) {
+            payload["validationResult"] = validation.status.rawValue
+        }
+        return payload
     }
 }
 
@@ -157,7 +214,7 @@ public enum DefaultAgentRegistryFactory {
             ContextualHomeAgent(
                 agent: OperationDetectionAgent(
                     worker: OperationDetectionWorkerSession(
-                        ruleDetect: { text in HomeOperationDetectionService().detect(text) },
+                        ruleDetect: { text in HomeOperationDetectionService().analyzeSemantics(text) },
                         foundationModelAvailability: foundationModelAvailability
                     )
                 ),
@@ -224,7 +281,7 @@ public enum DefaultAgentRegistryFactory {
                 makeInput: { context in
                     AutomationDraftInput(
                         text: context.request.text,
-                        operation: context.operation ?? HomeOperationDetectionService().detect(context.request.text)
+                        operation: context.operation ?? HomeOperationDetectionService().analyzeSemantics(context.request.text)
                     )
                 },
                 makePatch: { output, _ in
@@ -243,7 +300,10 @@ public enum DefaultAgentRegistryFactory {
             ),
             ContextualHomeAgent(
                 agent: AutomationConditionOperandResolutionAgent(
-                    resolver: AutomationConditionOperandResolver(registry: registry, foundationModelAvailability: foundationModelAvailability)
+                    resolveDraft: AutomationConditionOperandResolver(
+                        registry: registry,
+                        foundationModelAvailability: foundationModelAvailability
+                    ).resolveDraft
                 ),
                 makeInput: { context in
                     guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
@@ -257,16 +317,21 @@ public enum DefaultAgentRegistryFactory {
             ),
             ContextualHomeAgent(
                 agent: AutomationActionResolutionAgent(
-                    resolverProvider: {
+                    resolveActions: { actionDescriptions, eventBus, runID in
                         guard let agentRegistry = registryBox.registry else {
-                            return nil
+                            return []
                         }
-                        return AutomationActionResolver(
+                        let resolver = AutomationActionResolver(
                             registry: agentRegistry,
                             graphPlanner: GraphPlanner(
                                 policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
                             ),
                             policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+                        )
+                        return await resolver.resolveAll(
+                            actionDescriptions,
+                            eventBus: eventBus,
+                            runID: runID
                         )
                     }
                 ),
@@ -422,6 +487,23 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: { output, _ in patch(.candidateHydration, [ResolutionContextPatchKey.hydratedCandidates.rawValue: output]) }
             ),
             ContextualHomeAgent(
+                agent: CapabilityResolutionAgent(),
+                makeInput: { context in
+                    CapabilityResolutionInput(
+                        rawText: context.request.text,
+                        resolutionState: try state(from: context, agentID: .capabilityResolution),
+                        hydratedCandidates: context.hydratedCandidates,
+                        aggregation: context.aggregation ?? HomeCandidateAggregationResult(
+                            finalCandidateIDs: context.selectedCandidateIDs,
+                            needsClarification: false,
+                            confidence: 0
+                        ),
+                        knowledgeSnippets: context.knowledgeSnippets
+                    )
+                },
+                makePatch: { output, _ in patch(.capabilityResolution, [ResolutionContextPatchKey.capabilityDecision.rawValue: output]) }
+            ),
+            ContextualHomeAgent(
                 agent: InstructionComposerAgent(factory: instructionFactory),
                 makeInput: finalInput,
                 makePatch: { output, _ in patch(.instructionComposer, [ResolutionContextPatchKey.instructionPackage.rawValue: output]) }
@@ -575,8 +657,13 @@ public enum DefaultAgentRegistryFactory {
                 }
             ),
             ContextualHomeAgent(
-                agent: UnsupportedCommandAgent(),
-                makeInput: { $0.request.text },
+                agent: UnsupportedCommandAgent(reasonBuilder: { $0 }),
+                makeInput: { context in
+                    if context.operation?.operation == .unsupported {
+                        return context.operation?.reason ?? "This command is not supported."
+                    }
+                    return "This command is not supported."
+                },
                 makePatch: { output, _ in patch(.unsupportedCommand, [ResolutionContextPatchKey.resolution.rawValue: output]) }
             ),
             ContextualHomeAgent(
@@ -591,9 +678,48 @@ public enum DefaultAgentRegistryFactory {
             )
         ]
 
-        let finalRegistry = AgentRegistry(agents: agents)
+        let modules = Self.agentModules(from: agents)
+        let finalRegistry = AgentRegistry(agents: modules.flatMap { $0.makeAgents() })
         registryBox.registry = finalRegistry
         return finalRegistry
+    }
+
+    private static func agentModules(from agents: [any AnyHomeAgent]) -> [any AgentModule] {
+        let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+        let moduleDefinitions: [(name: String, ids: [AgentID])] = [
+            ("operationDetection", [.operationDetection]),
+            ("nlu", [.language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification]),
+            ("automation", [
+                .automationDraft,
+                .automationConditionOperandResolution,
+                .automationActionResolution,
+                .automationValidation,
+                .automationResultAssembly
+            ]),
+            ("smartThings", [.smartThingsCompilation, .smartThingsRuleCreation]),
+            ("knowledge", [.capabilityKnowledge, .bixbyKnowledge, .commandExample, .retrievalJudge]),
+            ("candidates", [.candidateRetrieval, .candidateRanking, .candidateShard, .candidateHydration, .capabilityResolution]),
+            ("draft", [.instructionComposer, .draftGeneration, .draftRepair]),
+            ("safety", [.safetyValidation, .parameterValidation, .confirmationPolicy]),
+            ("execution", [.executionPlanning, .mockExecution]),
+            ("fallback", [.ruleFallback, .bixbyFallback, .unsupportedCommand]),
+            ("response", [.clarification, .resultSummary])
+        ]
+
+        var assignedIDs = Set<AgentID>()
+        var modules: [any AgentModule] = moduleDefinitions.map { definition in
+            assignedIDs.formUnion(definition.ids)
+            return StaticAgentModule(
+                name: definition.name,
+                agents: definition.ids.compactMap { agentsByID[$0] }
+            )
+        }
+
+        let remainingAgents = agents.filter { !assignedIDs.contains($0.id) }
+        if !remainingAgents.isEmpty {
+            modules.append(StaticAgentModule(name: "unassigned", agents: remainingAgents))
+        }
+        return modules
     }
 
     private static func patch(_ agentID: AgentID, _ values: [String: any Sendable]) -> ResolutionContextPatch {
@@ -743,7 +869,8 @@ public enum DefaultAgentRegistryFactory {
                 finalCandidateIDs: context.selectedCandidateIDs,
                 needsClarification: false,
                 confidence: 0
-            )
+            ),
+            capabilityDecision: context.capabilityDecision
         )
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import HomeAutomationAgents
+import HomeAutomationCore
 
 public enum GraphNodeRunStatus: String, Sendable, Hashable, Codable {
     case pending
@@ -18,6 +19,7 @@ public struct GraphRunMetrics: Sendable, Hashable, Codable {
     public var selectedAgents: [String: String]
     public var skippedNodeIDs: [String]
     public var nodeDurations: [String: Double]
+    public var subgraphRuns: [HomeAutomationSubgraphRunSummary]
 
     public init(
         graphID: String,
@@ -27,7 +29,8 @@ public struct GraphRunMetrics: Sendable, Hashable, Codable {
         nodeStatuses: [String: GraphNodeRunStatus] = [:],
         selectedAgents: [String: String] = [:],
         skippedNodeIDs: [String] = [],
-        nodeDurations: [String: Double] = [:]
+        nodeDurations: [String: Double] = [:],
+        subgraphRuns: [HomeAutomationSubgraphRunSummary] = []
     ) {
         self.graphID = graphID
         self.goal = goal.rawValue
@@ -37,15 +40,22 @@ public struct GraphRunMetrics: Sendable, Hashable, Codable {
         self.selectedAgents = selectedAgents
         self.skippedNodeIDs = skippedNodeIDs
         self.nodeDurations = nodeDurations
+        self.subgraphRuns = subgraphRuns
     }
 }
 
 public struct GraphSchedulerResult: Sendable {
     public let exit: AgentRunResult?
     public let metrics: GraphRunMetrics
+    public let interruption: GraphCheckpointRecord?
 
-    public init(exit: AgentRunResult?, metrics: GraphRunMetrics) {
+    public init(
+        exit: AgentRunResult?,
+        metrics: GraphRunMetrics,
+        interruption: GraphCheckpointRecord? = nil
+    ) {
         self.exit = exit
         self.metrics = metrics
+        self.interruption = interruption
     }
 }

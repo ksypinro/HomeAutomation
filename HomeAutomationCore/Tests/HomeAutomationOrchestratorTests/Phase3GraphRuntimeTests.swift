@@ -37,12 +37,15 @@ struct Phase3GraphRuntimeTests {
         #expect(!plan.isFallbackOnly)
         #expect(plan.graph.id == "direct-command-graph")
         #expect(plan.graph.nodes.contains { $0.id == AgentID.retrievalJudge.rawValue })
+        #expect(plan.graph.nodes.contains { $0.id == AgentID.capabilityResolution.rawValue })
         #expect(plan.graph.nodes.contains { node in
             node.id == AgentID.mockExecution.rawValue &&
                 node.executionPolicy == .safetyGate &&
                 node.guardCondition == .canExecuteCommand
         })
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.retrievalJudge.rawValue, to: AgentID.candidateRanking.rawValue)))
+        #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.candidateHydration.rawValue, to: AgentID.capabilityResolution.rawValue)))
+        #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.capabilityResolution.rawValue, to: AgentID.instructionComposer.rawValue)))
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.executionPlanning.rawValue, to: AgentID.mockExecution.rawValue)))
         #expect(plan.graph.entryNodeIDs.contains(AgentID.language.rawValue))
     }
@@ -101,19 +104,19 @@ struct Phase3GraphRuntimeTests {
     func graphSchedulerResolvesAgentByCapability() async {
         let graph = OrchestrationGraph(
             id: "capability-resolution",
-            goal: .executeDeviceCommand,
+            goal: .rootRouting,
             nodes: [
-                GraphNode(id: "detect-language", requirement: .byCapability(.languageDetection))
+                GraphNode(id: "detect-operation", requirement: .byCapability(.operationDetection))
             ],
             edges: [],
-            entryNodeIDs: ["detect-language"]
+            entryNodeIDs: ["detect-operation"]
         )
         let registry = AgentRegistry(
             agents: [
                 StubGraphAgent(
-                    id: .language,
-                    capabilities: [.languageDetection],
-                    operations: [.executeDeviceCommand],
+                    id: .operationDetection,
+                    capabilities: [.operationDetection],
+                    operations: [.executeDeviceCommand, .automationCreation, .unsupported],
                     priority: 10
                 )
             ]
@@ -134,21 +137,21 @@ struct Phase3GraphRuntimeTests {
 
         let context = await contextStore.snapshot()
         #expect(result.exit == nil)
-        #expect(context.trace.map(\.agentID) == [.language])
-        #expect(result.metrics.nodeStatuses["detect-language"] == .completed)
-        #expect(result.metrics.selectedAgents["detect-language"] == AgentID.language.rawValue)
+        #expect(context.trace.map(\.agentID) == [.operationDetection])
+        #expect(result.metrics.nodeStatuses["detect-operation"] == .completed)
+        #expect(result.metrics.selectedAgents["detect-operation"] == AgentID.operationDetection.rawValue)
     }
 
     @Test
     func graphSchedulerAcceptsNearBoundaryAgentResult() async {
         let graph = OrchestrationGraph(
             id: "near-timeout-result",
-            goal: .executeDeviceCommand,
+            goal: .rootRouting,
             nodes: [
-                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language))
+                GraphNode(id: AgentID.operationDetection.rawValue, requirement: .byID(.operationDetection))
             ],
             edges: [],
-            entryNodeIDs: [AgentID.language.rawValue]
+            entryNodeIDs: [AgentID.operationDetection.rawValue]
         )
         let contextStore = ResolutionContextStore(
             request: CommandRequest(text: "turn on lamp", executeLowRiskCommands: false)
@@ -159,7 +162,7 @@ struct Phase3GraphRuntimeTests {
             registry: AgentRegistry(
                 agents: [
                     SlowSuccessGraphAgent(
-                        id: .language,
+                        id: .operationDetection,
                         timeoutNanoseconds: 50_000_000,
                         delayNanoseconds: 75_000_000
                     )
@@ -174,8 +177,8 @@ struct Phase3GraphRuntimeTests {
 
         let context = await contextStore.snapshot()
         #expect(result.exit == nil)
-        #expect(context.trace.map(\.agentID) == [.language])
-        #expect(result.metrics.nodeStatuses[AgentID.language.rawValue] == .completed)
+        #expect(context.trace.map(\.agentID) == [.operationDetection])
+        #expect(result.metrics.nodeStatuses[AgentID.operationDetection.rawValue] == .completed)
     }
 
     @Test
@@ -197,6 +200,7 @@ struct Phase3GraphRuntimeTests {
             request: CommandRequest(text: "unlock it", executeLowRiskCommands: true)
         )
         await contextStore.setDraft(draft)
+        await contextStore.setHydratedCandidates([Self.frontDoorLock()])
 
         let result = await GraphScheduler().execute(
             OrchestrationGraph(
@@ -382,10 +386,15 @@ private struct StubGraphAgent: AnyHomeAgent {
     ) {
         self.id = id
         self.capabilities = capabilities
+        let defaults = AgentManifestDefaults.manifest(id: id, capabilities: capabilities)
         self.manifest = AgentManifest(
             id: id,
             capabilities: capabilities,
             supportedOperations: operations,
+            consumes: defaults.consumes,
+            produces: defaults.produces,
+            safetyRole: defaults.safetyRole,
+            retryPolicy: defaults.retryPolicy,
             priority: priority
         )
     }
@@ -491,7 +500,44 @@ private extension Phase3GraphRuntimeTests {
         )
     }
 
+    static func bedroomLamp() -> HomeCandidateRecord {
+        HomeCandidateRecord(
+            id: "bedroom_lamp",
+            displayName: "Bedroom Lamp",
+            deviceType: "light",
+            room: "bedroom",
+            capabilities: ["switch"],
+            supportedCommands: ["switch": ["on", "off"]],
+            currentState: ["switch": "off"]
+        )
+    }
+
+    static func frontDoorLock() -> HomeCandidateRecord {
+        HomeCandidateRecord(
+            id: "front_door_lock",
+            displayName: "Front Door Lock",
+            deviceType: "lock",
+            room: "entry",
+            capabilities: ["lock"],
+            supportedCommands: ["lock": ["lock", "unlock"]],
+            riskLevel: .high
+        )
+    }
+
     func runMockExecutionGraph(contextStore: ResolutionContextStore) async -> GraphSchedulerResult {
+        await contextStore.setDraft(
+            HomeCommandDraft(
+                intent: .turnOn,
+                targetDeviceID: "bedroom_lamp",
+                capability: "switch",
+                command: "on",
+                needsClarification: false,
+                requiresConfirmation: false,
+                confidence: 1
+            )
+        )
+        await contextStore.setHydratedCandidates([Self.bedroomLamp()])
+
         let graph = OrchestrationGraph(
             id: "mock-execution-policy",
             goal: .executeDeviceCommand,

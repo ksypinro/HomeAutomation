@@ -19,6 +19,7 @@ struct AgentContractTests {
             .candidateRanking,
             .candidateShard,
             .candidateHydration,
+            .capabilityResolution,
             .instructionComposer,
             .draftGeneration,
             .draftRepair,
@@ -34,7 +35,7 @@ struct AgentContractTests {
             .resultSummary
         ]
 
-        #expect(ids.count == 26)
+        #expect(ids.count == 27)
     }
 
     @Test
@@ -45,6 +46,7 @@ struct AgentContractTests {
 
         #expect(context.retrievedCandidates.isEmpty)
         #expect(context.knowledgeSnippets.isEmpty)
+        #expect(context.capabilityDecision == nil)
         #expect(context.memoryHints.isEmpty)
         #expect(context.trace.isEmpty)
     }

@@ -63,6 +63,20 @@ struct Phase5RAGIntegrationTests {
         #expect(output.first?.sourceID == "switchLevel")
         #expect(output.reports.first?.strategy == "hybrid")
         #expect(output.reports.first?.filterHints["deviceTypes"] == ["light"])
+        #expect(output.reports.first?.filterHints["strategyName"] == ["capability.hybrid.deviceTypeFiltered"])
+        #expect(output.reports.first?.filterHints["fallbackBehavior"] == ["useCanonicalRegistry"])
+        #expect(output.reports.first?.sourceIDs == ["capability:switchLevel"])
+        #expect(output.reports.first?.acceptedSourceIDs == ["capability:switchLevel"])
+    }
+
+    @Test
+    func ragAgentsDeclareOwnedRetrievalStrategies() {
+        #expect(CapabilityKnowledgeAgent.retrievalStrategy.name == "capability.hybrid.deviceTypeFiltered")
+        #expect(CapabilityKnowledgeAgent.retrievalStrategy.source == .capability)
+        #expect(CapabilityKnowledgeAgent.retrievalStrategy.fallbackBehavior == .useCanonicalRegistry)
+        #expect(BixbyKnowledgeAgent.retrievalStrategy.source == .bixbyCommand)
+        #expect(CommandExampleAgent.retrievalStrategy(limit: 2).topK == 2)
+        #expect(RetrievalJudgeAgent.retryStrategy(for: .nlDataset).fallbackBehavior == .retryWithReformulation)
     }
 
     @Test

@@ -510,16 +510,100 @@ public struct HomeFinalResolutionInput: Sendable, Hashable, Codable {
     public let resolutionState: HomeResolutionState
     public let hydratedCandidates: [HomeCandidateRecord]
     public let aggregation: HomeCandidateAggregationResult
+    public let capabilityDecision: HomeCapabilityDecision?
 
     public init(
         rawText: String,
         resolutionState: HomeResolutionState,
         hydratedCandidates: [HomeCandidateRecord],
-        aggregation: HomeCandidateAggregationResult
+        aggregation: HomeCandidateAggregationResult,
+        capabilityDecision: HomeCapabilityDecision? = nil
     ) {
         self.rawText = rawText
         self.resolutionState = resolutionState
         self.hydratedCandidates = hydratedCandidates
         self.aggregation = aggregation
+        self.capabilityDecision = capabilityDecision
+    }
+}
+
+public struct HomeCapabilityAlternative: Sendable, Hashable, Codable {
+    public let capability: String
+    public let command: String?
+    public let targetDeviceID: String?
+    public let confidence: Double
+    public let evidence: [String]
+
+    public init(
+        capability: String,
+        command: String?,
+        targetDeviceID: String?,
+        confidence: Double,
+        evidence: [String]
+    ) {
+        self.capability = capability
+        self.command = command
+        self.targetDeviceID = targetDeviceID
+        self.confidence = confidence
+        self.evidence = evidence
+    }
+}
+
+public struct HomeCapabilityDecision: Sendable, Hashable, Codable {
+    public let selectedCapability: String?
+    public let selectedCommand: String?
+    public let targetDeviceID: String?
+    public let alternatives: [HomeCapabilityAlternative]
+    public let evidence: [String]
+    public let confidence: Double
+
+    public init(
+        selectedCapability: String?,
+        selectedCommand: String?,
+        targetDeviceID: String?,
+        alternatives: [HomeCapabilityAlternative],
+        evidence: [String],
+        confidence: Double
+    ) {
+        self.selectedCapability = selectedCapability
+        self.selectedCommand = selectedCommand
+        self.targetDeviceID = targetDeviceID
+        self.alternatives = alternatives
+        self.evidence = evidence
+        self.confidence = confidence
+    }
+}
+
+public struct HomeAutomationSubgraphRunSummary: Sendable, Hashable, Codable {
+    public let id: String
+    public let parentNodeID: String
+    public let scopeID: String
+    public let graphID: String
+    public let goal: String
+    public let nodeStatuses: [String: String]
+    public let selectedAgents: [String: String]
+    public let skippedNodeIDs: [String]
+    public let nodeDurations: [String: Double]
+
+    public init(
+        id: String,
+        parentNodeID: String,
+        scopeID: String,
+        graphID: String,
+        goal: String,
+        nodeStatuses: [String: String],
+        selectedAgents: [String: String],
+        skippedNodeIDs: [String],
+        nodeDurations: [String: Double]
+    ) {
+        self.id = id
+        self.parentNodeID = parentNodeID
+        self.scopeID = scopeID
+        self.graphID = graphID
+        self.goal = goal
+        self.nodeStatuses = nodeStatuses
+        self.selectedAgents = selectedAgents
+        self.skippedNodeIDs = skippedNodeIDs
+        self.nodeDurations = nodeDurations
     }
 }

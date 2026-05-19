@@ -351,6 +351,27 @@ struct FMFirstMigrationTests {
         #expect(result.operation == HomeAutomationOperationKind.automationCreation)
     }
 
+    @Test("OperationSemanticAnalyzerTool exposes deterministic semantic analysis")
+    func operationSemanticAnalyzerToolReturnsAnalyzerOutput() async throws {
+        let tool = OperationSemanticAnalyzerTool(
+            commandText: "Turn on AC every day at 7 AM",
+            analyze: { text in
+                HomeOperationDetectionResult(
+                    domain: .homeAutomation,
+                    operation: text.contains("7 AM") ? .automationCreation : .executeDeviceCommand,
+                    confidence: 0.91,
+                    reason: "test semantic analyzer"
+                )
+            }
+        )
+
+        let output = try await tool.call(arguments: .init())
+
+        #expect(output.contains("operation: automationCreation"))
+        #expect(output.contains("confidence: 0.91"))
+        #expect(output.contains("test semantic analyzer"))
+    }
+
     // MARK: - AutomationDraftWorkerSession (parser-as-hint)
 
     @Test("AutomationDraftWorkerSession invokes model even when parser returns high-confidence result")
