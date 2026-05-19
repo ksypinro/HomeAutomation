@@ -15,6 +15,8 @@ The current implementation is orchestrator-first: a SwiftUI app calls a multi-ag
 
 ## High-Level Architecture
 
+Current architecture source of truth: the orchestrator is graph-only. Command routing starts with `root-command-graph`, then `GraphPlanner`, `OperationGraphCatalog`, and `GraphScheduler` own direct command, fallback, automation creation, and unsupported flows.
+
 ```mermaid
 flowchart TB
     User["User"]
@@ -23,8 +25,9 @@ flowchart TB
     Orchestrator["HomeCommandOrchestrator"]
 
     subgraph OrchestratorLayer["HomeAutomationOrchestrator"]
-        Planner["AgentPlanner"]
-        Scheduler["AgentScheduler"]
+        Planner["GraphPlanner"]
+        Catalog["OperationGraphCatalog"]
+        Scheduler["GraphScheduler"]
         Registry["AgentRegistry"]
         Context["ResolutionContextStore"]
         Events["AgentEventBus"]
@@ -101,6 +104,7 @@ flowchart TB
 
     User --> App --> VM --> Orchestrator
     Orchestrator --> Planner
+    Planner --> Catalog
     Orchestrator --> Scheduler
     Orchestrator --> Context
     Orchestrator --> Events
@@ -132,13 +136,14 @@ flowchart TD
     A["User submits command"] --> B["ViewModel starts orchestrator stream"]
     B --> C["Create CommandRequest and ResolutionContext"]
     C --> D["Apply conversation-memory hints when text references prior context"]
-    D --> E{"Foundation Models available?"}
+    D --> R["Root command graph: OperationDetectionAgent"]
+    R --> E{"Detected operation"}
 
-    E -->|No| F["RuleFallbackAgent"]
+    E -->|Direct command + models unavailable| F["Fallback graph: RuleFallbackAgent"]
     F --> G["BixbyFallbackAgent"]
     G --> H["UnsupportedCommandAgent if no deterministic match"]
 
-    E -->|Yes| I["Run 6 NLU agents in parallel"]
+    E -->|Direct command + models available| I["Direct command graph: run 6 NLU agents in parallel"]
     I --> J["Run NLU-informed knowledge and candidate retrieval in parallel"]
     J --> K["RetrievalJudgeAgent accepts or retries weak retrieval"]
     K --> L["Rank and hydrate scoped candidates"]
@@ -155,11 +160,20 @@ flowchart TD
     U -->|Low risk and enabled| W["MockExecutionAgent mutates mock registry"]
     U -->|Execution disabled or query| X["Return ready/query result"]
 
+    E -->|Automation creation| AA["Automation creation graph"]
+    AA --> AB["AutomationDraftAgent"]
+    AB --> AC["Action and condition resolution in parallel"]
+    AC --> AD["AutomationValidationAgent"]
+    AD --> AE["SmartThingsCompilationAgent"]
+    AE --> AF["AutomationResultAssemblyAgent"]
+
+    E -->|Unsupported operation| H
     H --> Y["Assemble result and metrics"]
     N --> Y
     V --> Y
     W --> Y
     X --> Y
+    AF --> Y
     Y --> Z["Stream outcome, metrics, dashboard updates"]
 ```
 
@@ -242,9 +256,10 @@ flowchart LR
 
 | Component | Role |
 | --- | --- |
-| `HomeCommandOrchestrator` | Main command resolver. Creates context, streams events, runs the scheduler, assembles `HomeAutomationResolverResult`, records metrics, and stores conversation turns. |
-| `AgentPlanner` | Builds the execution plan. Uses fallback-only flow when models are unavailable; otherwise runs NLU, knowledge, candidate, draft, safety, and execution-planning stages. |
-| `AgentScheduler` | Executes sequential and parallel phases, checks circuit breakers, runs agents, applies patches, records traces, and fails closed for mandatory gates. |
+| `HomeCommandOrchestrator` | Main command resolver. Creates context, streams events, runs the root routing graph, assembles `HomeAutomationResolverResult`, records metrics, and stores conversation turns. |
+| `GraphPlanner` | Builds operation graphs for root routing, direct command, fallback, automation creation, and unsupported handling. |
+| `OperationGraphCatalog` | Selects the graph provider for each detected operation and model-availability policy. |
+| `GraphScheduler` | Executes DAG nodes, checks circuit breakers, runs agents, applies patches, records traces, and fails closed for mandatory gates. |
 | `AgentRegistry` | Stores `AnyHomeAgent` instances by `AgentID` and capability. |
 | `ResolutionContextStore` | Actor-backed holder for the evolving `ResolutionContext`. |
 | `AgentEventBus` | Async event stream for UI timeline updates. |

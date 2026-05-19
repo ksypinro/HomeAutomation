@@ -18,6 +18,8 @@ DerivedData/
 xcuserdata/
 
 ## Other
+.DS_Store
+**/.DS_Store
 *.tmp
 *.moved-aside
 *.xccheckout

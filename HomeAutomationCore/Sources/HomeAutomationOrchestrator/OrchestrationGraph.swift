@@ -25,6 +25,7 @@ public struct OrchestrationGraph: Sendable, Hashable {
 }
 
 public enum OrchestrationGoal: String, Sendable, Hashable, Codable {
+    case rootRouting
     case executeDeviceCommand
     case automationCreation
     case unsupported
@@ -35,17 +36,20 @@ public struct GraphNode: Sendable, Hashable, Identifiable {
     public let requirement: AgentRequirement
     public let executionPolicy: NodeExecutionPolicy
     public let guardCondition: GraphGuard?
+    public let interrupt: GraphInterrupt?
 
     public init(
         id: String,
         requirement: AgentRequirement,
         executionPolicy: NodeExecutionPolicy = .required,
-        guardCondition: GraphGuard? = nil
+        guardCondition: GraphGuard? = nil,
+        interrupt: GraphInterrupt? = nil
     ) {
         self.id = id
         self.requirement = requirement
         self.executionPolicy = executionPolicy
         self.guardCondition = guardCondition
+        self.interrupt = interrupt
     }
 }
 

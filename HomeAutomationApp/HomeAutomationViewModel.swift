@@ -1,6 +1,7 @@
 import Foundation
 import HomeAutomationCore
 import HomeAutomationOrchestrator
+import HomeAutomationAgents
 import Observation
 
 enum HomePipelineEventStatus: String, Hashable {

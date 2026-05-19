@@ -203,7 +203,7 @@ struct AutomationCreationFlowTests {
         let graphRun = try #require(metrics.graphRun)
 
         #expect(graphRun.graphID == "automation-creation-graph")
-        #expect(graphRun.nodeStatuses[AgentID.operationDetection.rawValue] == GraphNodeRunStatus.completed)
+        #expect(metrics.agentTraces.contains { $0.agentID == .operationDetection })
         #expect(graphRun.nodeStatuses[AgentID.automationDraft.rawValue] == GraphNodeRunStatus.completed)
         #expect(graphRun.nodeStatuses[AgentID.automationConditionOperandResolution.rawValue] == GraphNodeRunStatus.completed)
         #expect(graphRun.nodeStatuses[AgentID.automationActionResolution.rawValue] == GraphNodeRunStatus.completed)

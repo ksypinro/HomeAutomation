@@ -65,12 +65,32 @@ struct OrchestratorInfrastructureTests {
 
         #expect(!plan.isFallbackOnly)
         #expect(plan.graph.nodes.contains { $0.id == AgentID.retrievalJudge.rawValue })
+        #expect(plan.graph.nodes.contains { $0.id == AgentID.capabilityResolution.rawValue })
         #expect(plan.graph.nodes.contains { node in
             node.id == AgentID.mockExecution.rawValue &&
                 node.executionPolicy == .safetyGate &&
                 node.guardCondition == .canExecuteCommand
         })
+        #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.candidateHydration.rawValue, to: AgentID.capabilityResolution.rawValue)))
+        #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.capabilityResolution.rawValue, to: AgentID.instructionComposer.rawValue)))
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.executionPlanning.rawValue, to: AgentID.mockExecution.rawValue)))
+    }
+
+    @Test
+    func graphPlannerExposesRootRoutingGraph() {
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { true })
+        let planner = GraphPlanner(policy: policy)
+        let context = ResolutionContext(
+            request: CommandRequest(text: "Turn on AC everyday at 7 AM", executeLowRiskCommands: false)
+        )
+
+        let graph = planner.planRootRouting(for: context.request.text, context: context).graph
+
+        #expect(graph.id == "root-command-graph")
+        #expect(graph.goal == .rootRouting)
+        #expect(GraphValidator().validate(graph).isEmpty)
+        #expect(graph.nodes.map(\.id) == [AgentID.operationDetection.rawValue])
+        #expect(graph.entryNodeIDs == [AgentID.operationDetection.rawValue])
     }
 
     @Test
@@ -88,7 +108,6 @@ struct OrchestratorInfrastructureTests {
         #expect(graph.goal == .automationCreation)
         #expect(GraphValidator().validate(graph).isEmpty)
         #expect(graph.nodes.map(\.id) == [
-            AgentID.operationDetection.rawValue,
             AgentID.automationDraft.rawValue,
             AgentID.automationConditionOperandResolution.rawValue,
             AgentID.automationActionResolution.rawValue,
@@ -97,6 +116,7 @@ struct OrchestratorInfrastructureTests {
             AgentID.smartThingsRuleCreation.rawValue,
             AgentID.automationResultAssembly.rawValue
         ])
+        #expect(graph.entryNodeIDs == [AgentID.automationDraft.rawValue])
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue)))
@@ -160,6 +180,7 @@ struct OrchestratorInfrastructureTests {
             .candidateRanking,
             .candidateShard,
             .candidateHydration,
+            .capabilityResolution,
             .instructionComposer,
             .draftGeneration,
             .draftRepair,
@@ -371,7 +392,10 @@ struct OrchestratorInfrastructureTests {
     @Test
     func graphSchedulerSkipsOpenCircuitForNonMandatoryAgent() async {
         let circuitBreakers = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
-        let registry = AgentRegistry(agents: [FailingAnyAgent(id: .language)])
+        let registry = AgentRegistry(agents: [
+            FailingAnyAgent(id: .language),
+            SuccessfulAnyAgent(id: .unsupportedCommand)
+        ])
         let contextStore = ResolutionContextStore(
             request: CommandRequest(text: "turn on light", executeLowRiskCommands: false)
         )
@@ -379,9 +403,12 @@ struct OrchestratorInfrastructureTests {
             id: "non-mandatory-open-circuit",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language))
+                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language)),
+                GraphNode(id: AgentID.unsupportedCommand.rawValue, requirement: .byID(.unsupportedCommand))
             ],
-            edges: [],
+            edges: [
+                GraphEdge(from: AgentID.language.rawValue, to: AgentID.unsupportedCommand.rawValue)
+            ],
             entryNodeIDs: [AgentID.language.rawValue]
         )
         let scheduler = GraphScheduler()
@@ -409,7 +436,7 @@ struct OrchestratorInfrastructureTests {
         let trace = await contextStore.snapshot().trace
 
         #expect(result.exit == nil)
-        #expect(trace.last?.result == .skipped)
+        #expect(trace.contains { $0.agentID == .language && $0.result == .skipped })
         #expect(await circuitBreakers.allStatuses()[.language] == .open)
         #expect(result.metrics.nodeStatuses[AgentID.language.rawValue] == .skipped)
     }
@@ -433,6 +460,17 @@ struct OrchestratorInfrastructureTests {
             confidence: 1
         )
         await contextStore.setDraft(draft)
+        await contextStore.setHydratedCandidates([
+            HomeCandidateRecord(
+                id: "front_door_lock",
+                displayName: "Front Door Lock",
+                deviceType: "lock",
+                room: "entry",
+                capabilities: ["lock"],
+                supportedCommands: ["lock": ["lock", "unlock"]],
+                riskLevel: .high
+            )
+        ])
 
         let graph = OrchestrationGraph(
             id: "mandatory-open-circuit",

@@ -54,6 +54,20 @@ public enum AutomationRAGSubproblem: String, Sendable, Hashable, Codable, CaseIt
             return 0.30
         }
     }
+
+    func retrievalStrategy(topK: Int = 3) -> AgentRetrievalStrategy {
+        AgentRetrievalStrategy(
+            name: "automationDraft.hybrid.\(rawValue)",
+            agentID: .automationDraft,
+            purpose: "Retrieve SmartThings automation knowledge for the \(rawValue) draft extraction subproblem.",
+            source: source,
+            requiredTags: ["operation": HomeAutomationOperationKind.automationCreation.rawValue],
+            topK: topK,
+            minScore: 0,
+            ranking: .hybrid(alpha: semanticWeight),
+            fallbackBehavior: .skip
+        )
+    }
 }
 
 public struct AutomationRAGSubproblemQuery: Sendable, Hashable {
@@ -152,7 +166,17 @@ public enum AutomationRAGPolicy {
             "command"
         ]
 
-        return StructuredRetrievalQuery(
+        let strategy = AgentRetrievalStrategy(
+            name: "automationDraft.hybrid.allAutomationKnowledge",
+            agentID: .automationDraft,
+            purpose: "Retrieve broad SmartThings automation knowledge for draft extraction.",
+            requiredTags: ["operation": HomeAutomationOperationKind.automationCreation.rawValue],
+            topK: topK,
+            minScore: 0,
+            ranking: .hybrid(alpha: 0.35),
+            fallbackBehavior: .skip
+        )
+        return strategy.makeQuery(
             rawText: rawText,
             semanticText: QueryReformulator.reformulate(
                 rawText: rawText,
@@ -162,16 +186,10 @@ public enum AutomationRAGPolicy {
                 repeatHints: repeatHints
             ),
             keywordTerms: keywordTerms,
-            metadataFilter: MetadataFilter(
-                requiredTags: ["operation": HomeAutomationOperationKind.automationCreation.rawValue]
-            ),
-            operation: .automationCreation,
+            operation: HomeAutomationOperationKind.automationCreation,
             automationConcepts: concepts,
             conditionOperators: conditionOperators,
-            repeatHints: repeatHints,
-            strategy: .hybrid(alpha: 0.35),
-            minScore: 0,
-            topK: topK
+            repeatHints: repeatHints
         )
     }
 
@@ -234,7 +252,8 @@ public enum AutomationRAGPolicy {
             "command"
         ]
 
-        return StructuredRetrievalQuery(
+        let strategy = subproblem.retrievalStrategy(topK: topK)
+        return strategy.makeQuery(
             rawText: rawText,
             semanticText: QueryReformulator.reformulate(
                 rawText: rawText,
@@ -244,17 +263,10 @@ public enum AutomationRAGPolicy {
                 repeatHints: repeatHints
             ),
             keywordTerms: keywordTerms,
-            metadataFilter: MetadataFilter(
-                source: subproblem.source,
-                requiredTags: ["operation": HomeAutomationOperationKind.automationCreation.rawValue]
-            ),
-            operation: .automationCreation,
+            operation: HomeAutomationOperationKind.automationCreation,
             automationConcepts: concepts,
             conditionOperators: conditionOperators,
-            repeatHints: repeatHints,
-            strategy: .hybrid(alpha: subproblem.semanticWeight),
-            minScore: 0,
-            topK: topK
+            repeatHints: repeatHints
         )
     }
 
@@ -445,12 +457,13 @@ enum AgentRAGSupport {
                 query: retrieval.query.rawText,
                 results: retrieval.chunks.map { Double($0.score) },
                 minScore: Double(retrieval.query.minScore),
-                filterHints: [
+                sourceIDs: retrieval.chunks.map { $0.chunk.id },
+                filterHints: retrieval.subproblem.retrievalStrategy(topK: retrieval.query.topK).reportHints(extra: [
                     "subproblem": [retrieval.subproblem.rawValue],
                     "automationConcepts": retrieval.query.automationConcepts,
                     "conditionOperators": retrieval.query.conditionOperators,
                     "repeatHints": retrieval.query.repeatHints
-                ].filter { !$0.value.isEmpty },
+                ].filter { !$0.value.isEmpty }),
                 reformulatedQuery: retrieval.query.semanticText == retrieval.query.rawText ? nil : retrieval.query.semanticText
             )
         }

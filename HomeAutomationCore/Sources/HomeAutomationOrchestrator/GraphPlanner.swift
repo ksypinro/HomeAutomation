@@ -30,6 +30,11 @@ public struct GraphPlanner: Sendable {
         return catalog.plan(for: .executeDeviceCommand, context: context)
     }
 
+    public func planRootRouting(for text: String, context: ResolutionContext) -> GraphExecutionPlan {
+        logger.debug("Generating root routing graph for text: '\(text, privacy: .private)'")
+        return GraphExecutionPlan(graph: Self.rootRoutingGraph())
+    }
+
     public func plan(
         for text: String,
         context: ResolutionContext,
@@ -58,6 +63,7 @@ public struct GraphPlanner: Sendable {
             .retrievalJudge,
             .candidateRanking,
             .candidateHydration,
+            .capabilityResolution,
             .instructionComposer,
             .draftGeneration,
             .safetyValidation,
@@ -73,7 +79,8 @@ public struct GraphPlanner: Sendable {
                 id: id.rawValue,
                 requirement: .byID(id),
                 executionPolicy: executionPolicy(for: id),
-                guardCondition: guardCondition(for: id)
+                guardCondition: guardCondition(for: id),
+                interrupt: interrupt(for: id)
             )
         }
 
@@ -99,6 +106,22 @@ public struct GraphPlanner: Sendable {
         )
     }
 
+    public static func rootRoutingGraph() -> OrchestrationGraph {
+        OrchestrationGraph(
+            id: "root-command-graph",
+            goal: .rootRouting,
+            nodes: [
+                GraphNode(
+                    id: AgentID.operationDetection.rawValue,
+                    requirement: .byID(.operationDetection),
+                    executionPolicy: .required
+                )
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.operationDetection.rawValue]
+        )
+    }
+
     public static func fallbackGraph() -> OrchestrationGraph {
         let fallbackAgents: [AgentID] = [
             .ruleFallback,
@@ -121,7 +144,6 @@ public struct GraphPlanner: Sendable {
 
     public static func automationCreationGraph() -> OrchestrationGraph {
         let stages: [(id: AgentID, policy: NodeExecutionPolicy)] = [
-            (.operationDetection, .required),
             (.automationDraft, .required),
             (.automationConditionOperandResolution, .required),
             (.automationActionResolution, .required),
@@ -138,11 +160,11 @@ public struct GraphPlanner: Sendable {
                 GraphNode(
                     id: stage.id.rawValue,
                     requirement: .byID(stage.id),
-                    executionPolicy: stage.policy
+                    executionPolicy: stage.policy,
+                    interrupt: interrupt(for: stage.id)
                 )
             },
             edges: [
-                GraphEdge(from: AgentID.operationDetection.rawValue, to: AgentID.automationDraft.rawValue),
                 GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue),
                 GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue),
                 GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue),
@@ -151,7 +173,7 @@ public struct GraphPlanner: Sendable {
                 GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue),
                 GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)
             ],
-            entryNodeIDs: [AgentID.operationDetection.rawValue]
+            entryNodeIDs: [AgentID.automationDraft.rawValue]
         )
     }
 
@@ -184,6 +206,23 @@ public struct GraphPlanner: Sendable {
         switch id {
         case .mockExecution:
             return .canExecuteCommand
+        default:
+            return nil
+        }
+    }
+
+    private static func interrupt(for id: AgentID) -> GraphInterrupt? {
+        switch id {
+        case .confirmationPolicy:
+            return GraphInterrupt(
+                kind: .confirmation,
+                reason: "Pause before confirmation policy when a caller requests human approval checkpoints."
+            )
+        case .smartThingsRuleCreation:
+            return GraphInterrupt(
+                kind: .externalMutationApproval,
+                reason: "Pause before external SmartThings rule creation when a caller requests mutation approval."
+            )
         default:
             return nil
         }

@@ -11,7 +11,7 @@ struct Phase7FanOutTests {
 
     @Test
     func automationActionResolutionHasAggregateTimeoutBudget() {
-        let agent = AutomationActionResolutionAgent(resolverProvider: { nil })
+        let agent = AutomationActionResolutionAgent(resolveActions: { _, _, _ in [] })
 
         #expect(agent.timeoutNanoseconds >= 240_000_000_000)
     }
@@ -315,6 +315,10 @@ struct Phase7FanOutTests {
         let metrics = try #require(await orchestrator.lastMetrics())
         #expect(metrics.automationMetrics.automationActionCount >= 1)
         #expect(metrics.automationMetrics.graphNodeStatuses["automationActionResolution:a1"] == GraphNodeRunStatus.completed.rawValue)
+        let subgraph = try #require(metrics.graphRun?.subgraphRuns.first { $0.scopeID == "a1" })
+        #expect(subgraph.parentNodeID == AgentID.automationActionResolution.rawValue)
+        #expect(subgraph.graphID == "direct-command-fallback-graph")
+        #expect(subgraph.nodeStatuses[AgentID.ruleFallback.rawValue] == GraphNodeRunStatus.completed.rawValue)
     }
 
     // MARK: - Aggregate Properties

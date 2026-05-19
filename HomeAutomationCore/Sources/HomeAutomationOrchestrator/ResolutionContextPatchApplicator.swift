@@ -56,6 +56,9 @@ public enum ResolutionContextPatchApplicators {
         ResolutionContextPatchKey.hydratedCandidates.rawValue: { value, ctx in
             if let v = value.get([HomeCandidateRecord].self) { ctx.hydratedCandidates = v }
         },
+        ResolutionContextPatchKey.capabilityDecision.rawValue: { value, ctx in
+            if let v = value.get(HomeCapabilityDecision.self) { ctx.capabilityDecision = v }
+        },
         ResolutionContextPatchKey.knowledgeSnippets.rawValue: { value, ctx in
             if let v = value.get([KnowledgeSnippet].self) { ctx.knowledgeSnippets.append(contentsOf: v) }
         },

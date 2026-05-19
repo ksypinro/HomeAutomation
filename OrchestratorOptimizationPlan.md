@@ -1,9 +1,10 @@
 # Orchestrator Optimization Plan
 
-> **Reference**: [OrchestratorArchitecture.md](./OrchestratorArchitecture.md) §9
+> **Reference**: [HomeAutomationCore/Sources/HomeAutomationOrchestrator/OrchestratorArchitecture.md](./HomeAutomationCore/Sources/HomeAutomationOrchestrator/OrchestratorArchitecture.md) §9
 > **Created**: 2026-05-17
 > **Total Issues**: 14 (4 Critical, 4 High, 3 Medium, 3 Low)
 > **Phases**: 6 independent phases, executable in any order
+> **Status**: Historical optimization checklist. The active orchestrator is graph-only; legacy phased runtime references have been removed from this plan.
 
 ---
 
@@ -30,9 +31,9 @@
 
 ### O-2: Agent Timeout Enforcement
 
-**Problem**: Every agent declares `timeoutNanoseconds` (e.g., `3_000_000_000` for OperationDetection) but neither `AgentScheduler.runAgent()` nor `GraphScheduler.runNode()` enforces this timeout. If an FM inference hangs, the entire pipeline stalls.
+**Problem**: Every agent declares `timeoutNanoseconds` (e.g., `3_000_000_000` for OperationDetection). `GraphScheduler.runNode()` must enforce this timeout consistently so a hung FM inference cannot stall the entire pipeline.
 
-**Root Cause**: The `agent.run(context:)` call at `GraphScheduler.swift:252` and `AgentScheduler.swift:140` is a bare `await` with no timeout wrapper.
+**Root Cause**: This is handled by the graph runtime via `withAgentTimeout`; future work should focus on per-agent timeout tuning and telemetry.
 
 #### Implementation Steps
 
@@ -107,7 +108,7 @@ func withAgentTimeout<T: Sendable>(
  let end = Date()
 ```
 
-**Step 3**: Apply the same change to `AgentScheduler.runAgent()` at line 140 (legacy path).
+**Step 3**: Verify graph timeout telemetry reports `agent.timeout` events with `agentInvocationID`, graph node ID, and attempt number.
 
 **Step 4**: Add unit test
 
@@ -453,43 +454,21 @@ extension HomeResolutionState {
 
 ---
 
-### O-6: Deprecate Legacy Runtime Mode
+### O-6: Preserve Graph-Only Runtime
 
-**Problem**: `AgentScheduler` (257 LOC) and `AgentPlanner` (92 LOC) duplicate the functionality of `GraphScheduler` and `GraphPlanner`. Both paths must be maintained in sync. The legacy path exists only as a rollback mechanism.
+**Problem**: Top-level routing and operation-specific execution should remain owned by `GraphPlanner`, `OperationGraphCatalog`, and `GraphScheduler`. Reintroducing a phased runtime would fragment telemetry, policy, and testing.
 
 #### Implementation Steps
 
-**Step 1**: Add deprecation annotations
+**Step 1**: Keep operation detection in the `root-command-graph`.
 
-```swift
-@available(*, deprecated, message: "Use GraphScheduler with .graph runtime mode")
-public struct AgentScheduler: Sendable { ... }
+**Step 2**: Keep direct command, fallback, automation creation, and unsupported handling as graph providers in `OperationGraphCatalog`.
 
-@available(*, deprecated, message: "Use GraphPlanner with .graph runtime mode")  
-public struct AgentPlanner: Sendable { ... }
-```
-
-**Step 2**: Add runtime logging when legacy mode is activated
-
-```diff
-// HomeCommandOrchestrator, executeDirectCommandPipeline()
- case .legacy:
-+    logger.warning("Running in LEGACY mode. This mode is deprecated and will be removed.")
-     let plan = planner.plan(for: text, context: await contextStore.snapshot())
-```
-
-**Step 3**: After 2 production release cycles with zero legacy activations, remove:
-- `AgentScheduler.swift`
-- `AgentPlanner.swift`
-- All `case .legacy:` branches in `HomeCommandOrchestrator` and `AutomationActionResolver`
-- `OrchestratorRuntimeMode.legacy` enum case
-
-> [!IMPORTANT]
-> Do NOT remove immediately. Keep for one release cycle as a safety net. Monitor `OrchestratorMetrics.automationMetrics.runtimeMode` for any `"legacy"` values in production telemetry.
+**Step 3**: Reject future orchestration branches that bypass `GraphScheduler`.
 
 #### Verification
-- Set env var `HOME_AUTOMATION_ORCHESTRATOR_RUNTIME=legacy`, run tests — should still pass with deprecation warnings
-- Set to `graph` (or unset), run tests — should pass without warnings
+- Run graph routing tests and confirm operation detection appears as the first graph-owned node.
+- Confirm telemetry and metrics runtime labels remain `"graph"`.
 
 ---
 

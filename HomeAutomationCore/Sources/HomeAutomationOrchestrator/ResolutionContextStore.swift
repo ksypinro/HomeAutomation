@@ -86,6 +86,10 @@ public actor ResolutionContextStore {
         context.hydratedCandidates = value
     }
 
+    public func setCapabilityDecision(_ value: HomeCapabilityDecision) {
+        context.capabilityDecision = value
+    }
+
     public func setDraft(_ value: HomeCommandDraft) {
         context.draft = value
     }

@@ -104,8 +104,10 @@ public enum AgentManifestDefaults {
             return ["request.text", "resolutionState", "retrievedCandidates"]
         case .candidateHydration:
             return ["selectedCandidateIDs", "aggregation"]
+        case .capabilityResolution:
+            return ["request.text", "resolutionState", "hydratedCandidates", "aggregation", "knowledgeSnippets"]
         case .instructionComposer:
-            return ["resolutionState", "hydratedCandidates", "aggregation", "knowledgeSnippets"]
+            return ["resolutionState", "hydratedCandidates", "aggregation", "knowledgeSnippets", "capabilityDecision"]
         case .draftGeneration, .draftRepair:
             return ["instructionPackage"]
         case .safetyValidation:
@@ -165,6 +167,8 @@ public enum AgentManifestDefaults {
             return ["selectedCandidateIDs"]
         case .candidateHydration:
             return ["hydratedCandidates"]
+        case .capabilityResolution:
+            return ["capabilityDecision"]
         case .instructionComposer:
             return ["instructionPackage"]
         case .draftGeneration, .draftRepair:

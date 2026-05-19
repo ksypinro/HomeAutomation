@@ -16,7 +16,7 @@ The project already has several useful observability pieces, but they are not un
 
 - `OSLog.Logger` is used across agents and orchestrator components. This is good for local debugging, but the messages are scattered, inconsistent, and not easy to analyze later from a single daily file.
 - `AgentEventBus` publishes UI-visible `OrchestratorPipelineEvent` values with `runID`, `stage`, `agentID`, `status`, `detail`, and `timestamp`.
-- `GraphScheduler` and legacy `AgentScheduler` record `AgentTraceEntry` values with per-agent start/end/duration/result.
+- `GraphScheduler` records `AgentTraceEntry` values with per-agent start/end/duration/result.
 - `OrchestratorMetrics` captures run-level evaluation fields, graph node statuses, confidence values, candidate counts, retrieval quality, FoundationModel usage, circuit states, and automation-specific fields.
 - Agent worker sessions already log many useful strings like `[Input]`, `[FoundationModelInput]`, `[FoundationModelOutput]`, and `[FoundationModelError]`, but these are not consistently structured and cannot be reliably grouped by run or agent.
 - Tool calls in `AgentTools.swift` record output sizes via `AgentToolOutputSizeStore`, but do not persist arguments, outputs, duration, errors, or caller context.
@@ -44,7 +44,7 @@ Add a telemetry module inside `HomeAutomationOrchestrator` with one shared actor
 ```mermaid
 flowchart TD
     Orchestrator["HomeCommandOrchestrator"] --> Telemetry["HomeAutomationTelemetry"]
-    Scheduler["GraphScheduler / AgentScheduler"] --> Telemetry
+    Scheduler["GraphScheduler"] --> Telemetry
     Adapter["ContextualHomeAgent"] --> Telemetry
     Workers["Worker Sessions"] --> ModelTelemetry["FoundationModelTelemetry"]
     Tools["Agent Tools"] --> ToolTelemetry["ToolTelemetry"]
@@ -287,7 +287,7 @@ Add run-level logging around:
 
 This gives one top-level timeline per user request.
 
-### 2. `GraphScheduler` And `AgentScheduler`
+### 2. `GraphScheduler`
 
 Add scheduler-level logging around:
 
@@ -491,7 +491,7 @@ Because logs include user commands and device names:
 ### Phase 2: Run And Graph Instrumentation
 
 - Instrument `HomeCommandOrchestrator` for `run.started`, `run.operationDetected`, `run.graphSelected`, `run.completed`, and `run.metrics`.
-- Instrument `GraphScheduler` and legacy `AgentScheduler` for node/agent lifecycle, retries, timeout, and circuit breaker events.
+- Instrument `GraphScheduler` for node/agent lifecycle, retries, timeout, and circuit breaker events.
 - Ensure `runID`, `graphID`, `stage`, `agentID`, `agentInvocationID`, attempt number, graph node ID, and action scope are included.
 
 ### Phase 3: Agent Input/Output Logging

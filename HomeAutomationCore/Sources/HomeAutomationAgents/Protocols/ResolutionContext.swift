@@ -16,6 +16,7 @@ public struct ResolutionContext: Sendable {
     public var selectedCandidateIDs: [String]
     public var aggregation: HomeCandidateAggregationResult?
     public var hydratedCandidates: [HomeCandidateRecord]
+    public var capabilityDecision: HomeCapabilityDecision?
     public var knowledgeSnippets: [KnowledgeSnippet]
     public var retrievalReports: [KnowledgeRetrievalReport]
     public var memoryHints: [MemoryHint]
@@ -68,6 +69,9 @@ public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
     public let source: String
     public let strategy: String
     public let query: String
+    public let sourceIDs: [String]
+    public let acceptedSourceIDs: [String]
+    public let rejectedSourceIDs: [String]
     public let returnedCount: Int
     public let acceptedCount: Int
     public let averageScore: Double
@@ -82,6 +86,9 @@ public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
         source: String,
         strategy: String,
         query: String,
+        sourceIDs: [String] = [],
+        acceptedSourceIDs: [String] = [],
+        rejectedSourceIDs: [String] = [],
         returnedCount: Int,
         acceptedCount: Int,
         averageScore: Double,
@@ -95,6 +102,9 @@ public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
         self.source = source
         self.strategy = strategy
         self.query = query
+        self.sourceIDs = sourceIDs
+        self.acceptedSourceIDs = acceptedSourceIDs
+        self.rejectedSourceIDs = rejectedSourceIDs
         self.returnedCount = returnedCount
         self.acceptedCount = acceptedCount
         self.averageScore = averageScore
@@ -116,18 +126,26 @@ public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
         query: String,
         results: [Double],
         minScore: Double,
+        sourceIDs: [String] = [],
         filterHints: [String: [String]] = [:],
         reformulatedQuery: String? = nil,
         retryCount: Int = 0
     ) -> KnowledgeRetrievalReport {
         let average = results.isEmpty ? 0 : results.reduce(0, +) / Double(results.count)
+        let acceptedIndexes = results.indices.filter { results[$0] >= minScore }
+        let rejectedIndexes = results.indices.filter { results[$0] < minScore }
+        let acceptedSourceIDs = acceptedIndexes.compactMap { sourceIDs.indices.contains($0) ? sourceIDs[$0] : nil }
+        let rejectedSourceIDs = rejectedIndexes.compactMap { sourceIDs.indices.contains($0) ? sourceIDs[$0] : nil }
         return KnowledgeRetrievalReport(
             agentID: agentID.rawValue,
             source: source,
             strategy: strategy,
             query: query,
+            sourceIDs: sourceIDs,
+            acceptedSourceIDs: acceptedSourceIDs,
+            rejectedSourceIDs: rejectedSourceIDs,
             returnedCount: results.count,
-            acceptedCount: results.filter { $0 >= minScore }.count,
+            acceptedCount: acceptedIndexes.count,
             averageScore: average,
             maxScore: results.max() ?? 0,
             minScore: minScore,
