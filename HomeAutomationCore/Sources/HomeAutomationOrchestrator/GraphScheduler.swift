@@ -20,7 +20,13 @@ public struct GraphScheduler: Sendable {
     ) async -> GraphSchedulerResult {
         logger.info("Starting graph \(graph.id, privacy: .public) for runID: \(runID, privacy: .public)")
         let metrics = GraphRunMetricsRecorder(graph: graph)
-        let initialContext = await contextStore.snapshot()
+        let initialContext = await measuredSnapshot(
+            contextStore: contextStore,
+            graph: graph,
+            runID: runID,
+            metrics: metrics,
+            stage: "validation"
+        )
         let validationErrors = GraphValidator().validate(
             graph,
             registry: registry,
@@ -55,177 +61,222 @@ public struct GraphScheduler: Sendable {
         let agentSelector = GraphAgentSelector()
         let retryController = GraphRetryController()
         let safetyGateHandler = GraphSafetyGateHandler()
+        let transitionPolicy = GraphTransitionPolicy()
+        var interruption: GraphCheckpointRecord?
 
-        while dependencies.hasPendingNodes {
-            let context = await contextStore.snapshot()
-            let candidates = dependencies.readyNodes(in: graph)
+        let firstExit = await withTaskGroup(
+            of: GraphNodeOutcome.self,
+            returning: AgentRunResult?.self
+        ) { group in
+            var runningNodeIDs = Set<String>()
+            var firstExit: AgentRunResult?
 
-            guard !candidates.isEmpty else {
-                let blockedNodes = dependencies.blockedNodes()
-                let allOptional = blockedNodes.allSatisfy { $0.executionPolicy == .optional }
-                if allOptional {
-                    await markPendingSkipped(
-                        dependencies.pendingNodeIDs,
-                        nodesByID: dependencies.nodesByID,
-                        agentSelector: agentSelector,
-                        registry: registry,
+            while dependencies.hasPendingNodes || !runningNodeIDs.isEmpty {
+                if firstExit == nil {
+                    let context = await measuredSnapshot(
+                        contextStore: contextStore,
                         graph: graph,
-                        eventBus: eventBus,
                         runID: runID,
                         metrics: metrics,
-                        reason: "Optional nodes blocked"
+                        stage: "scheduler"
                     )
+                    let candidates = dependencies.readyNodes(in: graph)
+                        .filter { !runningNodeIDs.contains($0.id) }
+                    for node in candidates {
+                        await metrics.markReady(nodeID: node.id, at: Date())
+                    }
+
+                    var runnable: [GraphNode] = []
+                    for node in candidates {
+                        if !guardEvaluator.evaluate(node.guardCondition, context: context, graph: graph, policy: policy) {
+                            dependencies.complete(node.id)
+                            await markSkipped(
+                                node: node,
+                                selectedAgentID: agentSelector.missingAgentID(for: node),
+                                eventBus: eventBus,
+                                runID: runID,
+                                metrics: metrics,
+                                detail: "Graph guard not satisfied"
+                            )
+                            await saveCheckpoint(
+                                options: options,
+                                graph: graph,
+                                runID: runID,
+                                dependencies: dependencies,
+                                context: await measuredSnapshot(
+                                    contextStore: contextStore,
+                                    graph: graph,
+                                    runID: runID,
+                                    metrics: metrics,
+                                    stage: node.id
+                                ),
+                                lastCompletedNodeID: node.id
+                            )
+                            continue
+                        }
+
+                        if options.shouldInterrupt(before: node) {
+                            if runningNodeIDs.isEmpty {
+                                let checkpoint = await makeCheckpoint(
+                                    graph: graph,
+                                    runID: runID,
+                                    dependencies: dependencies,
+                                    context: context,
+                                    lastCompletedNodeID: dependencies.completedNodeIDs.sorted().last,
+                                    interruptedBeforeNodeID: node.id,
+                                    interrupt: node.interrupt ?? GraphInterrupt(
+                                        kind: .confirmation,
+                                        reason: "Caller requested interruption before \(node.id)."
+                                    )
+                                )
+                                await options.checkpointStore?.save(checkpoint)
+                                await eventBus.publish(
+                                    OrchestratorPipelineEvent(
+                                        runID: runID,
+                                        stage: node.id,
+                                        agentID: agentSelector.missingAgentID(for: node)?.rawValue,
+                                        status: .skipped,
+                                        detail: checkpoint.interrupt?.reason ?? "Graph interrupted"
+                                    )
+                                )
+                                await HomeAutomationTelemetry.shared.log(
+                                    "graph.interrupted",
+                                    context: HomeAutomationTelemetryScope.current?.merging(
+                                        runID: runID.uuidString,
+                                        operation: graph.goal.rawValue,
+                                        graphID: graph.id,
+                                        stage: node.id,
+                                        graphNodeID: node.id,
+                                        runtimeMode: "graph"
+                                    ),
+                                    status: "paused",
+                                    payload: [
+                                        "interruptedBeforeNodeID": node.id,
+                                        "interruptKind": checkpoint.interrupt?.kind.rawValue ?? "",
+                                        "reason": checkpoint.interrupt?.reason ?? ""
+                                    ]
+                                )
+                                interruption = checkpoint
+                                return Optional<AgentRunResult>.none
+                            }
+                            continue
+                        }
+
+                        runnable.append(node)
+                    }
+
+                    if !runnable.isEmpty {
+                        await metrics.recordBatch(size: runnable.count)
+                    }
+
+                    for node in runnable {
+                        runningNodeIDs.insert(node.id)
+                        let startContext = context
+                        group.addTask {
+                            await self.runNode(
+                                node,
+                                graph: graph,
+                                agentSelector: agentSelector,
+                                retryController: retryController,
+                                safetyGateHandler: safetyGateHandler,
+                                transitionPolicy: transitionPolicy,
+                                registry: registry,
+                                context: startContext,
+                                contextStore: contextStore,
+                                eventBus: eventBus,
+                                policy: policy,
+                                circuitBreakers: circuitBreakers,
+                                runID: runID,
+                                metrics: metrics
+                            )
+                        }
+                    }
+
+                    if runningNodeIDs.isEmpty && dependencies.hasPendingNodes {
+                        let nextReady = dependencies.readyNodes(in: graph)
+                        if !nextReady.isEmpty {
+                            continue
+                        }
+
+                        let blockedNodes = dependencies.blockedNodes()
+                        let allOptional = blockedNodes.allSatisfy { $0.executionPolicy == .optional }
+                        if allOptional {
+                            await markPendingSkipped(
+                                dependencies.pendingNodeIDs,
+                                nodesByID: dependencies.nodesByID,
+                                agentSelector: agentSelector,
+                                registry: registry,
+                                graph: graph,
+                                eventBus: eventBus,
+                                runID: runID,
+                                metrics: metrics,
+                                reason: "Optional nodes blocked"
+                            )
+                            break
+                        }
+
+                        let blocked = dependencies.pendingNodeIDs.sorted().joined(separator: ", ")
+                        let failure = AgentFailure(
+                            agentID: AgentID("graphScheduler"),
+                            reason: "No ready graph nodes. Blocked nodes: \(blocked)",
+                            isRetryable: false
+                        )
+                        await eventBus.publish(
+                            OrchestratorPipelineEvent(
+                                runID: runID,
+                                stage: graph.id,
+                                agentID: "graphScheduler",
+                                status: .failed,
+                                detail: failure.reason
+                            )
+                        )
+                        await markPendingSkipped(
+                            dependencies.pendingNodeIDs,
+                            nodesByID: dependencies.nodesByID,
+                            agentSelector: agentSelector,
+                            registry: registry,
+                            graph: graph,
+                            eventBus: eventBus,
+                            runID: runID,
+                            metrics: metrics,
+                            reason: "Graph blocked"
+                        )
+                        return .terminalFailure(failure)
+                    }
+                }
+
+                guard !runningNodeIDs.isEmpty else {
+                    if firstExit != nil {
+                        break
+                    }
+                    continue
+                }
+
+                guard let outcome = await group.next() else {
                     break
                 }
-                
-                let blocked = dependencies.pendingNodeIDs.sorted().joined(separator: ", ")
-                let failure = AgentFailure(
-                    agentID: AgentID("graphScheduler"),
-                    reason: "No ready graph nodes. Blocked nodes: \(blocked)",
-                    isRetryable: false
-                )
-                await eventBus.publish(
-                    OrchestratorPipelineEvent(
-                        runID: runID,
-                        stage: graph.id,
-                        agentID: "graphScheduler",
-                        status: .failed,
-                        detail: failure.reason
-                    )
-                )
-                await markPendingSkipped(
-                    dependencies.pendingNodeIDs,
-                    nodesByID: dependencies.nodesByID,
-                    agentSelector: agentSelector,
-                    registry: registry,
-                    graph: graph,
-                    eventBus: eventBus,
-                    runID: runID,
-                    metrics: metrics,
-                    reason: "Graph blocked"
-                )
-                return GraphSchedulerResult(
-                    exit: .terminalFailure(failure),
-                    metrics: await metrics.finish()
-                )
-            }
-
-            var runnable: [GraphNode] = []
-            for node in candidates {
-                if guardEvaluator.evaluate(node.guardCondition, context: context, graph: graph, policy: policy) {
-                    runnable.append(node)
-                } else {
-                    dependencies.complete(node.id)
-                    await markSkipped(
-                        node: node,
-                        selectedAgentID: agentSelector.missingAgentID(for: node),
-                        eventBus: eventBus,
-                        runID: runID,
-                        metrics: metrics,
-                        detail: "Graph guard not satisfied"
-                    )
-                    await saveCheckpoint(
-                        options: options,
-                        graph: graph,
-                        runID: runID,
-                        dependencies: dependencies,
-                        context: await contextStore.snapshot(),
-                        lastCompletedNodeID: node.id
-                    )
-                }
-            }
-
-            guard !runnable.isEmpty else {
-                continue
-            }
-
-            if let interruptNode = runnable.first(where: { options.shouldInterrupt(before: $0) }) {
-                let checkpoint = await makeCheckpoint(
+                runningNodeIDs.remove(outcome.nodeID)
+                dependencies.complete(outcome.nodeID)
+                await saveCheckpoint(
+                    options: options,
                     graph: graph,
                     runID: runID,
                     dependencies: dependencies,
-                    context: await contextStore.snapshot(),
-                    lastCompletedNodeID: dependencies.completedNodeIDs.sorted().last,
-                    interruptedBeforeNodeID: interruptNode.id,
-                    interrupt: interruptNode.interrupt ?? GraphInterrupt(
-                        kind: .confirmation,
-                        reason: "Caller requested interruption before \(interruptNode.id)."
-                    )
-                )
-                await options.checkpointStore?.save(checkpoint)
-                await eventBus.publish(
-                    OrchestratorPipelineEvent(
-                        runID: runID,
-                        stage: interruptNode.id,
-                        agentID: agentSelector.missingAgentID(for: interruptNode)?.rawValue,
-                        status: .skipped,
-                        detail: checkpoint.interrupt?.reason ?? "Graph interrupted"
-                    )
-                )
-                await HomeAutomationTelemetry.shared.log(
-                    "graph.interrupted",
-                    context: HomeAutomationTelemetryScope.current?.merging(
-                        runID: runID.uuidString,
-                        operation: graph.goal.rawValue,
-                        graphID: graph.id,
-                        stage: interruptNode.id,
-                        graphNodeID: interruptNode.id,
-                        runtimeMode: "graph"
-                    ),
-                    status: "paused",
-                    payload: [
-                        "interruptedBeforeNodeID": interruptNode.id,
-                        "interruptKind": checkpoint.interrupt?.kind.rawValue ?? "",
-                        "reason": checkpoint.interrupt?.reason ?? ""
-                    ]
-                )
-                return GraphSchedulerResult(
-                    exit: nil,
-                    metrics: await metrics.finish(),
-                    interruption: checkpoint
-                )
-            }
-
-            let firstExit = await withTaskGroup(of: GraphNodeOutcome.self) { group in
-                for node in runnable {
-                    group.addTask {
-                        await self.runNode(
-                            node,
-                            graph: graph,
-                            agentSelector: agentSelector,
-                            retryController: retryController,
-                            safetyGateHandler: safetyGateHandler,
-                            registry: registry,
-                            context: context,
-                            contextStore: contextStore,
-                            eventBus: eventBus,
-                            policy: policy,
-                            circuitBreakers: circuitBreakers,
-                            runID: runID,
-                            metrics: metrics
-                        )
-                    }
-                }
-
-                var firstExit: AgentRunResult?
-                for await outcome in group {
-                    dependencies.complete(outcome.nodeID)
-                    await saveCheckpoint(
-                        options: options,
+                    context: await measuredSnapshot(
+                        contextStore: contextStore,
                         graph: graph,
                         runID: runID,
-                        dependencies: dependencies,
-                        context: await contextStore.snapshot(),
-                        lastCompletedNodeID: outcome.nodeID
-                    )
-                    if firstExit == nil, let exit = outcome.exit {
-                        firstExit = exit
-                    }
+                        metrics: metrics,
+                        stage: outcome.nodeID
+                    ),
+                    lastCompletedNodeID: outcome.nodeID
+                )
+                if firstExit == nil, let exit = outcome.exit {
+                    firstExit = exit
                 }
-                return firstExit
             }
 
-            if let firstExit {
+            if firstExit != nil {
                 await markPendingSkipped(
                     dependencies.pendingNodeIDs,
                     nodesByID: dependencies.nodesByID,
@@ -237,8 +288,20 @@ public struct GraphScheduler: Sendable {
                     metrics: metrics,
                     reason: "Terminal graph exit"
                 )
-                return GraphSchedulerResult(exit: firstExit, metrics: await metrics.finish())
             }
+            return firstExit
+        }
+
+        if let interruption {
+            return GraphSchedulerResult(
+                exit: nil,
+                metrics: await metrics.finish(),
+                interruption: interruption
+            )
+        }
+
+        if let firstExit {
+            return GraphSchedulerResult(exit: firstExit, metrics: await metrics.finish())
         }
 
         logger.info("Graph \(graph.id, privacy: .public) completed without terminal exit.")
@@ -251,6 +314,68 @@ public struct GraphScheduler: Sendable {
             lastCompletedNodeID: dependencies.completedNodeIDs.sorted().last
         )
         return GraphSchedulerResult(exit: nil, metrics: await metrics.finish())
+    }
+
+    private func measuredSnapshot(
+        contextStore: ResolutionContextStore,
+        graph: OrchestrationGraph,
+        runID: UUID,
+        metrics: GraphRunMetricsRecorder,
+        stage: String
+    ) async -> ResolutionContext {
+        let start = Date()
+        let context = await contextStore.snapshot()
+        let duration = Date().timeIntervalSince(start)
+        await metrics.recordSnapshot(duration: duration, contextKeyCount: context.contextKeyCount)
+        await HomeAutomationTelemetry.shared.log(
+            "context.snapshot",
+            context: HomeAutomationTelemetryScope.current?.merging(
+                runID: runID.uuidString,
+                operation: graph.goal.rawValue,
+                graphID: graph.id,
+                stage: stage,
+                runtimeMode: "graph"
+            ),
+            status: "completed",
+            durationMs: duration * 1_000,
+            payload: [
+                "contextKeyCount": String(context.contextKeyCount)
+            ]
+        )
+        return context
+    }
+
+    private func measuredApply(
+        _ patch: ResolutionContextPatch,
+        contextStore: ResolutionContextStore,
+        graph: OrchestrationGraph,
+        runID: UUID,
+        metrics: GraphRunMetricsRecorder,
+        stage: String
+    ) async {
+        let start = Date()
+        await contextStore.apply(patch)
+        let duration = Date().timeIntervalSince(start)
+        await metrics.recordApply(duration: duration)
+        await HomeAutomationTelemetry.shared.log(
+            "context.apply",
+            context: HomeAutomationTelemetryScope.current?.merging(
+                runID: runID.uuidString,
+                operation: graph.goal.rawValue,
+                graphID: graph.id,
+                stage: stage,
+                graphNodeID: stage,
+                agentID: patch.agentID.rawValue,
+                runtimeMode: "graph"
+            ),
+            status: "completed",
+            durationMs: duration * 1_000,
+            payload: [
+                "updateCount": String(patch.updates.count),
+                "scopedUpdateCount": String(patch.scopedUpdates.values.reduce(0) { $0 + $1.count }),
+                "hasTransitionRequest": String(patch.transitionRequest != nil)
+            ]
+        )
     }
 
     private func resumeNodeIDs(
@@ -343,6 +468,7 @@ public struct GraphScheduler: Sendable {
         agentSelector: GraphAgentSelector,
         retryController: GraphRetryController,
         safetyGateHandler: GraphSafetyGateHandler,
+        transitionPolicy: GraphTransitionPolicy,
         registry: AgentRegistry,
         context: ResolutionContext,
         contextStore: ResolutionContextStore,
@@ -447,6 +573,7 @@ public struct GraphScheduler: Sendable {
         repeat {
             attemptCount += 1
             start = Date()
+            await metrics.markQueuedStart(nodeID: node.id, at: start)
             await metrics.markRunning(nodeID: node.id, agentID: agentID, startedAt: start)
             let telemetryContext = baseTelemetryContext.merging(
                 agentInvocationID: Self.agentInvocationID(
@@ -522,25 +649,54 @@ public struct GraphScheduler: Sendable {
 
         switch result {
         case .success(let patch):
-            await contextStore.apply(patch)
+            await measuredApply(
+                patch,
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            )
         case .retryableFailure(let failure), .terminalFailure(let failure):
             await contextStore.appendError(failure)
         case .clarification, .unsupported:
             break
         }
 
+        var transitionExit: AgentRunResult?
+        if case .success(let patch) = result,
+           let transitionRequest = patch.transitionRequest {
+            transitionExit = await handleTransition(
+                transitionRequest,
+                node: node,
+                agentID: agentID,
+                manifest: selection.manifest,
+                graph: graph,
+                transitionPolicy: transitionPolicy,
+                safetyGateHandler: safetyGateHandler,
+                contextStore: contextStore,
+                eventBus: eventBus,
+                policy: policy,
+                circuitBreakers: circuitBreakers,
+                registry: registry,
+                runID: runID,
+                metrics: metrics
+            )
+        }
+
+        let effectiveResult = transitionExit ?? result
         await eventBus.publish(
             OrchestratorPipelineEvent(
                 runID: runID,
                 stage: node.id,
                 agentID: agentID.rawValue,
-                status: eventStatus(for: result),
-                detail: detail(for: result)
+                status: eventStatus(for: effectiveResult),
+                detail: detail(for: effectiveResult)
             )
         )
         await metrics.markFinished(
             nodeID: node.id,
-            status: eventStatus(for: result) == .completed ? .completed : .failed,
+            status: eventStatus(for: effectiveResult) == .completed ? .completed : .failed,
             startedAt: start,
             endedAt: end
         )
@@ -553,7 +709,13 @@ public struct GraphScheduler: Sendable {
                 let exit = await safetyGateHandler.failClosed(
                     for: agentID,
                     reason: "mandatory gate failed",
-                    context: await contextStore.snapshot(),
+                    context: await measuredSnapshot(
+                        contextStore: contextStore,
+                        graph: graph,
+                        runID: runID,
+                        metrics: metrics,
+                        stage: node.id
+                    ),
                     contextStore: contextStore,
                     policy: policy
                 )
@@ -561,15 +723,203 @@ public struct GraphScheduler: Sendable {
             }
         }
 
-        if policy.isTerminalExit(result) {
-            return GraphNodeOutcome(nodeID: node.id, exit: result)
+        if policy.isTerminalExit(effectiveResult) {
+            return GraphNodeOutcome(nodeID: node.id, exit: effectiveResult)
         }
 
-        if shouldStopAfterContextResolution(await contextStore.snapshot(), after: agentID) {
+        if let transitionExit {
+            return GraphNodeOutcome(nodeID: node.id, exit: transitionExit)
+        }
+
+        if shouldStopAfterContextResolution(
+            await measuredSnapshot(
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            ),
+            after: agentID
+        ) {
             return GraphNodeOutcome(nodeID: node.id, exit: result)
         }
 
         return GraphNodeOutcome(nodeID: node.id, exit: nil)
+    }
+
+    private func handleTransition(
+        _ request: GraphTransitionRequest,
+        node: GraphNode,
+        agentID: AgentID,
+        manifest: AgentManifest,
+        graph: OrchestrationGraph,
+        transitionPolicy: GraphTransitionPolicy,
+        safetyGateHandler: GraphSafetyGateHandler,
+        contextStore: ResolutionContextStore,
+        eventBus: AgentEventBus,
+        policy: OrchestratorPolicyEngine,
+        circuitBreakers: CircuitBreakerRegistry,
+        registry: AgentRegistry,
+        runID: UUID,
+        metrics: GraphRunMetricsRecorder
+    ) async -> AgentRunResult? {
+        let context = await measuredSnapshot(
+            contextStore: contextStore,
+            graph: graph,
+            runID: runID,
+            metrics: metrics,
+            stage: node.id
+        )
+        let decision = transitionPolicy.evaluate(
+            request,
+            node: node,
+            agentID: agentID,
+            manifest: manifest,
+            context: context,
+            graph: graph,
+            safetyGateHandler: safetyGateHandler,
+            policy: policy
+        )
+        let decisionSummary = decision.isApproved ? "approved" : "rejected:\(decision.detail)"
+        await metrics.recordTransition(nodeID: node.id, request: request, decision: decisionSummary)
+        await HomeAutomationTelemetry.shared.log(
+            "graph.transition",
+            context: HomeAutomationTelemetryScope.current?.merging(
+                runID: runID.uuidString,
+                operation: graph.goal.rawValue,
+                graphID: graph.id,
+                stage: node.id,
+                graphNodeID: node.id,
+                agentID: agentID.rawValue,
+                runtimeMode: "graph"
+            ),
+            status: decision.isApproved ? "approved" : "rejected",
+            payload: [
+                "transitionKind": request.kind,
+                "reason": request.reason,
+                "decision": decision.detail
+            ]
+        )
+
+        guard decision.isApproved else {
+            let failure = AgentFailure(
+                agentID: agentID,
+                reason: "Graph transition \(request.kind) rejected: \(decision.detail)",
+                isRetryable: false
+            )
+            await contextStore.appendError(failure)
+            return .terminalFailure(failure)
+        }
+
+        switch request {
+        case .routeToClarification(let question, _):
+            let patch = ResolutionContextPatch(
+                agentID: agentID,
+                updates: [
+                    ResolutionContextPatchKey.resolution.rawValue: AnySendableValue(HomeCommandResolution.needsClarification(question))
+                ]
+            )
+            await measuredApply(
+                patch,
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            )
+            return .clarification(question)
+        case .routeToUnsupported(let reason):
+            let patch = ResolutionContextPatch(
+                agentID: agentID,
+                updates: [
+                    ResolutionContextPatchKey.resolution.rawValue: AnySendableValue(HomeCommandResolution.unsupported(reason))
+                ]
+            )
+            await measuredApply(
+                patch,
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            )
+            return .unsupported(reason)
+        case .routeToFallback(let reason):
+            let result = await GraphScheduler().execute(
+                GraphPlanner.fallbackGraph(),
+                registry: registry,
+                contextStore: contextStore,
+                eventBus: eventBus,
+                policy: policy,
+                circuitBreakers: circuitBreakers,
+                runID: runID
+            )
+            if let exit = result.exit {
+                return exit
+            }
+            let latest = await measuredSnapshot(
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            )
+            if latest.resolution != nil {
+                return .success(ResolutionContextPatch(agentID: agentID))
+            }
+            return .unsupported("Fallback transition did not produce a resolution: \(reason)")
+        case .insertConfirmationBeforeExecution(let reason):
+            guard let draft = context.draft else {
+                return .terminalFailure(
+                    AgentFailure(
+                        agentID: agentID,
+                        reason: "Cannot insert confirmation without a command draft: \(reason)",
+                        isRetryable: false
+                    )
+                )
+            }
+            let patch = ResolutionContextPatch(
+                agentID: agentID,
+                updates: [
+                    ResolutionContextPatchKey.resolution.rawValue: AnySendableValue(HomeCommandResolution.requiresConfirmation(draft))
+                ]
+            )
+            await measuredApply(
+                patch,
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            )
+            return .success(patch)
+        case .retryWithAlternateCapability(let capability, let command, let reason):
+            var evidence = context.capabilityDecision?.evidence ?? []
+            evidence.append("Graph transition requested alternate capability: \(reason)")
+            let decision = HomeCapabilityDecision(
+                selectedCapability: capability,
+                selectedCommand: command,
+                targetDeviceID: context.capabilityDecision?.targetDeviceID,
+                alternatives: context.capabilityDecision?.alternatives ?? [],
+                evidence: evidence,
+                confidence: max(context.capabilityDecision?.confidence ?? 0, 0.7)
+            )
+            let patch = ResolutionContextPatch(
+                agentID: agentID,
+                updates: [
+                    ResolutionContextPatchKey.capabilityDecision.rawValue: AnySendableValue(decision)
+                ]
+            )
+            await measuredApply(
+                patch,
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: node.id
+            )
+            return nil
+        }
     }
 
     private func record(result: AgentRunResult, breaker: AgentCircuitBreaker, registry: CircuitBreakerRegistry) async {
@@ -715,6 +1065,7 @@ private struct GraphNodeOutcome: Sendable {
 
 private actor GraphRunMetricsRecorder {
     private var metrics: GraphRunMetrics
+    private var readyAt: [String: Date] = [:]
 
     init(graph: OrchestrationGraph) {
         var nodeStatuses: [String: GraphNodeRunStatus] = [:]
@@ -739,6 +1090,16 @@ private actor GraphRunMetricsRecorder {
         metrics.selectedAgents[nodeID] = agentID.rawValue
     }
 
+    func markReady(nodeID: String, at: Date) {
+        readyAt[nodeID] = readyAt[nodeID] ?? at
+    }
+
+    func markQueuedStart(nodeID: String, at: Date) {
+        if let ready = readyAt[nodeID] {
+            metrics.nodeQueueDurations[nodeID] = at.timeIntervalSince(ready)
+        }
+    }
+
     func markFinished(
         nodeID: String,
         status: GraphNodeRunStatus,
@@ -757,6 +1118,23 @@ private actor GraphRunMetricsRecorder {
         if !metrics.skippedNodeIDs.contains(nodeID) {
             metrics.skippedNodeIDs.append(nodeID)
         }
+    }
+
+    func recordSnapshot(duration: TimeInterval, contextKeyCount: Int) {
+        metrics.contextSnapshotDurations.append(duration)
+        metrics.contextKeyCounts.append(contextKeyCount)
+    }
+
+    func recordApply(duration: TimeInterval) {
+        metrics.contextApplyDurations.append(duration)
+    }
+
+    func recordBatch(size: Int) {
+        metrics.runnableBatchSizes.append(size)
+    }
+
+    func recordTransition(nodeID: String, request: GraphTransitionRequest, decision: String) {
+        metrics.transitionDecisions.append("\(nodeID):\(request.kind):\(decision)")
     }
 
     func finish() -> GraphRunMetrics {

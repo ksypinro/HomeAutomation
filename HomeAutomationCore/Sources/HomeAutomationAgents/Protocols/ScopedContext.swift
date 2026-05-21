@@ -38,6 +38,112 @@ public struct ScopedContextKey<Value: Sendable>: Sendable, Hashable {
     }
 }
 
+public struct ContextArtifactKey<Value: Sendable>: Sendable, Hashable {
+    public let name: String
+    public let scope: ContextScope
+    public let valueTypeName: String
+    public let debugDescription: String?
+
+    public init(
+        _ name: String,
+        scope: ContextScope,
+        debugDescription: String? = nil
+    ) {
+        self.name = name
+        self.scope = scope
+        self.valueTypeName = String(reflecting: Value.self)
+        self.debugDescription = debugDescription
+    }
+
+    public var descriptor: ContextArtifactDescriptor {
+        ContextArtifactDescriptor(
+            name: name,
+            scope: scope,
+            valueTypeName: valueTypeName,
+            debugDescription: debugDescription
+        )
+    }
+
+    public func scoped(to scope: ContextScope) -> ContextArtifactKey<Value> {
+        ContextArtifactKey<Value>(
+            name,
+            scope: scope,
+            debugDescription: debugDescription
+        )
+    }
+}
+
+public struct ContextArtifactDescriptor: Sendable, Hashable, Codable, CustomStringConvertible {
+    public let name: String
+    public let scope: ContextScope
+    public let valueTypeName: String
+    public let debugDescription: String?
+
+    public init(
+        name: String,
+        scope: ContextScope,
+        valueTypeName: String,
+        debugDescription: String? = nil
+    ) {
+        self.name = name
+        self.scope = scope
+        self.valueTypeName = valueTypeName
+        self.debugDescription = debugDescription
+    }
+
+    public var storageKey: String {
+        "\(scope.description).\(name)"
+    }
+
+    public var description: String {
+        "\(storageKey)<\(valueTypeName)>"
+    }
+}
+
+public enum ContextArtifactRequirement: String, Sendable, Hashable, Codable {
+    case required
+    case optional
+}
+
+public struct ContextArtifactContract: Sendable, Hashable, Codable {
+    public let descriptor: ContextArtifactDescriptor
+    public let requirement: ContextArtifactRequirement
+
+    public init(
+        descriptor: ContextArtifactDescriptor,
+        requirement: ContextArtifactRequirement = .required
+    ) {
+        self.descriptor = descriptor
+        self.requirement = requirement
+    }
+
+    public static func required<Value: Sendable>(
+        _ key: ContextArtifactKey<Value>
+    ) -> ContextArtifactContract {
+        ContextArtifactContract(descriptor: key.descriptor, requirement: .required)
+    }
+
+    public static func optional<Value: Sendable>(
+        _ key: ContextArtifactKey<Value>
+    ) -> ContextArtifactContract {
+        ContextArtifactContract(descriptor: key.descriptor, requirement: .optional)
+    }
+}
+
+public enum ContextArtifactError: LocalizedError, Sendable, Hashable {
+    case missing(key: ContextArtifactDescriptor)
+    case typeMismatch(key: ContextArtifactDescriptor, actualTypeName: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missing(let key):
+            return "Missing context artifact \(key.storageKey). Expected \(key.valueTypeName)."
+        case .typeMismatch(let key, let actualTypeName):
+            return "Context artifact \(key.storageKey) has type \(actualTypeName), expected \(key.valueTypeName)."
+        }
+    }
+}
+
 public enum ScopedContextKeys {
     public static func operation(
         in scope: ContextScope = .operation
@@ -91,5 +197,77 @@ public enum ScopedContextKeys {
         in scope: ContextScope = .backend("smartthings")
     ) -> ScopedContextKey<SmartThingsRuleCreationReceipt> {
         ScopedContextKey("smartThingsRuleCreation", scope: scope)
+    }
+}
+
+public enum ContextArtifactKeys {
+    public static func automationRuleDraft(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<HomeAutomationRuleDraft> {
+        ContextArtifactKey(
+            "automationDraft",
+            scope: scope,
+            debugDescription: "Automation rule draft extracted from the user request."
+        )
+    }
+
+    public static func automationPlan(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<HomeAutomationCreationPlan> {
+        ContextArtifactKey(
+            "automationPlan",
+            scope: scope,
+            debugDescription: "Compiled automation creation plan."
+        )
+    }
+
+    public static func resolvedAction(
+        in scope: ContextScope
+    ) -> ContextArtifactKey<HomeAutomationResolvedAction> {
+        ContextArtifactKey(
+            "automationResolvedAction",
+            scope: scope,
+            debugDescription: "Resolved automation action for an action subgraph scope."
+        )
+    }
+
+    public static func commandDraft(
+        in scope: ContextScope
+    ) -> ContextArtifactKey<HomeCommandDraft> {
+        ContextArtifactKey(
+            "draft",
+            scope: scope,
+            debugDescription: "Direct-command draft resolved inside a scoped graph."
+        )
+    }
+
+    public static func validation(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<AutomationValidationResult> {
+        ContextArtifactKey(
+            "automationValidation",
+            scope: scope,
+            debugDescription: "Automation validation result."
+        )
+    }
+
+    public static func smartThingsRule(
+        in scope: ContextScope = .backend("smartthings")
+    ) -> ContextArtifactKey<SmartThingsRuleDocument> {
+        ContextArtifactKey(
+            "smartThingsRule",
+            scope: scope,
+            debugDescription: "SmartThings rule document produced by compilation."
+        )
+    }
+
+    public static func smartThingsRuleCreation(
+        in scope: ContextScope = .backend("smartthings")
+    ) -> ContextArtifactKey<SmartThingsRuleCreationReceipt> {
+        ContextArtifactKey(
+            "smartThingsRuleCreation",
+            scope: scope,
+            debugDescription: "SmartThings rule creation receipt."
+        )
     }
 }

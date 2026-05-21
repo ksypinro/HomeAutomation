@@ -47,9 +47,41 @@ public struct ResolutionContext: Sendable {
         scopedValues[key.scope]?[key.name]?.get(Value.self)
     }
 
+    public var artifacts: ContextArtifactStore {
+        ContextArtifactStore(scopedValues: scopedValues)
+    }
+
+    public func artifact<Value: Sendable>(
+        for key: ContextArtifactKey<Value>
+    ) -> Value? {
+        scopedValues[key.scope]?[key.name]?.get(Value.self)
+    }
+
+    public func requireArtifact<Value: Sendable>(
+        for key: ContextArtifactKey<Value>
+    ) throws -> Value {
+        guard let value = scopedValues[key.scope]?[key.name] else {
+            throw ContextArtifactError.missing(key: key.descriptor)
+        }
+        guard let typed = value.get(Value.self) else {
+            throw ContextArtifactError.typeMismatch(
+                key: key.descriptor,
+                actualTypeName: value.typeName
+            )
+        }
+        return typed
+    }
+
     public mutating func setScopedValue<Value: Sendable>(
         _ value: Value,
         for key: ScopedContextKey<Value>
+    ) {
+        scopedValues[key.scope, default: [:]][key.name] = AnySendableValue(value)
+    }
+
+    public mutating func setArtifact<Value: Sendable>(
+        _ value: Value,
+        for key: ContextArtifactKey<Value>
     ) {
         scopedValues[key.scope, default: [:]][key.name] = AnySendableValue(value)
     }
@@ -62,7 +94,116 @@ public struct ResolutionContext: Sendable {
             scopedValues[scope, default: [:]][key] = value
         }
     }
+
+    public var contextKeyCount: Int {
+        var count = 2
+        if operation != nil { count += 1 }
+        if language != nil { count += 1 }
+        if domain != nil { count += 1 }
+        if intent != nil { count += 1 }
+        if deviceType != nil { count += 1 }
+        if slots != nil { count += 1 }
+        if risk != nil { count += 1 }
+        if resolutionState != nil { count += 1 }
+        if !retrievedCandidates.isEmpty { count += 1 }
+        if !selectedCandidateIDs.isEmpty { count += 1 }
+        if aggregation != nil { count += 1 }
+        if !hydratedCandidates.isEmpty { count += 1 }
+        if capabilityDecision != nil { count += 1 }
+        if !knowledgeSnippets.isEmpty { count += 1 }
+        if !retrievalReports.isEmpty { count += 1 }
+        if !memoryHints.isEmpty { count += 1 }
+        if instructionPackage != nil { count += 1 }
+        if draft != nil { count += 1 }
+        if executionPlan != nil { count += 1 }
+        if resolution != nil { count += 1 }
+        count += scopedValues.values.reduce(0) { $0 + $1.count }
+        return count
+    }
 }
+
+public struct ContextArtifactStore: Sendable {
+    private let scopedValues: [ContextScope: [String: AnySendableValue]]
+
+    public init(scopedValues: [ContextScope: [String: AnySendableValue]]) {
+        self.scopedValues = scopedValues
+    }
+
+    public func artifact<Value: Sendable>(
+        for key: ContextArtifactKey<Value>
+    ) -> Value? {
+        scopedValues[key.scope]?[key.name]?.get(Value.self)
+    }
+
+    public func requireArtifact<Value: Sendable>(
+        for key: ContextArtifactKey<Value>
+    ) throws -> Value {
+        guard let value = scopedValues[key.scope]?[key.name] else {
+            throw ContextArtifactError.missing(key: key.descriptor)
+        }
+        guard let typed = value.get(Value.self) else {
+            throw ContextArtifactError.typeMismatch(
+                key: key.descriptor,
+                actualTypeName: value.typeName
+            )
+        }
+        return typed
+    }
+}
+
+public protocol RequestContextFacet {
+    var request: CommandRequest { get }
+}
+
+public protocol OperationContextFacet: RequestContextFacet {
+    var operation: HomeOperationDetectionResult? { get }
+}
+
+public protocol NLUContextFacet: RequestContextFacet {
+    var language: HomeLanguageDetectionResult? { get }
+    var domain: HomeDomainClassificationResult? { get }
+    var intent: HomeIntentFamilyResult? { get }
+    var deviceType: HomeDeviceTypeResult? { get }
+    var slots: HomeSlotExtractionResult? { get }
+    var risk: HomeRiskClassificationResult? { get }
+    var resolutionState: HomeResolutionState? { get }
+}
+
+public protocol KnowledgeContextFacet: RequestContextFacet {
+    var knowledgeSnippets: [KnowledgeSnippet] { get }
+    var retrievalReports: [KnowledgeRetrievalReport] { get }
+    var memoryHints: [MemoryHint] { get }
+}
+
+public protocol CandidateContextFacet: RequestContextFacet {
+    var retrievedCandidates: [HomeCandidateRecord] { get }
+    var selectedCandidateIDs: [String] { get }
+    var aggregation: HomeCandidateAggregationResult? { get }
+    var hydratedCandidates: [HomeCandidateRecord] { get }
+}
+
+public protocol CapabilityContextFacet: NLUContextFacet, CandidateContextFacet, KnowledgeContextFacet {
+    var capabilityDecision: HomeCapabilityDecision? { get }
+}
+
+public protocol AutomationContextFacet: OperationContextFacet {
+    var artifacts: ContextArtifactStore { get }
+}
+
+public protocol ExecutionContextFacet: CapabilityContextFacet {
+    var instructionPackage: HomeModelInstructionPackage? { get }
+    var draft: HomeCommandDraft? { get }
+    var executionPlan: HomeAutomationExecutionPlan? { get }
+    var resolution: HomeCommandResolution? { get }
+}
+
+extension ResolutionContext: OperationContextFacet,
+    NLUContextFacet,
+    KnowledgeContextFacet,
+    CandidateContextFacet,
+    CapabilityContextFacet,
+    AutomationContextFacet,
+    ExecutionContextFacet {}
 
 public struct KnowledgeRetrievalReport: Sendable, Codable, Hashable {
     public let agentID: String

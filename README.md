@@ -259,9 +259,10 @@ flowchart LR
 | `HomeCommandOrchestrator` | Main command resolver. Creates context, streams events, runs the root routing graph, assembles `HomeAutomationResolverResult`, records metrics, and stores conversation turns. |
 | `GraphPlanner` | Builds operation graphs for root routing, direct command, fallback, automation creation, and unsupported handling. |
 | `OperationGraphCatalog` | Selects the graph provider for each detected operation and model-availability policy. |
-| `GraphScheduler` | Executes DAG nodes, checks circuit breakers, runs agents, applies patches, records traces, and fails closed for mandatory gates. |
+| `GraphScheduler` | Executes DAG nodes as dependencies complete, checks circuit breakers, runs agents, applies typed patches, records traces, handles approved graph transitions, and fails closed for mandatory gates. |
 | `AgentRegistry` | Stores `AnyHomeAgent` instances by `AgentID` and capability. |
-| `ResolutionContextStore` | Actor-backed holder for the evolving `ResolutionContext`. |
+| `ResolutionContextStore` | Actor-backed holder for the evolving `ResolutionContext`, including typed scoped artifacts and legacy string-key compatibility. |
+| `ContextArtifactKey` / context facets | Typed artifact exchange and read-only context slices used to reduce raw string coupling between graph agents. |
 | `AgentEventBus` | Async event stream for UI timeline updates. |
 | `OrchestratorPolicyEngine` | Central policy for model availability, retry limits, terminal exits, execution eligibility, and fail-closed safety behavior. |
 | `CircuitBreakerRegistry` | Per-agent circuit breaker registry. |
@@ -281,7 +282,7 @@ flowchart LR
 | `SlotExtractionAgent` | `String` | `HomeSlotExtractionResult` | Extracts rooms, device nicknames, numeric values, units, and modes from the command text. |
 | `RiskClassificationAgent` | `String` | `HomeRiskClassificationResult` | Produces initial risk estimate (`.low`/`.medium`/`.high`/`.critical`) as advisory signal for downstream safety gates. |
 
-All 6 NLU agents run **in parallel** during Phase 1 of the orchestrator pipeline. Each supports optional RAG few-shot enrichment via `ContextRetriever`.
+All 6 NLU agents run **in parallel** as dependency-ready graph nodes. The scheduler can start newly ready downstream nodes as soon as their direct dependencies finish, while unrelated NLU work continues. Each agent supports optional RAG few-shot enrichment via `ContextRetriever`.
 
 #### Knowledge Agents (4) - Context Hydration and Retrieval Quality
 

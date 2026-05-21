@@ -279,6 +279,8 @@ sequenceDiagram
 
 `ResolutionContext` is the central mutable-by-patch state object. Agents do not mutate it directly; they return `ResolutionContextPatch` values and `GraphScheduler` applies those patches through `ResolutionContextStore`.
 
+New scoped exchanges should use `ContextArtifactKey<Value>` and typed artifact helpers instead of raw scoped string keys. The internal store remains type-erased for compatibility, but typed reads and manifest artifact contracts now expose wrong-type wiring before runtime where possible. Input builders should also prefer read-only context facets such as `NLUContextFacet`, `CandidateContextFacet`, `CapabilityContextFacet`, `AutomationContextFacet`, and `ExecutionContextFacet` so agents depend on only the state they need.
+
 | Field | Purpose |
 | --- | --- |
 | `request` | Original command text and execution toggle. |
@@ -666,8 +668,9 @@ HomeAutomation/
 | `AgentTraceEntry` | Timing and result trace for one agent call. |
 | `ResolutionContextPatch` | Patch returned by an agent. |
 | `AnySendableValue` | Sendable value box used in context patches. |
+| `ContextArtifactKey` | Typed scoped context key used for new artifact exchange between graph agents. |
 | `AgentRunResult` | Agent result: success, clarification, unsupported, retryable failure, or terminal failure. |
-| `ResolutionContext` | Shared orchestration context. |
+| `ResolutionContext` | Shared orchestration context with read-only facet protocols for lower-coupling input construction. |
 | `CommandRequest` | User text plus execution toggle. |
 | `KnowledgeSnippet` | Agent-level knowledge snippet. |
 | `MemoryHint` | Low-priority candidate hint from conversation memory. |
@@ -746,11 +749,12 @@ HomeAutomation/
 | `OrchestrationGraph` | DAG of graph nodes, dependencies, guards, and execution policies. |
 | `GraphPlanner` | Builds root routing, direct command, fallback, automation creation, and unsupported graphs. |
 | `OperationGraphCatalog` | Maps operation kinds to graph providers. |
-| `GraphScheduler` | Runs graph nodes, handles circuit checks, applies patches, emits events, and fails closed. |
+| `GraphScheduler` | Runs graph nodes as dependencies become ready, handles circuit checks, applies patches, emits events, records performance telemetry, evaluates constrained graph transitions, and fails closed. |
 | `AgentRegistry` | Stores type-erased agents by identity/capability. |
 | `ContextualHomeAgent` | Adapts a typed `HomeAgent` into `AnyHomeAgent` with context input and patch mapping. |
 | `DefaultAgentRegistryFactory` | Wires default agent implementations and dependencies. |
 | `ResolutionContextPatchKey` | String constants for patch updates. |
+| `GraphTransitionPolicy` | Approves only known graph transitions such as clarification, unsupported, fallback, confirmation insertion, and bounded alternate capability retry. |
 | `ResolutionContextStore` | Actor for snapshot/apply/append operations on context. |
 | `OrchestratorPipelineEvent` | UI-visible pipeline event. |
 | `AgentEventBus` | Async event publisher. |
