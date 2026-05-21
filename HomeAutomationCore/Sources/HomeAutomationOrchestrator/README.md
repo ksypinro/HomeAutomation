@@ -52,17 +52,18 @@ flowchart TD
     B --> C["Create CommandRequest and ResolutionContextStore"]
     C --> D["Attach memory hint when command references previous turn"]
     D --> E["Publish input event"]
-    E --> F["Foundation-model-backed operation detection"]
-    F --> G["GraphPlanner asks OperationGraphCatalog for a graph"]
-    G --> H["GraphScheduler executes ready DAG nodes"]
-    H --> I["Agents return patches or terminal exits"]
-    I --> J["ResolutionContextStore applies patches"]
-    J --> K["Graph guards decide optional execution nodes"]
-    K --> L["Mandatory gates fail closed when blocked"]
-    L --> M["Assemble HomeAutomationResolverResult from graph context"]
-    M --> N["Capture metrics and circuit states"]
-    N --> O["Append conversation memory turn"]
-    O --> P["Emit outcome event and final result"]
+    E --> F["GraphPlanner selects root-command-graph"]
+    F --> G["GraphScheduler runs operationDetection as first graph node"]
+    G --> H["Root graph routes to direct command, automation, fallback, or unsupported graph"]
+    H --> I["GraphScheduler executes ready DAG nodes"]
+    I --> J["Agents return typed patches, artifacts, terminal exits, or transition requests"]
+    J --> K["ResolutionContextStore applies patches"]
+    K --> L["Graph guards and GraphTransitionPolicy decide optional or adaptive routing"]
+    L --> M["Mandatory gates fail closed when blocked"]
+    M --> N["Assemble HomeAutomationResolverResult from graph context"]
+    N --> O["Capture metrics and circuit states"]
+    O --> P["Append conversation memory turn"]
+    P --> Q["Emit outcome event and final result"]
 ```
 
 All command paths run through `GraphPlanner` plus `GraphScheduler`. There is no runtime-mode branching and no phased scheduler rollback path.
@@ -115,15 +116,18 @@ Automation creation is also graph-native. If the automation graph cannot produce
 | `HomeCommandOrchestrator.makeRAGEnabled` | Convenience factory that indexes canonical knowledge and injects a `ContextRetriever` into the agent registry. |
 | `GraphPlanner` | Selects operation-specific DAGs via `OperationGraphCatalog`. |
 | `OperationGraphCatalog` | Maps operation kinds to direct-command, fallback, automation-creation, or unsupported graphs. |
-| `GraphScheduler` | Executes graph nodes when dependencies and guards are satisfied, records graph metrics, checks circuits, publishes events, applies patches, and respects fail-closed policy. |
+| `GraphScheduler` | Executes graph nodes as soon as dependencies and guards are satisfied, records graph metrics, checks circuits, publishes events, applies patches, handles approved transitions, and respects fail-closed policy. |
 | `OrchestrationGraph` | Immutable graph definition containing nodes, edges, entry nodes, and orchestration goal. |
 | `GraphNode` | One executable graph node with an agent requirement, execution policy, and optional guard. |
 | `GraphGuard` | Predicate used to skip guarded nodes such as `mockExecution` when policy does not allow execution. |
-| `GraphRunMetrics` | Per-graph metrics containing node statuses, selected agents, skipped nodes, and node durations. |
+| `GraphTransitionPolicy` | Approves only constrained graph transitions such as clarification, unsupported, fallback, confirmation insertion, or bounded alternate capability retry. |
+| `GraphRunMetrics` | Per-graph metrics containing node statuses, selected agents, skipped nodes, node durations, queue durations, context snapshot/apply timings, context key counts, batch sizes, and transition decisions. |
 | `AgentRegistry` | Stores type-erased agents by ID and capability for graph lookup. |
 | `ContextualHomeAgent` | Adapts a typed `HomeAgent` to `AnyHomeAgent` by deriving input from context and mapping output to a patch. |
 | `DefaultAgentRegistryFactory` | Wires default agent instances, dependencies, RAG retriever, model availability closure, registry, validators, tools, and executors. |
 | `ResolutionContextPatchKey` | String constants for patch keys used by `ResolutionContextStore`. |
+| `ContextArtifactKey` | Typed key for scoped graph artifacts. New scoped data exchange should prefer typed artifact helpers over raw string writes. |
+| `ResolutionContext` facets | Read-only protocol slices such as `NLUContextFacet`, `CandidateContextFacet`, `CapabilityContextFacet`, `AutomationContextFacet`, and `ExecutionContextFacet` for lower-coupling input builders. |
 | `ResolutionContextStore` | Actor that owns the evolving `ResolutionContext`; supports snapshots, patch application, retrieval report append, error append, trace append, and memory hint append. |
 | `OrchestratorPipelineEvent` | UI-visible event with run ID, stage, optional agent ID, status, and detail. |
 | `AgentEventBus` | Async event publisher and replay stream for pipeline events. |
@@ -152,11 +156,15 @@ flowchart TD
     F -->|Non-mandatory| H["Mark skipped and continue"]
     F -->|Available| I["Run agent with timeout and retry policy"]
     I --> J["Record trace, telemetry, and breaker result"]
-    J --> K["Apply success patch or append error"]
-    K --> L["Publish pipeline event"]
-    L --> M{"Terminal exit or final context resolution?"}
-    M -->|Yes| N["Skip pending nodes and return"]
-    M -->|No| A
+    J --> K["Apply patch or append error"]
+    K --> L{"Transition requested?"}
+    L -->|Yes| M["GraphTransitionPolicy approves or rejects"]
+    L -->|No| N["Publish pipeline event"]
+    M --> N
+    N --> O{"Terminal exit or final context resolution?"}
+    O -->|Yes| P["Skip pending nodes and return"]
+    O -->|No| Q["Recompute newly ready nodes immediately"]
+    Q --> A
 ```
 
 ## Safety and Resilience Rules
@@ -169,3 +177,5 @@ flowchart TD
 - Every attempted or skipped graph node should appear in graph metrics and pipeline events.
 - Foundation Models availability, prompt budget, selected tools, skipped calls, and model failure categories are surfaced through metrics.
 - Retrieval judge behavior is observable through `RetrievalQualityMetrics`; weak retrieval can trigger at most one bounded reformulated retry.
+- Raw scoped string writes are legacy compatibility. New graph-owned exchanges should use `ContextArtifactKey` and manifest artifact contracts.
+- Agents may request only policy-approved graph transitions. Arbitrary graph mutation is intentionally unsupported.

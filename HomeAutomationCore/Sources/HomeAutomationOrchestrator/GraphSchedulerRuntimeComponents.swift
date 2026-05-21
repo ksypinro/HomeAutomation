@@ -231,3 +231,63 @@ struct GraphSafetyGateHandler: Sendable {
         return result
     }
 }
+
+struct GraphTransitionPolicy: Sendable {
+    enum Decision: Sendable, Hashable {
+        case approved
+        case rejected(String)
+
+        var isApproved: Bool {
+            if case .approved = self { return true }
+            return false
+        }
+
+        var detail: String {
+            switch self {
+            case .approved:
+                return "approved"
+            case .rejected(let reason):
+                return reason
+            }
+        }
+    }
+
+    func evaluate(
+        _ request: GraphTransitionRequest,
+        node: GraphNode,
+        agentID: AgentID,
+        manifest: AgentManifest,
+        context: ResolutionContext,
+        graph: OrchestrationGraph,
+        safetyGateHandler: GraphSafetyGateHandler,
+        policy: OrchestratorPolicyEngine
+    ) -> Decision {
+        if safetyGateHandler.isSafetyGate(node: node, agentID: agentID, manifest: manifest, policy: policy) {
+            switch request {
+            case .insertConfirmationBeforeExecution:
+                return .approved
+            default:
+                return .rejected("Safety gates may only request confirmation insertion.")
+            }
+        }
+
+        switch request {
+        case .routeToClarification:
+            return .approved
+        case .routeToUnsupported:
+            return .approved
+        case .routeToFallback:
+            return graph.goal == .executeDeviceCommand
+                ? .approved
+                : .rejected("Fallback transitions are only supported in direct-command graphs.")
+        case .insertConfirmationBeforeExecution:
+            return context.draft == nil
+                ? .rejected("Cannot request confirmation without a command draft.")
+                : .approved
+        case .retryWithAlternateCapability:
+            return agentID == .capabilityResolution
+                ? .approved
+                : .rejected("Only capability resolution may request alternate capability retry.")
+        }
+    }
+}

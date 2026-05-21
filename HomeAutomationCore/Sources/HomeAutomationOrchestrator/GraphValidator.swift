@@ -11,6 +11,8 @@ public enum GraphValidationError: Error, Sendable, Hashable, CustomStringConvert
     case unreachableNode(String)
     case optionalSafetyGateNode(String)
     case missingManifestInput(graphID: String, nodeID: String, key: String, availableKeys: [String])
+    case missingManifestArtifact(graphID: String, nodeID: String, key: String, scope: String, expectedType: String, availableArtifacts: [String])
+    case manifestArtifactTypeMismatch(graphID: String, nodeID: String, key: String, scope: String, expectedType: String, actualType: String)
     case missingTerminalOutput(graphID: String, nodeID: String, requiredKeys: [String], availableKeys: [String])
 
     public var description: String {
@@ -31,6 +33,10 @@ public enum GraphValidationError: Error, Sendable, Hashable, CustomStringConvert
             return "Graph safety gate cannot be optional: \(id)"
         case .missingManifestInput(let graphID, let nodeID, let key, let availableKeys):
             return "Graph \(graphID) node \(nodeID) consumes missing key '\(key)'. Available keys: \(availableKeys.joined(separator: ", "))"
+        case .missingManifestArtifact(let graphID, let nodeID, let key, let scope, let expectedType, let availableArtifacts):
+            return "Graph \(graphID) node \(nodeID) consumes missing artifact '\(scope).\(key)' of type \(expectedType). Available artifacts: \(availableArtifacts.joined(separator: ", "))"
+        case .manifestArtifactTypeMismatch(let graphID, let nodeID, let key, let scope, let expectedType, let actualType):
+            return "Graph \(graphID) node \(nodeID) consumes artifact '\(scope).\(key)' with type \(actualType), expected \(expectedType)"
         case .missingTerminalOutput(let graphID, let nodeID, let requiredKeys, let availableKeys):
             return "Graph \(graphID) terminal node \(nodeID) cannot produce required terminal output. Required one of: \(requiredKeys.joined(separator: ", ")). Available keys: \(availableKeys.joined(separator: ", "))"
         }
@@ -190,6 +196,7 @@ public struct GraphValidator: Sendable {
     ) -> [GraphValidationError] {
         let manifestsByNode = selectedManifestsByNode(graph, registry: registry)
         var availableKeys = initialAvailableKeys(for: graph.goal, context: initialContext)
+        var availableArtifacts = initialAvailableArtifacts(context: initialContext)
         var completedNodeIDs = Set<String>()
         var pendingNodeIDs = Set(graph.nodes.map(\.id))
         var errors: [GraphValidationError] = []
@@ -219,8 +226,38 @@ public struct GraphValidator: Sendable {
                         )
                     )
                 }
+                for contract in manifest?.consumedArtifacts.sorted(by: { $0.descriptor.description < $1.descriptor.description }) ?? [] {
+                    let descriptor = contract.descriptor
+                    let available = availableArtifacts[descriptor.storageKey]
+                    if let available, available.valueTypeName != descriptor.valueTypeName {
+                        errors.append(
+                            .manifestArtifactTypeMismatch(
+                                graphID: graph.id,
+                                nodeID: node.id,
+                                key: descriptor.name,
+                                scope: descriptor.scope.description,
+                                expectedType: descriptor.valueTypeName,
+                                actualType: available.valueTypeName
+                            )
+                        )
+                    } else if available == nil, contract.requirement == .required {
+                        errors.append(
+                            .missingManifestArtifact(
+                                graphID: graph.id,
+                                nodeID: node.id,
+                                key: descriptor.name,
+                                scope: descriptor.scope.description,
+                                expectedType: descriptor.valueTypeName,
+                                availableArtifacts: availableArtifacts.keys.sorted()
+                            )
+                        )
+                    }
+                }
 
                 availableKeys.formUnion(manifest?.produces ?? [])
+                for contract in manifest?.producedArtifacts ?? [] {
+                    availableArtifacts[contract.descriptor.storageKey] = contract.descriptor
+                }
                 pendingNodeIDs.remove(node.id)
                 completedNodeIDs.insert(node.id)
             }
@@ -321,6 +358,27 @@ public struct GraphValidator: Sendable {
         return keys
     }
 
+    private func initialAvailableArtifacts(
+        context: ResolutionContext?
+    ) -> [String: ContextArtifactDescriptor] {
+        guard let context else {
+            return [:]
+        }
+
+        var descriptors: [String: ContextArtifactDescriptor] = [:]
+        for (scope, values) in context.scopedValues {
+            for (name, value) in values {
+                let descriptor = ContextArtifactDescriptor(
+                    name: name,
+                    scope: scope,
+                    valueTypeName: value.typeName
+                )
+                descriptors[descriptor.storageKey] = descriptor
+            }
+        }
+        return descriptors
+    }
+
     private func terminalOutputKeys(for goal: OrchestrationGoal) -> Set<String> {
         switch goal {
         case .rootRouting:
@@ -358,7 +416,12 @@ public struct GraphValidator: Sendable {
             switch $0 {
             case .duplicateNodeID, .missingEdgeEndpoint, .cycleDetected, .missingEntryNode, .unreachableNode:
                 return true
-            case .duplicateEdge, .optionalSafetyGateNode, .missingManifestInput, .missingTerminalOutput:
+            case .duplicateEdge,
+                 .optionalSafetyGateNode,
+                 .missingManifestInput,
+                 .missingManifestArtifact,
+                 .manifestArtifactTypeMismatch,
+                 .missingTerminalOutput:
                 return false
             }
         }

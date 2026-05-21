@@ -7,6 +7,8 @@ public struct AgentManifest: Sendable, Hashable {
     public let supportedOperations: Set<HomeAutomationOperationKind>
     public let consumes: Set<String>
     public let produces: Set<String>
+    public let consumedArtifacts: Set<ContextArtifactContract>
+    public let producedArtifacts: Set<ContextArtifactContract>
     public let safetyRole: AgentSafetyRole
     public let retryPolicy: AgentRetryPolicy
     public let priority: Int
@@ -17,6 +19,8 @@ public struct AgentManifest: Sendable, Hashable {
         supportedOperations: Set<HomeAutomationOperationKind> = [.executeDeviceCommand],
         consumes: Set<String> = [],
         produces: Set<String> = [],
+        consumedArtifacts: Set<ContextArtifactContract> = [],
+        producedArtifacts: Set<ContextArtifactContract> = [],
         safetyRole: AgentSafetyRole = .none,
         retryPolicy: AgentRetryPolicy = .noRetry,
         priority: Int = 0
@@ -26,6 +30,8 @@ public struct AgentManifest: Sendable, Hashable {
         self.supportedOperations = supportedOperations
         self.consumes = consumes
         self.produces = produces
+        self.consumedArtifacts = consumedArtifacts
+        self.producedArtifacts = producedArtifacts
         self.safetyRole = safetyRole
         self.retryPolicy = retryPolicy
         self.priority = priority
@@ -60,6 +66,8 @@ public enum AgentManifestDefaults {
             supportedOperations: supportedOperations(for: id),
             consumes: consumes(for: id),
             produces: produces(for: id),
+            consumedArtifacts: consumedArtifacts(for: id),
+            producedArtifacts: producedArtifacts(for: id),
             safetyRole: safetyRole(for: id),
             retryPolicy: retryPolicy(for: id),
             priority: priority(for: id)
@@ -203,6 +211,46 @@ public enum AgentManifestDefaults {
             return ["smartThingsRuleCreation", "automationPlan"]
         case .automationResultAssembly:
             return ["resolverResult", "resolution"]
+        default:
+            return []
+        }
+    }
+
+    private static func consumedArtifacts(for id: AgentID) -> Set<ContextArtifactContract> {
+        switch id {
+        case .automationActionResolution,
+             .automationConditionOperandResolution,
+             .automationValidation,
+             .smartThingsCompilation,
+             .automationResultAssembly:
+            return [.required(ContextArtifactKeys.automationRuleDraft())]
+        case .smartThingsRuleCreation:
+            return [
+                .required(ContextArtifactKeys.automationPlan()),
+                .required(ContextArtifactKeys.smartThingsRule()),
+                .optional(ContextArtifactKeys.validation())
+            ]
+        default:
+            return []
+        }
+    }
+
+    private static func producedArtifacts(for id: AgentID) -> Set<ContextArtifactContract> {
+        switch id {
+        case .automationDraft:
+            return [.required(ContextArtifactKeys.automationRuleDraft())]
+        case .automationValidation:
+            return [.required(ContextArtifactKeys.validation())]
+        case .smartThingsCompilation:
+            return [
+                .required(ContextArtifactKeys.automationPlan()),
+                .optional(ContextArtifactKeys.smartThingsRule())
+            ]
+        case .smartThingsRuleCreation:
+            return [
+                .required(ContextArtifactKeys.automationPlan()),
+                .optional(ContextArtifactKeys.smartThingsRuleCreation())
+            ]
         default:
             return []
         }

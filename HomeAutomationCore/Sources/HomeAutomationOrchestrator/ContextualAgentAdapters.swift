@@ -174,6 +174,10 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
         if let validation = patch.scopedUpdates[.root]?[ResolutionContextPatchKey.automationValidation.rawValue]?.get(AutomationValidationResult.self) {
             payload["validationResult"] = validation.status.rawValue
         }
+        if let transition = patch.transitionRequest {
+            payload["graphTransitionKind"] = transition.kind
+            payload["graphTransitionReason"] = transition.reason
+        }
         return payload
     }
 }
@@ -285,17 +289,14 @@ public enum DefaultAgentRegistryFactory {
                     )
                 },
                 makePatch: { output, _ in
-                    ResolutionContextPatch(
+                    var patch = ResolutionContextPatch(
                         agentID: .automationDraft,
                         updates: [
                             ResolutionContextPatchKey.retrievalReports.rawValue: AnySendableValue(output.retrievalReports)
-                        ],
-                        scopedUpdates: [
-                            .root: [
-                                ScopedContextKeys.automationRuleDraft().name: AnySendableValue(output.ruleDraft)
-                            ]
                         ]
                     )
+                    patch.setArtifact(output.ruleDraft, for: ContextArtifactKeys.automationRuleDraft())
+                    return patch
                 }
             ),
             ContextualHomeAgent(
@@ -306,10 +307,7 @@ public enum DefaultAgentRegistryFactory {
                     ).resolveDraft
                 ),
                 makeInput: { context in
-                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
-                        throw AgentContextInputError(agentID: .automationConditionOperandResolution, message: "Missing automation draft")
-                    }
-                    return draft
+                    try context.requireArtifact(for: ContextArtifactKeys.automationRuleDraft())
                 },
                 makePatch: { output, _ in
                     automationConditionPatch(output)
@@ -336,19 +334,14 @@ public enum DefaultAgentRegistryFactory {
                     }
                 ),
                 makeInput: { context in
-                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
-                        throw AgentContextInputError(agentID: .automationActionResolution, message: "Missing automation draft")
-                    }
-                    return draft.actionDescriptions
+                    try context.requireArtifact(for: ContextArtifactKeys.automationRuleDraft()).actionDescriptions
                 },
                 makePatch: automationActionPatch
             ),
             ContextualHomeAgent(
                 agent: AutomationValidationAgent(),
                 makeInput: { context in
-                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
-                        throw AgentContextInputError(agentID: .automationValidation, message: "Missing automation draft")
-                    }
+                    let draft = try context.requireArtifact(for: ContextArtifactKeys.automationRuleDraft())
                     let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate)
                     return AutomationValidationInput(
                         ruleDraft: draft,
@@ -360,7 +353,7 @@ public enum DefaultAgentRegistryFactory {
                         .automationValidation,
                         scope: .root,
                         [
-                            ScopedContextKeys.validation().name: output
+                            ContextArtifactKeys.validation().name: output
                         ]
                     )
                 }
@@ -368,9 +361,7 @@ public enum DefaultAgentRegistryFactory {
             ContextualHomeAgent(
                 agent: SmartThingsCompilationAgent(),
                 makeInput: { context in
-                    guard let draft = context.scopedValue(for: ScopedContextKeys.automationRuleDraft()) else {
-                        throw AgentContextInputError(agentID: .smartThingsCompilation, message: "Missing automation draft")
-                    }
+                    let draft = try context.requireArtifact(for: ContextArtifactKeys.automationRuleDraft())
                     guard let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate) else {
                         throw AgentContextInputError(agentID: .smartThingsCompilation, message: "Missing resolved automation actions")
                     }
@@ -378,7 +369,7 @@ public enum DefaultAgentRegistryFactory {
                         ruleDraft: draft,
                         resolvedActions: aggregate.resolvedActions,
                         requiresConfirmation: aggregate.requiresConfirmation,
-                        validation: context.scopedValue(for: ScopedContextKeys.validation())
+                        validation: context.artifact(for: ContextArtifactKeys.validation())
                     )
                 },
                 makePatch: smartThingsCompilationPatch
@@ -392,7 +383,7 @@ public enum DefaultAgentRegistryFactory {
                     return SmartThingsRuleCreationInput(
                         plan: compilation.plan,
                         document: compilation.document,
-                        validation: context.scopedValue(for: ScopedContextKeys.validation()),
+                        validation: context.artifact(for: ContextArtifactKeys.validation()),
                         options: context.request.automationCreationOptions
                     )
                 },
@@ -436,23 +427,14 @@ public enum DefaultAgentRegistryFactory {
             ContextualHomeAgent(
                 agent: CandidateRetrievalAgent(registry: registry, contextRetriever: contextRetriever),
                 makeInput: { context in
-                    CandidateRetrievalInput(
-                        text: context.request.text,
-                        state: context.resolutionState ?? fallbackState(for: context.request.text),
-                        memoryHints: context.memoryHints
-                    )
+                    candidateRetrievalInput(from: context)
                 },
                 makePatch: { output, _ in patch(.candidateRetrieval, [ResolutionContextPatchKey.retrievedCandidates.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: CandidateRankingAgent(resolver: candidateResolver),
                 makeInput: { context in
-                    CandidateRankingInput(
-                        text: context.request.text,
-                        state: try state(from: context, agentID: .candidateRanking),
-                        candidates: context.retrievedCandidates.map(\.compactView),
-                        memoryHints: context.memoryHints
-                    )
+                    try candidateRankingInput(from: context)
                 },
                 makePatch: { output, _ in
                     var updates: [String: any Sendable] = [
@@ -482,26 +464,16 @@ public enum DefaultAgentRegistryFactory {
             ContextualHomeAgent(
                 agent: CandidateHydrationAgent(registry: registry),
                 makeInput: { context in
-                    CandidateHydrationInput(candidateIDs: context.aggregation?.finalCandidateIDs ?? context.selectedCandidateIDs)
+                    candidateHydrationInput(from: context)
                 },
                 makePatch: { output, _ in patch(.candidateHydration, [ResolutionContextPatchKey.hydratedCandidates.rawValue: output]) }
             ),
             ContextualHomeAgent(
                 agent: CapabilityResolutionAgent(),
                 makeInput: { context in
-                    CapabilityResolutionInput(
-                        rawText: context.request.text,
-                        resolutionState: try state(from: context, agentID: .capabilityResolution),
-                        hydratedCandidates: context.hydratedCandidates,
-                        aggregation: context.aggregation ?? HomeCandidateAggregationResult(
-                            finalCandidateIDs: context.selectedCandidateIDs,
-                            needsClarification: false,
-                            confidence: 0
-                        ),
-                        knowledgeSnippets: context.knowledgeSnippets
-                    )
+                    try capabilityResolutionInput(from: context)
                 },
-                makePatch: { output, _ in patch(.capabilityResolution, [ResolutionContextPatchKey.capabilityDecision.rawValue: output]) }
+                makePatch: capabilityResolutionPatch
             ),
             ContextualHomeAgent(
                 agent: InstructionComposerAgent(factory: instructionFactory),
@@ -760,7 +732,7 @@ public enum DefaultAgentRegistryFactory {
     ) -> ResolutionContextPatch {
         var scopedUpdates: [ContextScope: [String: AnySendableValue]] = [
             .root: [
-                ScopedContextKeys.automationRuleDraft().name: AnySendableValue(output.ruleDraft),
+                ContextArtifactKeys.automationRuleDraft().name: AnySendableValue(output.ruleDraft),
                 AutomationRuntimeContextKeys.conditionOperandResolutionRecords.name: AnySendableValue(output.records)
             ]
         ]
@@ -795,10 +767,10 @@ public enum DefaultAgentRegistryFactory {
                 "resolution": AnySendableValue(result.resolution)
             ]
             if let draft = result.draft {
-                values[ScopedContextKeys.commandDraft(in: scope).name] = AnySendableValue(draft)
+                values[ContextArtifactKeys.commandDraft(in: scope).name] = AnySendableValue(draft)
             }
             if let resolvedAction = result.resolvedAction {
-                values[ScopedContextKeys.resolvedAction(in: scope).name] = AnySendableValue(resolvedAction)
+                values[ContextArtifactKeys.resolvedAction(in: scope).name] = AnySendableValue(resolvedAction)
             }
             scopedUpdates[scope] = values
         }
@@ -817,14 +789,14 @@ public enum DefaultAgentRegistryFactory {
             AutomationRuntimeContextKeys.smartThingsCompilation.name: AnySendableValue(output)
         ]
         if let document = output.document {
-            backendValues[ScopedContextKeys.smartThingsRule().name] = AnySendableValue(document)
+            backendValues[ContextArtifactKeys.smartThingsRule().name] = AnySendableValue(document)
         }
 
         return ResolutionContextPatch(
             agentID: .smartThingsCompilation,
             scopedUpdates: [
                 .root: [
-                    ScopedContextKeys.automationPlan().name: AnySendableValue(output.plan)
+                    ContextArtifactKeys.automationPlan().name: AnySendableValue(output.plan)
                 ],
                 .backend("smartthings"): backendValues
             ]
@@ -839,21 +811,90 @@ public enum DefaultAgentRegistryFactory {
             AutomationRuntimeContextKeys.smartThingsRuleCreation.name: AnySendableValue(output)
         ]
         if let receipt = output.receipt {
-            backendValues[ScopedContextKeys.smartThingsRuleCreation().name] = AnySendableValue(receipt)
+            backendValues[ContextArtifactKeys.smartThingsRuleCreation().name] = AnySendableValue(receipt)
         }
 
         return ResolutionContextPatch(
             agentID: .smartThingsRuleCreation,
             scopedUpdates: [
                 .root: [
-                    ScopedContextKeys.automationPlan().name: AnySendableValue(output.plan)
+                    ContextArtifactKeys.automationPlan().name: AnySendableValue(output.plan)
                 ],
                 .backend("smartthings"): backendValues
             ]
         )
     }
 
-    private static func state(from context: ResolutionContext, agentID: AgentID) throws -> HomeResolutionState {
+    private static func candidateRetrievalInput<Context: NLUContextFacet & KnowledgeContextFacet>(
+        from context: Context
+    ) -> CandidateRetrievalInput {
+        CandidateRetrievalInput(
+            text: context.request.text,
+            state: context.resolutionState ?? fallbackState(for: context.request.text),
+            memoryHints: context.memoryHints
+        )
+    }
+
+    private static func candidateRankingInput<Context: NLUContextFacet & CandidateContextFacet & KnowledgeContextFacet>(
+        from context: Context
+    ) throws -> CandidateRankingInput {
+        CandidateRankingInput(
+            text: context.request.text,
+            state: try state(from: context, agentID: .candidateRanking),
+            candidates: context.retrievedCandidates.map(\.compactView),
+            memoryHints: context.memoryHints
+        )
+    }
+
+    private static func candidateHydrationInput<Context: CandidateContextFacet>(
+        from context: Context
+    ) -> CandidateHydrationInput {
+        CandidateHydrationInput(
+            candidateIDs: context.aggregation?.finalCandidateIDs ?? context.selectedCandidateIDs
+        )
+    }
+
+    private static func capabilityResolutionInput<Context: CapabilityContextFacet>(
+        from context: Context
+    ) throws -> CapabilityResolutionInput {
+        CapabilityResolutionInput(
+            rawText: context.request.text,
+            resolutionState: try state(from: context, agentID: .capabilityResolution),
+            hydratedCandidates: context.hydratedCandidates,
+            aggregation: context.aggregation ?? HomeCandidateAggregationResult(
+                finalCandidateIDs: context.selectedCandidateIDs,
+                needsClarification: false,
+                confidence: 0
+            ),
+            knowledgeSnippets: context.knowledgeSnippets
+        )
+    }
+
+    private static func capabilityResolutionPatch(
+        _ output: HomeCapabilityDecision,
+        _ context: ResolutionContext
+    ) -> ResolutionContextPatch {
+        var transition: GraphTransitionRequest?
+        if output.confidence < 0.45 {
+            transition = .routeToClarification(
+                question: "Which capability or command should I use for this device?",
+                reason: "Capability resolution confidence \(output.confidence) is below the clarification threshold."
+            )
+        } else if output.confidence < 0.7, let alternative = output.alternatives.dropFirst().first {
+            transition = .retryWithAlternateCapability(
+                capability: alternative.capability,
+                command: alternative.command,
+                reason: "Capability resolution confidence \(output.confidence) is medium and an alternative is available."
+            )
+        }
+        return ResolutionContextPatch(
+            agentID: .capabilityResolution,
+            updates: [ResolutionContextPatchKey.capabilityDecision.rawValue: AnySendableValue(output)],
+            transitionRequest: transition
+        )
+    }
+
+    private static func state<Context: NLUContextFacet>(from context: Context, agentID: AgentID) throws -> HomeResolutionState {
         guard let state = context.resolutionState else {
             throw AgentContextInputError(agentID: agentID, message: "Missing resolution state")
         }

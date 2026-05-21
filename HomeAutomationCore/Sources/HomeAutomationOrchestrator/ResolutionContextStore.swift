@@ -35,6 +35,45 @@ public actor ResolutionContextStore {
         refreshResolutionStateIfPossible()
     }
 
+    public func applyBatch(_ patches: [ResolutionContextPatch]) throws {
+        try Self.validateNoConflictingWrites(patches)
+        for patch in patches {
+            apply(patch)
+        }
+    }
+
+    public static func validateNoConflictingWrites(_ patches: [ResolutionContextPatch]) throws {
+        var rootWrites: [String: AnySendableValue] = [:]
+        var scopedWrites: [String: AnySendableValue] = [:]
+
+        for patch in patches {
+            for (key, value) in patch.updates {
+                if appendOnlyPatchKeys.contains(key) {
+                    continue
+                }
+                if let existing = rootWrites[key], !existing.isSemanticallySame(as: value) {
+                    throw ResolutionContextPatchConflict.rootKey(key)
+                }
+                rootWrites[key] = value
+            }
+
+            for (scope, values) in patch.scopedUpdates {
+                for (key, value) in values {
+                    let scopedKey = "\(scope.description).\(key)"
+                    if let existing = scopedWrites[scopedKey], !existing.isSemanticallySame(as: value) {
+                        throw ResolutionContextPatchConflict.scopedKey(scope.description, key)
+                    }
+                    scopedWrites[scopedKey] = value
+                }
+            }
+        }
+    }
+
+    private static let appendOnlyPatchKeys: Set<String> = [
+        ResolutionContextPatchKey.knowledgeSnippets.rawValue,
+        ResolutionContextPatchKey.retrievalReports.rawValue
+    ]
+
     /// Sets the language detection result.
     public func setLanguage(_ value: HomeLanguageDetectionResult) {
         logger.debug("Setting language: \(value.languageCode, privacy: .public)")
@@ -166,5 +205,19 @@ public actor ResolutionContextStore {
             slots: slots,
             risk: risk
         )
+    }
+}
+
+public enum ResolutionContextPatchConflict: LocalizedError, Sendable, Hashable {
+    case rootKey(String)
+    case scopedKey(String, String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .rootKey(let key):
+            return "Conflicting parallel context writes for key '\(key)'."
+        case .scopedKey(let scope, let key):
+            return "Conflicting parallel context writes for scoped key '\(scope).\(key)'."
+        }
     }
 }

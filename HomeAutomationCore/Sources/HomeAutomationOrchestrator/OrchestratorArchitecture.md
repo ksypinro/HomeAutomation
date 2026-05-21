@@ -382,7 +382,7 @@ The `OrchestratorMetrics` struct captures 7 metric categories per run:
 | **Automation** | operation, graphID, actionCount, conditionCount, compilationSupported |
 | **FM Usage** | modelCallCount, skippedCount, contextWindowFailures, guardrailFailures |
 | **Retrieval Quality** | strategyNames, averageScore, judgeInvoked, retryCount |
-| **Graph Run** | nodeStatuses, nodeDurations, selectedAgents, skippedNodeIDs |
+| **Graph Run** | nodeStatuses, nodeDurations, selectedAgents, skippedNodeIDs, nodeQueueDurations, contextSnapshotDurations, contextApplyDurations, runnableBatchSizes, contextKeyCounts, transitionDecisions |
 
 ---
 
@@ -410,7 +410,7 @@ The `OrchestratorMetrics` struct captures 7 metric categories per run:
 
 | # | Issue | Location | Impact | Recommendation |
 |---|---|---|---|---|
-| **O-9** | **No retry logic in GraphScheduler** | `GraphScheduler.runNode()` | `PolicyEngine.shouldRetry()` exists but is never called by the graph scheduler. Retryable failures are recorded but not retried. | Add a retry loop in `runNode()` that calls `policy.shouldRetry()` and re-executes with exponential backoff up to `maxRetries`. |
+| **O-9** | **Retry tuning and diagnostics** | `GraphScheduler.runNode()` | `GraphRetryController` now calls `PolicyEngine.shouldRetry()`, but retry budgets and delay strategy should continue to be calibrated against Foundation Models latency and circuit-breaker behavior. | Keep retry telemetry visible, tune budgets per agent class, and add regression tests for retryable model failures. |
 | **O-10** | **Circuit breaker state is not persisted** | `CircuitBreakerRegistry` | Circuit breakers reset on process restart. A persistently failing agent will re-trip on every cold start, causing latency spikes. | Persist circuit states to `UserDefaults` or a lightweight store; restore on init. |
 | **O-11** | **`GraphScheduler` blocked-node detection is fragile** | `GraphScheduler.execute()` L57 | If all remaining nodes have unsatisfied dependencies but no cycle exists (e.g., a skipped node's dependents), the scheduler correctly detects the block but emits a `terminalFailure`. | Treat blocked nodes with `.optional` policy as skippable rather than terminal. |
 
@@ -418,7 +418,7 @@ The `OrchestratorMetrics` struct captures 7 metric categories per run:
 
 | # | Issue | Location | Impact | Recommendation |
 |---|---|---|---|---|
-| **O-12** | **`ResolutionContextPatchKey` uses raw strings** | `ResolutionContextPatchKey` | Typos in key strings cause silent data loss. No compile-time safety. | Convert to an enum with `rawValue` strings, or use `ScopedContextKey<T>` consistently for all fields. |
+| **O-12** | **Raw string context keys remain in compatibility path** | `ResolutionContextPatchKey`, scoped values | `ContextArtifactKey<Value>` now provides typed scoped artifact exchange, but many root patch keys still use legacy strings. | Keep migrating scoped exchanges and manifests to typed artifacts while retaining raw-string compatibility for existing root fields. |
 | **O-13** | **`OrchestratorMetrics` is monolithic** | `OrchestratorMetricsCollector.swift` (590 LOC) | Contains 7 nested metric structs, capture logic, confidence computation, and FM diagnostics in a single file. | Split into separate files per metric category. Extract `captureEvaluationFields` and `captureAutomationFields` into dedicated metric builders. |
 | **O-14** | **Conversation memory reference detection is naive** | `ConversationMemoryReferenceDetector.containsMemoryReference()` | Simple token matching for ["it", "that", "same", "there"]. High false-positive rate (e.g., "put it there" triggers twice). | Use an FM-backed coreference resolution step, or at minimum add bigram context (e.g., "turn it" vs "it is"). |
 
@@ -437,7 +437,7 @@ quadrantChart
     quadrant-4 Deprioritize
 
     O-2 Timeout enforcement: [0.35, 0.95]
-    O-9 Retry logic: [0.40, 0.80]
+    O-9 Retry tuning: [0.40, 0.55]
     O-4 Deduplicate stableUnique: [0.10, 0.30]
     O-5 Deduplicate makeOperationState: [0.15, 0.40]
     O-1 Snapshot reuse: [0.15, 0.60]
@@ -445,7 +445,7 @@ quadrantChart
     O-6 Root routing consolidation: [0.35, 0.70]
     O-8 Patch applicator registry: [0.55, 0.50]
     O-3 Parallel condition resolution: [0.40, 0.45]
-    O-12 Typed patch keys: [0.50, 0.35]
+    O-12 Typed artifact migration: [0.50, 0.35]
     O-13 Split metrics file: [0.30, 0.20]
     O-10 Persist circuit state: [0.45, 0.35]
     O-14 Better coreference: [0.75, 0.30]
@@ -457,7 +457,7 @@ quadrantChart
 1. **O-2** — Add timeout enforcement (prevents hung pipelines)
 2. **O-1** — Eliminate redundant snapshots (free performance win)
 3. **O-7** — Fix continuation leak (memory safety)
-4. **O-9** — Wire retry logic into GraphScheduler (resilience)
+4. **O-9** — Tune retry budgets and diagnostics (resilience)
 5. **O-5 + O-4** — Deduplicate shared code (maintainability)
 6. **O-6** — Preserve graph-only root routing (reduce surface area)
 
