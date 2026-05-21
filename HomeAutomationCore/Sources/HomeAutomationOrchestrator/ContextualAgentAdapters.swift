@@ -128,6 +128,28 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
             payload["evidence"] = decision.evidence.joined(separator: " | ")
             return payload
         }
+        if let routing = output as? HomeOperationRoutingResult {
+            return [
+                "producedFields": "operation,language,domain",
+                "mergedAgentIDs": "operationDetection,language,domain",
+                "operation": routing.operation.operation.rawValue,
+                "operationConfidence": String(routing.operation.confidence),
+                "languageCode": routing.language.languageCode,
+                "languageConfidence": String(routing.language.confidence),
+                "domain": String(describing: routing.domain.domain),
+                "domainConfidence": String(routing.domain.confidence)
+            ]
+        }
+        if let semantic = output as? HomeSemanticNLUResult {
+            return [
+                "producedFields": "intent,deviceType",
+                "mergedAgentIDs": "intentFamily,deviceType",
+                "intentFamilies": semantic.intent.topFamilies.map(String.init(describing:)).joined(separator: ","),
+                "intentConfidence": String(semantic.intent.confidence),
+                "deviceTypes": semantic.deviceType.deviceTypes.joined(separator: ","),
+                "deviceTypeConfidence": String(semantic.deviceType.confidence)
+            ]
+        }
         if let aggregation = output as? HomeCandidateAggregationResult {
             return [
                 "selectedCandidateIDs": aggregation.finalCandidateIDs.joined(separator: ","),
@@ -178,6 +200,17 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
             payload["graphTransitionKind"] = transition.kind
             payload["graphTransitionReason"] = transition.reason
         }
+        if patch.updates[ResolutionContextPatchKey.operation.rawValue]?.get(HomeOperationDetectionResult.self) != nil,
+           patch.updates[ResolutionContextPatchKey.language.rawValue]?.get(HomeLanguageDetectionResult.self) != nil,
+           patch.updates[ResolutionContextPatchKey.domain.rawValue]?.get(HomeDomainClassificationResult.self) != nil {
+            payload["producedFields"] = "operation,language,domain"
+            payload["mergedAgentIDs"] = "operationDetection,language,domain"
+        }
+        if patch.updates[ResolutionContextPatchKey.intent.rawValue]?.get(HomeIntentFamilyResult.self) != nil,
+           patch.updates[ResolutionContextPatchKey.deviceType.rawValue]?.get(HomeDeviceTypeResult.self) != nil {
+            payload["producedFields"] = "intent,deviceType"
+            payload["mergedAgentIDs"] = "intentFamily,deviceType"
+        }
         return payload
     }
 }
@@ -223,39 +256,32 @@ public enum DefaultAgentRegistryFactory {
                     )
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.operationDetection, [ResolutionContextPatchKey.operation.rawValue: output]) }
+                makePatch: { output, _ in
+                    patch(
+                        .operationDetection,
+                        [
+                            ResolutionContextPatchKey.operation.rawValue: output.operation,
+                            ResolutionContextPatchKey.language.rawValue: output.language,
+                            ResolutionContextPatchKey.domain.rawValue: output.domain
+                        ]
+                    )
+                }
             ),
             ContextualHomeAgent(
-                agent: LanguageAgent(
-                    worker: LanguageAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
+                agent: SemanticNLUAgent(
+                    worker: SemanticNLUWorkerSession(foundationModelAvailability: foundationModelAvailability),
                     contextRetriever: contextRetriever
                 ),
                 makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.language, [ResolutionContextPatchKey.language.rawValue: output]) }
-            ),
-            ContextualHomeAgent(
-                agent: DomainAgent(
-                    worker: DomainAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
-                    contextRetriever: contextRetriever
-                ),
-                makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.domain, [ResolutionContextPatchKey.domain.rawValue: output]) }
-            ),
-            ContextualHomeAgent(
-                agent: IntentFamilyAgent(
-                    worker: IntentFamilyAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
-                    contextRetriever: contextRetriever
-                ),
-                makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.intentFamily, [ResolutionContextPatchKey.intent.rawValue: output]) }
-            ),
-            ContextualHomeAgent(
-                agent: DeviceTypeAgent(
-                    worker: DeviceTypeAgentWorkerSession(foundationModelAvailability: foundationModelAvailability),
-                    contextRetriever: contextRetriever
-                ),
-                makeInput: { $0.request.text },
-                makePatch: { output, _ in patch(.deviceType, [ResolutionContextPatchKey.deviceType.rawValue: output]) }
+                makePatch: { output, _ in
+                    patch(
+                        .semanticNLU,
+                        [
+                            ResolutionContextPatchKey.intent.rawValue: output.intent,
+                            ResolutionContextPatchKey.deviceType.rawValue: output.deviceType
+                        ]
+                    )
+                }
             ),
             ContextualHomeAgent(
                 agent: SlotExtractionAgent(
@@ -660,7 +686,7 @@ public enum DefaultAgentRegistryFactory {
         let agentsByID = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
         let moduleDefinitions: [(name: String, ids: [AgentID])] = [
             ("operationDetection", [.operationDetection]),
-            ("nlu", [.language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification]),
+            ("nlu", [.semanticNLU, .slotExtraction, .riskClassification]),
             ("automation", [
                 .automationDraft,
                 .automationConditionOperandResolution,

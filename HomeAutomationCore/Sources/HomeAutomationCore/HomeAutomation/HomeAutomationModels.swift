@@ -114,6 +114,20 @@ public struct HomeDeviceTypeResult: Sendable, Hashable, Codable {
 }
 
 @Generable
+public struct HomeSemanticNLUResult: Sendable, Hashable, Codable {
+    public let intent: HomeIntentFamilyResult
+    public let deviceType: HomeDeviceTypeResult
+
+    public init(
+        intent: HomeIntentFamilyResult,
+        deviceType: HomeDeviceTypeResult
+    ) {
+        self.intent = intent
+        self.deviceType = deviceType
+    }
+}
+
+@Generable
 public struct HomeExtractedSlot: Sendable, Hashable, Codable {
     @Guide(description: "Canonical slot name such as value, duration, temperature, mode, room, or device.")
     public let name: String

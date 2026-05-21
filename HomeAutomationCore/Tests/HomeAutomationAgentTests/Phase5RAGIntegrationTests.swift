@@ -296,20 +296,18 @@ struct Phase5RAGIntegrationTests {
             )
         ])
         let capture = CapturedInput()
-        let agent = LanguageAgent(contextRetriever: retriever) { text in
+        let agent = SemanticNLUAgent(contextRetriever: retriever) { text in
             await capture.store(text)
-            return HomeLanguageDetectionResult(
-                languageCode: "en",
-                isMixedLanguage: false,
-                confidence: 0.9,
-                unsupportedLanguageLikely: false
+            return HomeSemanticNLUResult(
+                intent: HomeIntentFamilyResult(topFamilies: [.power], confidence: 0.9),
+                deviceType: HomeDeviceTypeResult(deviceTypes: ["light"], confidence: 0.9)
             )
         }
 
         _ = try await agent.run("turn on the lamp", context: Self.context(text: "turn on the lamp"))
         let seen = await capture.value()
 
-        #expect(seen.contains("Relevant prior smart-home examples for language detection"))
+        #expect(seen.contains("Relevant prior smart-home examples for semantic NLU intent and device type classification"))
         #expect(seen.contains("User command:"))
         #expect(seen.contains("turn on the lamp"))
     }

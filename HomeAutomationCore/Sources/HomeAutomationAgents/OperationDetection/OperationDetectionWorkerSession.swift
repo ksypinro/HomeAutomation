@@ -9,6 +9,7 @@ import os
 /// as an optional tool instead of being injected into the prompt as a fixed hint.
 public struct OperationDetectionWorkerSession: Sendable {
     private let detect: (@Sendable (String) async throws -> HomeOperationDetectionResult)?
+    private let detectRouting: (@Sendable (String) async throws -> HomeOperationRoutingResult)?
     private let ruleDetect: @Sendable (String) -> HomeOperationDetectionResult
     private let foundationModelAvailability: @Sendable () -> Bool
     private let modelCallPolicy: NLUModelCallPolicy
@@ -16,6 +17,7 @@ public struct OperationDetectionWorkerSession: Sendable {
 
     public init(
         detect: (@Sendable (String) async throws -> HomeOperationDetectionResult)? = nil,
+        detectRouting: (@Sendable (String) async throws -> HomeOperationRoutingResult)? = nil,
         ruleDetect: @escaping @Sendable (String) -> HomeOperationDetectionResult = { text in
             let state = AgentTextParser.deterministicState(for: text)
             let normalized = text.lowercased()
@@ -64,33 +66,44 @@ public struct OperationDetectionWorkerSession: Sendable {
         modelCallPolicy: NLUModelCallPolicy = .default
     ) {
         self.detect = detect
+        self.detectRouting = detectRouting
         self.ruleDetect = ruleDetect
         self.foundationModelAvailability = foundationModelAvailability
         self.modelCallPolicy = modelCallPolicy
     }
 
-    public func detectOperation(_ text: String) async throws -> HomeOperationDetectionResult {
+    public func detectOperation(_ text: String) async throws -> HomeOperationRoutingResult {
         logger.debug("[Input] text: \(text, privacy: .public)")
+
+        if let detectRouting {
+            let result = try await detectRouting(text)
+            logger.debug("[MockOutput] result: \(String(describing: result), privacy: .public)")
+            return normalizedRoutingResult(result, text: text, semanticResult: ruleDetect(text))
+        }
 
         if let detect {
             let result = try await detect(text)
             logger.debug("[MockOutput] result: \(String(describing: result), privacy: .public)")
-            return result
+            return routingFallback(text: text, operation: result)
         }
 
         guard foundationModelAvailability() else {
             let semanticResult = ruleDetect(text)
             logger.info("[Availability] Foundation model unavailable, using semantic analyzer result.")
             logger.debug("[SemanticAnalyzerFallback] result: \(String(describing: semanticResult), privacy: .public)")
-            return semanticResult
+            return routingFallback(text: text, operation: semanticResult)
         }
 
         let semanticAnalyzerTool = OperationSemanticAnalyzerTool(commandText: text, analyze: ruleDetect)
 
         let instructionsText = """
-        You are a smart-home operation classifier.
+        You are a smart-home operation, language, and domain routing classifier.
 
-        Your task: Given a user's command, return a single HomeOperationDetectionResult describing what the user wants to do.
+        Your task: Given a user's command, return a single HomeOperationRoutingResult.
+        The result contains:
+        - operation: a HomeOperationDetectionResult describing what the user wants to do.
+        - language: a HomeLanguageDetectionResult describing the command language.
+        - domain: a HomeDomainClassificationResult describing the same domain as operation.domain.
 
         You have access to the analyzeOperationSemantics tool. This tool runs a deterministic semantic analyzer
         and returns a suggested operation. Tool use is optional:
@@ -99,10 +112,15 @@ public struct OperationDetectionWorkerSession: Sendable {
         - Treat the tool as advisory. You may agree with it or override it when the user text supports a better answer.
 
         Output contract:
-        - domain: `.homeAutomation` for supported operations, otherwise `.unsupported` for unrelated requests.
-        - operation: exactly one of `.executeDeviceCommand`, `.automationCreation`, `.automationUpdate`, `.automationDeletion`, `.automationQuery`, `.sceneCreation`, `.routineExecution`, `.unsupported`.
-        - confidence: a Double in [0.0, 1.0] reflecting certainty.
-        - reason: one concise sentence explaining the key cues.
+        - operation.domain: `.homeAutomation` for supported operations, otherwise `.unsupported` for unrelated requests.
+        - operation.operation: exactly one of `.executeDeviceCommand`, `.automationCreation`, `.automationUpdate`, `.automationDeletion`, `.automationQuery`, `.sceneCreation`, `.routineExecution`, `.unsupported`.
+        - operation.confidence: a Double in [0.0, 1.0] reflecting certainty.
+        - operation.reason: one concise sentence explaining the key cues.
+        - language.languageCode: BCP-47-style code such as en, es, fr, ja, bn, or mixed_bn_en.
+        - language.isMixedLanguage: true when the command mixes languages.
+        - language.unsupportedLanguageLikely: true only when language support is likely poor.
+        - domain.domain must match operation.domain.
+        - domain.confidence should reflect domain confidence, not operation-specific confidence.
 
         Decision guide:
         1. Automation deletion: automation/rule/routine plus delete/remove terms.
@@ -138,29 +156,68 @@ public struct OperationDetectionWorkerSession: Sendable {
         do {
             let modelResult = try await session.respond(
                 to: Prompt("User command:\n\(text)"),
-                generating: HomeOperationDetectionResult.self
+                generating: HomeOperationRoutingResult.self
             ).content
             logger.debug("[FoundationModelOutput] result: \(String(describing: modelResult), privacy: .public)")
 
             let semanticResult = ruleDetect(text)
             logger.debug("[SemanticAnalyzerSafetyCheck] result: \(String(describing: semanticResult), privacy: .public)")
-            if semanticResult.operation == .automationCreation &&
-                modelResult.operation == .executeDeviceCommand &&
-                semanticResult.confidence >= 0.80 {
-                logger.info("[SafetyPreference] Semantic analyzer detected automationCreation with high confidence; preferring it to avoid ignoring triggers.")
-                return HomeOperationDetectionResult(
-                    domain: semanticResult.domain,
-                    operation: .automationCreation,
-                    confidence: max(semanticResult.confidence, modelResult.confidence * 0.9),
-                    reason: "Safety preference: semantic analyzer detected automation triggers that model missed. Analyzer reason: \(semanticResult.reason)"
-                )
-            }
-
-            return modelResult
+            return normalizedRoutingResult(modelResult, text: text, semanticResult: semanticResult)
         } catch {
             let semanticResult = ruleDetect(text)
             logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public), using semantic analyzer fallback.")
-            return semanticResult
+            return routingFallback(text: text, operation: semanticResult)
         }
+    }
+
+    private func routingFallback(
+        text: String,
+        operation: HomeOperationDetectionResult
+    ) -> HomeOperationRoutingResult {
+        let state = AgentTextParser.deterministicState(for: text)
+        let domain = HomeDomainClassificationResult(
+            domain: operation.domain,
+            confidence: max(state.domain.confidence, operation.confidence)
+        )
+        return HomeOperationRoutingResult(
+            operation: operation,
+            language: state.language,
+            domain: domain
+        )
+    }
+
+    private func normalizedRoutingResult(
+        _ result: HomeOperationRoutingResult,
+        text: String,
+        semanticResult: HomeOperationDetectionResult
+    ) -> HomeOperationRoutingResult {
+        var operation = result.operation
+        if semanticResult.operation == .automationCreation &&
+            operation.operation == .executeDeviceCommand &&
+            semanticResult.confidence >= 0.80 {
+            logger.info("[SafetyPreference] Semantic analyzer detected automationCreation with high confidence; preferring it to avoid ignoring triggers.")
+            operation = HomeOperationDetectionResult(
+                domain: semanticResult.domain,
+                operation: .automationCreation,
+                confidence: max(semanticResult.confidence, operation.confidence * 0.9),
+                reason: "Safety preference: semantic analyzer detected automation triggers that model missed. Analyzer reason: \(semanticResult.reason)"
+            )
+        }
+
+        let fallback = AgentTextParser.deterministicState(for: text)
+        let language = result.language.languageCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.language
+            : result.language
+        let domain = HomeDomainClassificationResult(
+            domain: operation.domain,
+            confidence: result.domain.domain == operation.domain
+                ? result.domain.confidence
+                : max(result.domain.confidence * 0.8, operation.confidence)
+        )
+        return HomeOperationRoutingResult(
+            operation: operation,
+            language: language,
+            domain: domain
+        )
     }
 }

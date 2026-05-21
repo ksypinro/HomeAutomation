@@ -46,10 +46,7 @@ public struct GraphPlanner: Sendable {
 
     public static func directCommandGraph() -> OrchestrationGraph {
         let phaseOne: [AgentID] = [
-            .language,
-            .domain,
-            .intentFamily,
-            .deviceType,
+            .semanticNLU,
             .slotExtraction,
             .riskClassification
         ]

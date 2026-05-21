@@ -102,7 +102,7 @@ public enum AgentManifestDefaults {
 
     private static func consumes(for id: AgentID) -> Set<String> {
         switch id {
-        case .language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification:
+        case .semanticNLU, .slotExtraction, .riskClassification:
             return ["request.text"]
         case .capabilityKnowledge, .bixbyKnowledge, .commandExample, .candidateRetrieval:
             return ["request.text", "resolutionState"]
@@ -153,14 +153,8 @@ public enum AgentManifestDefaults {
 
     private static func produces(for id: AgentID) -> Set<String> {
         switch id {
-        case .language:
-            return ["language", "resolutionState"]
-        case .domain:
-            return ["domain", "resolutionState"]
-        case .intentFamily:
-            return ["intent", "resolutionState"]
-        case .deviceType:
-            return ["deviceType", "resolutionState"]
+        case .semanticNLU:
+            return ["intent", "deviceType", "resolutionState"]
         case .slotExtraction:
             return ["slots", "resolutionState"]
         case .riskClassification:
@@ -196,7 +190,7 @@ public enum AgentManifestDefaults {
         case .unsupportedCommand, .clarification, .resultSummary:
             return ["resolution"]
         case .operationDetection:
-            return ["operation"]
+            return ["operation", "language", "domain"]
         case .automationDraft:
             return ["automationDraft", "retrievalReports"]
         case .automationActionResolution:
@@ -273,7 +267,7 @@ public enum AgentManifestDefaults {
         switch id {
         case .draftGeneration:
             return AgentRetryPolicy(maxAttempts: 3)
-        case .language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification:
+        case .semanticNLU, .slotExtraction, .riskClassification:
             return .singleRetry
         case .candidateRetrieval, .candidateRanking, .ruleFallback:
             return .singleRetry

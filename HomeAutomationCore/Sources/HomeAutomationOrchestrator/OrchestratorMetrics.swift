@@ -436,16 +436,21 @@ public struct OrchestratorMetrics: Sendable, Codable {
     private static func confidenceByAgent(context: ResolutionContext) -> [String: Double] {
         var values: [String: Double] = [:]
         if let language = context.language ?? context.resolutionState?.language {
-            values[AgentID.language.rawValue] = language.confidence
+            values["operationDetection.language"] = language.confidence
         }
         if let domain = context.domain ?? context.resolutionState?.domain {
-            values[AgentID.domain.rawValue] = domain.confidence
+            values["operationDetection.domain"] = domain.confidence
         }
-        if let intent = context.intent ?? context.resolutionState?.intent {
-            values[AgentID.intentFamily.rawValue] = intent.confidence
+        let intent = context.intent ?? context.resolutionState?.intent
+        let deviceType = context.deviceType ?? context.resolutionState?.deviceType
+        if let intent {
+            values["semanticNLU.intent"] = intent.confidence
         }
-        if let deviceType = context.deviceType ?? context.resolutionState?.deviceType {
-            values[AgentID.deviceType.rawValue] = deviceType.confidence
+        if let deviceType {
+            values["semanticNLU.deviceType"] = deviceType.confidence
+        }
+        if let intent, let deviceType {
+            values[AgentID.semanticNLU.rawValue] = min(intent.confidence, deviceType.confidence)
         }
         if let slots = context.slots ?? context.resolutionState?.slots {
             values[AgentID.slotExtraction.rawValue] = slots.confidence
@@ -506,10 +511,8 @@ public struct OrchestratorMetrics: Sendable, Codable {
 
     private mutating func captureFoundationModelFields(context: ResolutionContext) {
         let modelStages: [AgentID] = [
-            .language,
-            .domain,
-            .intentFamily,
-            .deviceType,
+            .operationDetection,
+            .semanticNLU,
             .slotExtraction,
             .riskClassification,
             .retrievalJudge,
@@ -549,10 +552,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     private static func estimatedSkippedNLUCount(context: ResolutionContext) -> Int {
         let confidence = confidenceByAgent(context: context)
         let thresholds: [String: Double] = [
-            AgentID.language.rawValue: 0.90,
-            AgentID.domain.rawValue: 0.80,
-            AgentID.intentFamily.rawValue: 0.78,
-            AgentID.deviceType.rawValue: 0.78,
+            AgentID.semanticNLU.rawValue: 0.78,
             AgentID.slotExtraction.rawValue: 0.78,
             AgentID.riskClassification.rawValue: 0.85
         ]

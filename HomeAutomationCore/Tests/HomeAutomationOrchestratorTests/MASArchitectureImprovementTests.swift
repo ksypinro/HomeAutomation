@@ -190,27 +190,27 @@ struct MASArchitectureImprovementTests {
             id: "pipelined-readiness",
             goal: .rootRouting,
             nodes: [
-                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language)),
-                GraphNode(id: AgentID.domain.rawValue, requirement: .byID(.domain)),
-                GraphNode(id: AgentID.intentFamily.rawValue, requirement: .byID(.intentFamily))
+                GraphNode(id: AgentID.semanticNLU.rawValue, requirement: .byID(.semanticNLU)),
+                GraphNode(id: AgentID.slotExtraction.rawValue, requirement: .byID(.slotExtraction)),
+                GraphNode(id: AgentID.riskClassification.rawValue, requirement: .byID(.riskClassification))
             ],
             edges: [
-                GraphEdge(from: AgentID.domain.rawValue, to: AgentID.intentFamily.rawValue)
+                GraphEdge(from: AgentID.slotExtraction.rawValue, to: AgentID.riskClassification.rawValue)
             ],
-            entryNodeIDs: [AgentID.language.rawValue, AgentID.domain.rawValue]
+            entryNodeIDs: [AgentID.semanticNLU.rawValue, AgentID.slotExtraction.rawValue]
         )
 
         _ = await GraphScheduler().execute(
             graph,
             registry: AgentRegistry(agents: [
                 TimedGraphAgent(
-                    id: .language,
+                    id: .semanticNLU,
                     delayNanoseconds: 5_000_000_000,
                     recorder: recorder,
-                    endAfterAgentStarts: .intentFamily
+                    endAfterAgentStarts: .riskClassification
                 ),
-                TimedGraphAgent(id: .domain, delayNanoseconds: 10_000_000, recorder: recorder),
-                TimedGraphAgent(id: .intentFamily, delayNanoseconds: 10_000_000, recorder: recorder)
+                TimedGraphAgent(id: .slotExtraction, delayNanoseconds: 10_000_000, recorder: recorder),
+                TimedGraphAgent(id: .riskClassification, delayNanoseconds: 10_000_000, recorder: recorder)
             ]),
             contextStore: contextStore,
             eventBus: AgentEventBus(),
@@ -219,20 +219,20 @@ struct MASArchitectureImprovementTests {
             runID: UUID()
         )
 
-        let intentStarted = try #require(await recorder.startedAt(.intentFamily))
-        let languageEnded = try #require(await recorder.endedAt(.language))
-        #expect(intentStarted < languageEnded)
+        let riskStarted = try #require(await recorder.startedAt(.riskClassification))
+        let semanticEnded = try #require(await recorder.endedAt(.semanticNLU))
+        #expect(riskStarted < semanticEnded)
     }
 
     @Test
     func batchPatchConflictDetectionRejectsDifferentSameKeyValues() async {
         let patches = [
             ResolutionContextPatch(
-                agentID: .language,
+                agentID: .semanticNLU,
                 updates: [ResolutionContextPatchKey.language.rawValue: AnySendableValue("en")]
             ),
             ResolutionContextPatch(
-                agentID: .domain,
+                agentID: .slotExtraction,
                 updates: [ResolutionContextPatchKey.language.rawValue: AnySendableValue("fr")]
             )
         ]

@@ -72,7 +72,7 @@ All command paths run through `GraphPlanner` plus `GraphScheduler`. There is no 
 
 ```text
 Direct command graph:
-Parallel NLU agents
+Parallel direct-command NLU agents: SemanticNLUAgent, SlotExtractionAgent, RiskClassificationAgent
 -> Parallel knowledge agents + candidate retrieval
 -> RetrievalJudgeAgent
 -> CandidateRankingAgent

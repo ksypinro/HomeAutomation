@@ -227,7 +227,7 @@ struct Phase4AutomationContextTests {
 
         await store.apply(
             ResolutionContextPatch(
-                agentID: .language,
+                agentID: .operationDetection,
                 updates: [
                     ResolutionContextPatchKey.language.rawValue: AnySendableValue(language),
                     ResolutionContextPatchKey.draft.rawValue: AnySendableValue(rootDraft)

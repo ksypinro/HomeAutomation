@@ -103,7 +103,7 @@ When `KnowledgeIndexer` runs, the `DocumentChunker.nlDatasetChunks()` method par
 4. **Source Tagging**: The chunk is strictly tagged with `source: .nlDataset`.
 
 ### How it is Queried
-Agents responsible for Natural Language Understanding (like `CommandExampleAgent`, `IntentFamilyAgent`, or `SlotExtractionAgent`) query the dataset using `ContextRetriever.retrieve()` with a `MetadataFilter(source: .nlDataset)`.
+Agents responsible for Natural Language Understanding (like `CommandExampleAgent`, `SemanticNLUAgent`, or `SlotExtractionAgent`) query the dataset using `ContextRetriever.retrieve()` with a `MetadataFilter(source: .nlDataset)`.
 
 The user's query is converted to a vector and compared against each example's clean `semanticContent`. `CommandExampleAgent` also applies NLU-derived device-type filters when available, so examples for unrelated device classes do not crowd out the result.
 

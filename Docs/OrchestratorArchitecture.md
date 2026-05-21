@@ -44,7 +44,7 @@ graph TB
     end
 
     subgraph AgentPool["Agent Pool"]
-        NLU["NLU Agents (6)"]
+        NLU["Active NLU Agents (3)"]
         RAG["RAG/Knowledge Agents (4)"]
         RANK["Ranking & Draft Agents (5)"]
         SAFE["Safety Gate Agents (4)"]
@@ -181,11 +181,8 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    subgraph Phase1["Phase 1 — NLU Classification (Parallel)"]
-        L["Language"]
-        D["Domain"]
-        IF["IntentFamily"]
-        DT["DeviceType"]
+    subgraph Phase1["Phase 1 — Direct-Command NLU (Parallel)"]
+        SNLU["SemanticNLU"]
         SE["SlotExtraction"]
         RC["RiskClassification"]
     end
@@ -209,10 +206,7 @@ graph LR
         EP["ExecutionPlanning 🛡"]
     end
 
-    L --> CK & BK & CE & CR
-    D --> CK & BK & CE & CR
-    IF --> CK & BK & CE & CR
-    DT --> CK & BK & CE & CR
+    SNLU --> CK & BK & CE & CR
     SE --> CK & BK & CE & CR
     RC --> CK & BK & CE & CR
 
@@ -276,9 +270,10 @@ classDiagram
         +run(context:) → AgentRunResult
     }
 
-    HomeAgent <|-- LanguageAgent
-    HomeAgent <|-- DomainAgent
     HomeAgent <|-- OperationDetectionAgent
+    HomeAgent <|-- SemanticNLUAgent
+    HomeAgent <|-- SlotExtractionAgent
+    HomeAgent <|-- RiskClassificationAgent
     AnyHomeAgent <|.. ContextualHomeAgent
     ContextualHomeAgent o-- HomeAgent : wraps
 ```
@@ -297,7 +292,7 @@ graph TB
 
     subgraph Fields["Context Fields"]
         REQ["request: CommandRequest"]
-        NLU_F["language, domain, intent, deviceType, slots, risk"]
+        NLU_F["root language/domain; direct intent, deviceType, slots, risk"]
         CAND["retrievedCandidates, hydratedCandidates, selectedIDs"]
         KNOW["knowledgeSnippets, retrievalReports, memoryHints"]
         DRAFT_F["instructionPackage, draft, executionPlan"]

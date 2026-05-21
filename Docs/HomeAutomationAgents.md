@@ -53,14 +53,11 @@ HomeAutomationAgents/
 |   |-- HomeOperationDetectionService.swift
 |   `-- Tools/
 |-- NLU/
-|   |-- Domain/
-|   |-- Language/
-|   |-- IntentFamily/
-|   |-- DeviceType/
-|   |   `-- Tools/
+|   |-- Semantic/
 |   |-- SlotExtraction/
 |   |-- RiskClassification/
 |   `-- Shared/
+|       `-- Tools/
 |-- AutomationRuntime/
 |-- AutomationDraftExtraction/
 |-- AutomationActionResolution/
@@ -130,8 +127,8 @@ flowchart TD
 | Group | Agents | Responsibility |
 | --- | --- | --- |
 | Runtime | `AgentEventBus`, `ResolutionContextPatchKey` | Shared agent runtime utilities and patch/event types used by graph execution. |
-| OperationDetection | `OperationDetectionAgent` | Classifies the requested operation, such as direct device command vs automation creation, using a Foundation Model-backed worker with semantic analyzer fallback. |
-| NLU | `LanguageAgent`, `DomainAgent`, `IntentFamilyAgent`, `DeviceTypeAgent`, `SlotExtractionAgent`, `RiskClassificationAgent` | Extract parallel language, domain, intent, device, slot, and risk signals from the user command. |
+| OperationDetection | `OperationDetectionAgent` | Root-routing Foundation Model-backed agent that emits operation, language, and domain, using semantic analyzer fallback and automation-creation safety preference. |
+| NLU | `SemanticNLUAgent`, `SlotExtractionAgent`, `RiskClassificationAgent` | Active direct-command NLU stack. `SemanticNLUAgent` fuses intent-family and device-type extraction; slot and risk remain separate. |
 | Automation | `AutomationDraftExtractionAgent`, `AutomationActionResolutionAgent`, `AutomationConditionOperandResolutionAgent`, `AutomationResultAssemblyAgent` | Extract automation drafts, resolve action/condition sub-work, and assemble final automation outcomes. |
 | SmartThings | `SmartThingsCompilationAgent`, `SmartThingsRuleCreationAgent` | Compile SmartThings Rule JSON and optionally call the SmartThings rule creation backend. |
 | Knowledge | `CapabilityKnowledgeAgent`, `BixbyKnowledgeAgent`, `CommandExampleAgent`, `RetrievalJudgeAgent` | Retrieve relevant context, hydrate canonical capability/Bixby/example facts, and report or retry weak retrieval. |
@@ -165,24 +162,18 @@ flowchart TD
 
 | Component | Role |
 | --- | --- |
-| `OperationDetectionAgent` | Produces `HomeOperationDetectionResult` for orchestration routing. |
-| `OperationDetectionWorkerSession` | Foundation Models worker session owned by `OperationDetectionAgent`; can call `OperationSemanticAnalyzerTool` for deterministic semantic grounding. |
+| `OperationDetectionAgent` | Produces `HomeOperationRoutingResult` for orchestration routing, language detection, and domain classification. |
+| `OperationDetectionWorkerSession` | Foundation Models worker session owned by `OperationDetectionAgent`; can call `OperationSemanticAnalyzerTool` for deterministic semantic grounding and preserves high-confidence automation creation from the analyzer. |
 | `HomeOperationDetectionService` | Deterministic semantic analyzer used as the operation-detection fallback and optional model tool. |
-| `LanguageAgentWorkerSession` | Foundation Models worker session owned by `LanguageAgent`, with deterministic parser fallback. |
-| `DomainAgentWorkerSession` | Foundation Models worker session owned by `DomainAgent`, with deterministic parser fallback. |
-| `IntentFamilyAgentWorkerSession` | Foundation Models worker session owned by `IntentFamilyAgent`, with deterministic parser fallback. |
-| `DeviceTypeAgentWorkerSession` | Foundation Models worker session owned by `DeviceTypeAgent`, with deterministic parser fallback. |
+| `SemanticNLUAgent` | Produces `HomeSemanticNLUResult` for active direct-command intent and device-type classification. |
+| `SemanticNLUWorkerSession` | Foundation Models worker session that uses deterministic intent/device hints plus `AvailableDeviceTypesTool` to keep device types canonical. |
 | `SlotExtractionAgentWorkerSession` | Foundation Models worker session owned by `SlotExtractionAgent`, with deterministic parser fallback. |
 | `RiskClassificationAgentWorkerSession` | Foundation Models worker session owned by `RiskClassificationAgent`, with deterministic parser fallback. |
-| `NLUModelCallPolicy` | Deterministic-first threshold policy for skipping low-value NLU model calls. |
-| `LanguageAgent` | Produces `HomeLanguageDetectionResult`. |
-| `DomainAgent` | Produces `HomeDomainClassificationResult`. |
-| `IntentFamilyAgent` | Produces `HomeIntentFamilyResult`. |
-| `DeviceTypeAgent` | Produces `HomeDeviceTypeResult`. |
+| `NLUModelCallPolicy` | Model-call policy for model-first, hinting, and legacy threshold-gated NLU behavior. |
 | `SlotExtractionAgent` | Produces `HomeSlotExtractionResult`. |
 | `RiskClassificationAgent` | Produces `HomeRiskClassificationResult`. |
 
-NLU agents may use RAG few-shot examples, but their output is still treated as an advisory signal until deterministic validation. Worker sessions now run deterministic parsing first and call Foundation Models only when the relevant NLU confidence is below the task threshold. Intent and device-type sessions use compact task-specific catalog hints instead of full Bixby or capability summaries.
+Active NLU agents may use RAG few-shot examples, but their output is still treated as an advisory signal until deterministic validation. Root routing supplies language/domain before operation-specific graph planning; the direct-command graph runs `SemanticNLUAgent`, `SlotExtractionAgent`, and `RiskClassificationAgent` in parallel.
 
 `AgentTextParser` extracts only the actual user command from few-shot prompts before deterministic parsing. It also keeps multiple high-signal intent families when a command combines goals, such as `.power` and `.temperature` for "Make bedroom warmer by turning off the AC".
 

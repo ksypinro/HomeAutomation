@@ -47,7 +47,15 @@ struct Phase3GraphRuntimeTests {
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.candidateHydration.rawValue, to: AgentID.capabilityResolution.rawValue)))
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.capabilityResolution.rawValue, to: AgentID.instructionComposer.rawValue)))
         #expect(plan.graph.edges.contains(GraphEdge(from: AgentID.executionPlanning.rawValue, to: AgentID.mockExecution.rawValue)))
-        #expect(plan.graph.entryNodeIDs.contains(AgentID.language.rawValue))
+        #expect(plan.graph.entryNodeIDs == Set([
+            AgentID.semanticNLU.rawValue,
+            AgentID.slotExtraction.rawValue,
+            AgentID.riskClassification.rawValue
+        ]))
+        #expect(!plan.graph.nodes.contains { $0.id == "language" })
+        #expect(!plan.graph.nodes.contains { $0.id == "domain" })
+        #expect(!plan.graph.nodes.contains { $0.id == "intentFamily" })
+        #expect(!plan.graph.nodes.contains { $0.id == "deviceType" })
     }
 
     @Test
