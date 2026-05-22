@@ -11,7 +11,7 @@ import OSLog
 /// and contextual mappers, yielding a ready-to-use `AgentRegistry`.
 public enum DefaultAgentRegistryFactory {
     public static func make(
-        registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         contextRetriever: ContextRetriever? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable

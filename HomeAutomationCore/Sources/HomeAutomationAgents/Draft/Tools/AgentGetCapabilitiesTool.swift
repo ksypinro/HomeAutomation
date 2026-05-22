@@ -5,11 +5,11 @@ import HomeAutomationCore
 public struct AgentGetCapabilitiesTool: Tool {
     public let name = "getDeviceCapabilities"
     public let description = "Lists capabilities and commands for a device ID."
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         outputSizeStore: AgentToolOutputSizeStore = .shared
     ) {
         self.registry = registry

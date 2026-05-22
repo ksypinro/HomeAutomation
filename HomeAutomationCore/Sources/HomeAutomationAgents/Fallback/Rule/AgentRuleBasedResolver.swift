@@ -12,14 +12,14 @@ import HomeAutomationRAG
 /// 4. Deterministic safety validation via `AgentCommandValidator`
 /// 5. Low-risk execution via `AgentPlanExecutor`
 public struct AgentRuleBasedResolver: HomeCommandResolving {
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let validator: AgentCommandValidator
     private let executor: AgentPlanExecutor
     private let bixbyFallbackMapper: AgentBixbyFallbackMapper
     private let contextRetriever: ContextRetriever?
 
     public init(
-        registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         validator: AgentCommandValidator = AgentCommandValidator(),
         bixbyFallbackMapper: AgentBixbyFallbackMapper = AgentBixbyFallbackMapper(),
         contextRetriever: ContextRetriever? = nil

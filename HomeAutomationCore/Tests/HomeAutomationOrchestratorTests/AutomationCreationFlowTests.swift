@@ -249,6 +249,36 @@ struct AutomationCreationFlowTests {
     }
 
     @Test
+    func automationCreationResolvesOrConditionWithLockedDoorAndLight() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        let result = try await orchestrator.resolve(
+            "Turn on bedroom AC and turn off the bedroom lamp every day at 7 AM if front door is locked or living room light is off",
+            executeLowRiskCommands: true
+        )
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected automation draft, got \(result.resolution.displaySummary)")
+            return
+        }
+        guard case .or(let conditions) = plan.ruleDraft.condition else {
+            Issue.record("Expected OR condition")
+            return
+        }
+        #expect(conditions.count == 2)
+        #expect(plan.resolvedActions.map(\.originalText) == [
+            "Turn on bedroom AC",
+            "Turn off the bedroom lamp"
+        ])
+        #expect(plan.smartThingsRuleJSON?.contains("front_door_lock") == true)
+        #expect(plan.smartThingsRuleJSON?.contains("catalog_light") == true)
+        #expect(plan.smartThingsRuleJSON?.contains(#""or""#) == true)
+    }
+
+    @Test
     func automationCreationStreamEmitsPhaseNineEvents() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),

@@ -165,7 +165,7 @@ extension AutomationPatternParser {
         }
 
         if let match = normalized.firstAutomationMatch(
-            of: #"^(.+?)\s+changes\s+(?:to\s+)?(on|off|open|closed|active|inactive)$"#
+            of: #"^(.+?)\s+changes\s+(?:to\s+)?(on|off|open|closed|locked|unlocked|active|inactive)$"#
         ) {
             return AutomationConditionOutput(
                 type: .changes,
@@ -184,12 +184,18 @@ extension AutomationPatternParser {
         let valuePairs: [(String, String)] = [
             (" is turned on", "on"),
             (" is turned off", "off"),
+            (" is unlocked", "unlocked"),
+            (" is locked", "locked"),
             (" is closed", "closed"),
             (" is open", "open"),
+            (" unlocks", "unlocked"),
+            (" locks", "locked"),
             (" opens", "open"),
             (" closes", "closed"),
             (" turns on", "on"),
             (" turns off", "off"),
+            (" unlocked", "unlocked"),
+            (" locked", "locked"),
             (" turned on", "on"),
             (" turned off", "off"),
             (" is on", "on"),

@@ -1,13 +1,13 @@
 import Foundation
 
-public actor MockHomeDeviceRegistry {
+public actor MockHomeDeviceRegistry: DeviceRegistryProtocol {
     private var devices: [HomeCandidateRecord]
 
     public init(devices: [HomeCandidateRecord] = MockHomeDeviceRegistry.defaultDevices) {
         self.devices = devices
     }
 
-    public func allDevices() -> [HomeCandidateRecord] {
+    public func allDevices() async -> [HomeCandidateRecord] {
         devices
     }
 
@@ -15,7 +15,7 @@ public actor MockHomeDeviceRegistry {
         text: String,
         hints: HomeResolutionState,
         limit: Int = 80
-    ) -> [HomeCandidateRecord] {
+    ) async -> [HomeCandidateRecord] {
         let query = text.normalizedHomeTokenString
         let hintedRooms = Set(hints.slots.rooms.map(\.normalizedHomeTokenString))
         let hintedTypes = Set(hints.deviceType.deviceTypes.map(\.normalizedHomeTokenString))
@@ -53,7 +53,7 @@ public actor MockHomeDeviceRegistry {
         return Array(devices.prefix(limit))
     }
 
-    public func executeLowRiskPlan(_ plan: HomeAutomationExecutionPlan) throws -> HomeCandidateRecord {
+    public func executeLowRiskPlan(_ plan: HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord {
         guard let originalStep = plan.steps.last(where: { $0.type == "command" }) ?? plan.steps.first else {
             throw FoundationLabCoreError.invalidRequest("Missing execution step")
         }

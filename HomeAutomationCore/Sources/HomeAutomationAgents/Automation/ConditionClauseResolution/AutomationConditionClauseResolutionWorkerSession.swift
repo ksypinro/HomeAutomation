@@ -266,8 +266,16 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
         let type = normalize(device.deviceType)
         let room = device.room.map(normalize)
         if query.contains(name) { total += 12 }
+        if name.contains(query) { total += 10 }
         if query.contains(type) { total += 8 }
         if let room, query.contains(room) { total += 5 }
+        total += Set(query.split(separator: " ").map(String.init))
+            .intersection(Set(name.split(separator: " ").map(String.init)))
+            .count * 2
+        if (query.contains("locked") || query.contains("unlocked") || query.contains("lock")),
+           device.capabilities.contains("lock") {
+            total += 8
+        }
         if query.contains("motion"), device.capabilities.contains("motionSensor") { total += 6 }
         if query.contains("temperature"), device.capabilities.contains("temperatureMeasurement") { total += 6 }
         if query.contains("contact"), device.capabilities.contains("contactSensor") { total += 6 }
@@ -291,6 +299,8 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
         if query.contains("contact"), device.capabilities.contains("contactSensor") { return "contactSensor" }
         if case .literalString(let value) = comparison.right {
             switch value {
+            case "locked", "unlocked":
+                if device.capabilities.contains("lock") { return "lock" }
             case "open", "closed":
                 if device.capabilities.contains("contactSensor") { return "contactSensor" }
                 if device.capabilities.contains("garageDoorControl") { return "garageDoorControl" }

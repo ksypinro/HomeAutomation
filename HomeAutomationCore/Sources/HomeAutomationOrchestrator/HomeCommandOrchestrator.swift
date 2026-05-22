@@ -49,13 +49,13 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let metricsCollector: OrchestratorMetricsCollector
     private let conversationMemory: ConversationMemory
     private let circuitBreakers: CircuitBreakerRegistry
-    private let deviceRegistry: MockHomeDeviceRegistry
+    private let deviceRegistry: any DeviceRegistryProtocol
     private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
 
     public init(
         registry: AgentRegistry,
         policy: OrchestratorPolicyEngine,
-        deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
         conversationMemory: ConversationMemory = ConversationMemory(),
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
@@ -77,7 +77,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     }
 
     public convenience init(
-        deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         contextRetriever: ContextRetriever? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
@@ -120,7 +120,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     /// This async initializer prepares the Vector Store and indexes all canonical
     /// device capability knowledge before returning the orchestrator.
     public static func makeRAGEnabled(
-        deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },

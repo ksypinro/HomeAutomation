@@ -40,7 +40,11 @@ enum AutomationConditionClauseResolutionPromptBuilder {
         input: AutomationConditionClauseResolutionInput,
         fallback: HomeAutomationCondition?
     ) -> String {
-        let capabilityNames = input.availableDevices.flatMap(\.capabilities)
+        let relevantDevices = AvailableConditionDevicesTool.relevantDevices(
+            from: input.availableDevices,
+            matching: input.component.rawText
+        )
+        let capabilityNames = relevantDevices.flatMap(\.capabilities)
         return """
         Full user command:
         \(input.fullUserText)
@@ -50,8 +54,8 @@ enum AutomationConditionClauseResolutionPromptBuilder {
         rawText: \(input.component.rawText)
         triggerPolicy: \(input.triggerPolicy.rawValue)
 
-        Available devices:
-        \(AvailableConditionDevicesTool.promptList(from: input.availableDevices))
+        Relevant available devices:
+        \(AvailableConditionDevicesTool.promptList(from: relevantDevices))
 
         Capability attributes:
         \(CapabilityAttributeCatalogTool.promptList(for: Array(Set(capabilityNames)).sorted()))

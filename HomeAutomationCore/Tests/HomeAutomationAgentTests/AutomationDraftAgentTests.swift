@@ -75,6 +75,71 @@ struct AutomationDraftAgentTests {
     }
 
     @Test
+    func parserExtractsLockedCondition() throws {
+        let output = try #require(
+            AutomationPatternParser().parse("Turn on bedroom AC every day at 7 AM if front door is locked")
+        )
+        let draftCondition = try #require(output.condition).makeHomeCondition(defaultTriggerPolicy: .never)
+
+        guard case .comparison(let comparison) = draftCondition else {
+            Issue.record("Expected locked state comparison")
+            return
+        }
+        #expect(comparison.left == .deviceAttribute(
+            description: "front door",
+            deviceID: nil,
+            capability: nil,
+            attribute: nil
+        ))
+        #expect(comparison.operatorName == .equals)
+        #expect(comparison.right == .literalString("locked"))
+        #expect(comparison.triggerPolicy == .never)
+    }
+
+    @Test
+    func conditionClauseFallbackResolvesLockedFrontDoor() async throws {
+        let devices = await MockHomeDeviceRegistry().allDevices()
+        let worker = AutomationConditionClauseResolutionWorkerSession(
+            foundationModelAvailability: { false }
+        )
+
+        let result = try await worker.resolve(
+            AutomationConditionClauseResolutionInput(
+                component: AutomationConditionComponent(id: "c1", rawText: "front door is locked", order: 0),
+                fullUserText: "Turn on bedroom AC every day at 7 AM if front door is locked",
+                availableDevices: devices,
+                triggerPolicy: .never
+            )
+        )
+
+        guard case .comparison(let comparison) = result.condition else {
+            Issue.record("Expected resolved locked state comparison")
+            return
+        }
+        guard case .deviceAttribute(_, let deviceID, let capability, let attribute) = comparison.left else {
+            Issue.record("Expected resolved device operand")
+            return
+        }
+        #expect(deviceID == "front_door_lock")
+        #expect(capability == "lock")
+        #expect(attribute == "lock")
+        #expect(comparison.right == .literalString("locked"))
+    }
+
+    @Test
+    func conditionDevicePromptLimitsToRelevantDevices() async {
+        let devices = await MockHomeDeviceRegistry().allDevices()
+
+        let relevant = AvailableConditionDevicesTool.relevantDevices(
+            from: devices,
+            matching: "front door is locked"
+        )
+
+        #expect(relevant.first?.id == "front_door_lock")
+        #expect(relevant.contains { $0.id == "catalog_refrigerator" } == false)
+    }
+
+    @Test
     func parserExtractsConversationalTemperatureRoutine() throws {
         let output = try #require(
             AutomationPatternParser().parse(
