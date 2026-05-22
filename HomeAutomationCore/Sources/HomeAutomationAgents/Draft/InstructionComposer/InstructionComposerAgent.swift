@@ -21,7 +21,7 @@ public struct InstructionComposerAgent: HomeAgent {
         self.compose = { input in await factory.makePackageWithRAG(from: input) }
     }
 
-    public init(registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry()) {
+    public init(registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry()) {
         self.init(factory: AgentInstructionSetFactory(toolProvider: AgentToolProvider(registry: registry)))
     }
 

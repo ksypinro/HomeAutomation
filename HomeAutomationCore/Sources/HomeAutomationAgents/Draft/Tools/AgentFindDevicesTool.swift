@@ -5,11 +5,11 @@ import HomeAutomationCore
 public struct AgentFindDevicesTool: Tool {
     public let name = "findDeviceCandidates"
     public let description = "Finds smart-home device candidates by query, room, or device type."
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         outputSizeStore: AgentToolOutputSizeStore = AgentToolOutputSizeStore()
     ) {
         self.registry = registry

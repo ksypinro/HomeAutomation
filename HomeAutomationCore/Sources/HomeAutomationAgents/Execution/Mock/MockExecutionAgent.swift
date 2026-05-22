@@ -1,7 +1,7 @@
 import Foundation
 import HomeAutomationCore
 
-/// Executes low-risk command steps against `MockHomeDeviceRegistry`.
+/// Executes low-risk command steps against the configured device registry.
 /// This is the only agent permitted to mutate device state.
 public struct MockExecutionAgent: HomeAgent {
     public typealias Input = HomeAutomationExecutionPlan
@@ -16,7 +16,7 @@ public struct MockExecutionAgent: HomeAgent {
         self.execute = execute
     }
 
-    public init(registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry()) {
+    public init(registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry()) {
         let executor = AgentPlanExecutor(registry: registry)
         self.execute = executor.executeLowRiskPlan
     }

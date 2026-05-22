@@ -18,12 +18,12 @@ struct ConditionOperandFMResult: Sendable, Hashable, Codable {
 }
 
 public struct AutomationConditionOperandResolver: Sendable {
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let foundationModelAvailability: @Sendable () -> Bool
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ConditionOperandResolver")
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         }

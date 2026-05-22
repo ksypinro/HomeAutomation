@@ -5,11 +5,11 @@ import HomeAutomationCore
 public struct AgentHydrateCandidatesTool: Tool {
     public let name = "hydrateCandidateRecords"
     public let description = "Returns full device records for candidate IDs."
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         outputSizeStore: AgentToolOutputSizeStore = .shared
     ) {
         self.registry = registry

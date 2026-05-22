@@ -5,11 +5,11 @@ import HomeAutomationCore
 public struct AgentInspectCandidateCommandTool: Tool {
     public let name = "inspectCandidateCommand"
     public let description = "Inspects a device capability, supported commands, modes, ranges, validation, and risk in one compact lookup."
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         outputSizeStore: AgentToolOutputSizeStore = .shared
     ) {
         self.registry = registry
