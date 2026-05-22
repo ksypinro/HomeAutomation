@@ -104,14 +104,12 @@ Each of the 25 agents gets its own evaluation harness. The key insight: **test e
 
 ### 2.2 Agent-Specific Metrics
 
-#### NLU Agents (6 agents)
+#### NLU & Routing Agents (3 active nodes)
 
 | Agent | Metric | Target |
 |-------|--------|--------|
-| LanguageAgent | Language code exact match | ≥ 95% |
-| DomainAgent | Domain enum match | ≥ 98% |
-| IntentFamilyAgent | Top-1 family match | ≥ 90% |
-| DeviceTypeAgent | Device type in top-3 | ≥ 92% |
+| OperationDetectionAgent | Language, Domain, and Routing exact match | ≥ 98% |
+| SemanticNLUAgent | Intent Family top-1 and Device Type top-3 match | ≥ 92% |
 | SlotExtractionAgent | Room F1 / Nickname F1 | ≥ 85% / ≥ 80% |
 | RiskClassificationAgent | Risk level exact match | ≥ 95% |
 
@@ -326,15 +324,13 @@ struct GoldenTestCase: Codable {
 ┌──────────────────────────────────────────────────────┐
 │  Agent Accuracy Dashboard (Nightly Run)              │
 ├──────────────────────────────────────────────────────┤
-│  NLU.LanguageAgent:      97.2% (▲ +0.3%)            │
-│  NLU.DomainAgent:        99.1% (━ 0.0%)             │
-│  NLU.IntentFamilyAgent:  88.4% (▼ -1.2%) ⚠️         │
-│  NLU.DeviceTypeAgent:    91.7% (▲ +2.1%)            │
-│  NLU.SlotExtraction:     82.3% (▲ +0.8%)            │
-│  NLU.RiskClassification: 96.8% (▲ +0.5%)            │
-│  Candidates.Ranking:     84.1% (▲ +3.2%)            │
-│  Draft.Generation:       78.9% (▲ +5.4%)            │
-│  E2E.FullPipeline:       72.3% (▲ +8.1%)            │
+│  Routing.OperationDetection: 98.1% (▲ +0.2%)         │
+│  NLU.SemanticNLU:            90.5% (▲ +1.1%)         │
+│  NLU.SlotExtraction:         82.3% (▲ +0.8%)         │
+│  NLU.RiskClassification:     96.8% (▲ +0.5%)         │
+│  Candidates.Ranking:         84.1% (▲ +3.2%)         │
+│  Draft.Generation:           78.9% (▲ +5.4%)         │
+│  E2E.FullPipeline:           72.3% (▲ +8.1%)         │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -356,7 +352,7 @@ struct GoldenTestCase: Codable {
 | Task | Priority | Effort |
 |------|----------|--------|
 | Build `AgentEvaluationRunner` harness | P0 | 2 days |
-| Implement NLU agent evaluators (6 agents) | P0 | 3 days |
+| Implement NLU/Routing agent evaluators | P0 | 3 days |
 | Implement Candidate agent evaluators | P0 | 2 days |
 | Implement Draft agent evaluators | P0 | 2 days |
 | Build confusion matrix reporting | P1 | 1 day |
@@ -399,10 +395,10 @@ struct GoldenTestCase: Codable {
 ## Key Insight: The Accuracy Bottleneck Chain
 
 ```
-User Input → NLU (6 agents) → Candidates → Draft → Safety → Output
-              ↓ 90%              ↓ 85%       ↓ 80%   ↓ 99%
+User Input → NLU (3 active nodes) → Candidates → Draft → Safety → Output
+              ↓ 92%                    ↓ 85%       ↓ 80%   ↓ 99%
               
-E2E accuracy = 0.90 × 0.85 × 0.80 × 0.99 = 60.6%
+E2E accuracy = 0.92 × 0.85 × 0.80 × 0.99 = 62.0%
 ```
 
 > [!IMPORTANT]

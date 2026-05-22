@@ -230,10 +230,9 @@ classDiagram
 
 ```mermaid
 flowchart TD
-    Start["Start: user command"] --> Intent["IntentFamilyAgent extracts broad family\npower, temperature, brightness, lockUnlock, openClose, etc."]
-    Intent --> DeviceType["DeviceTypeAgent extracts likely device types"]
-    DeviceType --> Slots["SlotExtractionAgent extracts room, values, modes, nicknames"]
-    Slots --> State["HomeResolutionState"]
+    Start["Start: user command"] --> Routing["OperationDetectionAgent extracts language, domain, operation routing"]
+    Routing --> ParallelNLU["Direct Graph runs SemanticNLUAgent, SlotExtractionAgent, RiskClassificationAgent in parallel"]
+    ParallelNLU --> State["HomeResolutionState"]
 
     State --> HintMap["IntentCapabilityMap maps intent families to possible capabilities"]
     HintMap --> CapabilityRAG["CapabilityKnowledgeAgent retrieves capability chunks"]
@@ -422,8 +421,7 @@ Here the same selected device can support multiple capabilities. The final capab
 
 | Stage | Responsibility | Output | Can Finalize Capability? |
 | --- | --- | --- | --- |
-| `IntentFamilyAgent` | Broadly classifies action family | `HomeIntentFamilyResult` | No |
-| `DeviceTypeAgent` | Identifies likely device type | `HomeDeviceTypeResult` | No |
+| `SemanticNLUAgent` | Extracts intent family and likely device types together | `HomeSemanticNLUResult` | No |
 | `SlotExtractionAgent` | Extracts room, values, modes | `HomeSlotExtractionResult` | No |
 | `IntentCapabilityMap` | Converts intent family into capability hints | `[String]` capability IDs | No |
 | `CapabilityKnowledgeAgent` | Retrieves and hydrates canonical capability facts | `KnowledgeSnippet` | No |

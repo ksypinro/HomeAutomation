@@ -431,7 +431,9 @@ struct Phase2AgentTests {
         let tasks = Set(examples.map(\.task))
 
         #expect(jsonl.split(separator: "\n").count == examples.count)
+        #expect(tasks.contains(.operationRouting))
         #expect(tasks.contains(.semanticNLU))
+        #expect(tasks.contains(.slotExtraction))
         #expect(tasks.contains(.riskClassification))
     }
 

@@ -1,3 +1,4 @@
+import Foundation
 import HomeAutomationAgents
 import HomeAutomationCore
 import HomeAutomationOrchestrator
@@ -47,6 +48,87 @@ struct AutomationActionResolverTests {
             return
         }
         #expect(plan.resolvedActions[0].device?.id == "bedroom_ac")
+    }
+
+    @Test
+    func directGraphActionResolutionSeedsRoutingState() async throws {
+        let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let resolver = AutomationActionResolver(
+            registry: registry,
+            graphPlanner: GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { true })),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true })
+        )
+
+        let result = await resolver.resolve(
+            "Turn on bedroom AC",
+            eventBus: AgentEventBus(),
+            runID: UUID()
+        )
+
+        #expect(result.isResolved)
+        #expect(result.draft?.targetDeviceID == "bedroom_ac")
+        #expect(result.draft?.capability == "switch")
+        #expect(result.draft?.command == "on")
+    }
+
+    @Test
+    func allActionsStartConcurrentlyByDefault() async throws {
+        let graph = OrchestrationGraph(
+            id: "slow-test-direct-command-graph",
+            goal: .executeDeviceCommand,
+            nodes: [
+                GraphNode(
+                    id: AgentID.ruleFallback.rawValue,
+                    requirement: .byID(.ruleFallback)
+                )
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.ruleFallback.rawValue]
+        )
+        let registry = AgentRegistry(
+            agents: [SlowSuccessAgent(delayNanoseconds: 200_000_000)]
+        )
+        let resolver = AutomationActionResolver(
+            registry: registry,
+            graphPlanner: GraphPlanner(
+                catalog: OperationGraphCatalog(
+                    providers: [StaticDirectCommandGraphProvider(graph: graph)]
+                )
+            ),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true })
+        )
+        let eventBus = AgentEventBus()
+        let runID = UUID()
+
+        _ = await resolver.resolveAll(
+            ["Turn on bedroom AC", "Turn off bedroom lamp", "Turn on kitchen strip light"],
+            eventBus: eventBus,
+            runID: runID
+        )
+        await eventBus.finish()
+
+        var events: [OrchestratorPipelineEvent] = []
+        for await event in await eventBus.stream() {
+            events.append(event)
+        }
+
+        let a1Running = try #require(events.firstIndex {
+            $0.stage == "automationActionResolution:a1" && $0.status == .running
+        })
+        let a2Running = try #require(events.firstIndex {
+            $0.stage == "automationActionResolution:a2" && $0.status == .running
+        })
+        let a3Running = try #require(events.firstIndex {
+            $0.stage == "automationActionResolution:a3" && $0.status == .running
+        })
+        let a1Finished = try #require(events.firstIndex {
+            $0.stage == "automationActionResolution:a1" &&
+                ($0.status == .completed || $0.status == .failed)
+        })
+
+        #expect(a1Running < a1Finished)
+        #expect(a2Running < a1Finished)
+        #expect(a3Running < a1Finished)
     }
 
     @Test
@@ -272,5 +354,26 @@ struct AutomationActionResolverTests {
         let detector = HomeOperationDetectionService()
         let result = detector.detect("When motion is detected turn on the hallway light")
         #expect(result.operation == .automationCreation)
+    }
+}
+
+private struct StaticDirectCommandGraphProvider: OperationGraphProvider {
+    let operation = HomeAutomationOperationKind.executeDeviceCommand
+    let graph: OrchestrationGraph
+
+    func makePlan(context: ResolutionContext) -> GraphExecutionPlan {
+        GraphExecutionPlan(graph: graph)
+    }
+}
+
+private struct SlowSuccessAgent: AnyHomeAgent {
+    let id = AgentID.ruleFallback
+    let capabilities: Set<AgentCapability> = [.ruleFallback]
+    let timeoutNanoseconds: UInt64 = 5_000_000_000
+    let delayNanoseconds: UInt64
+
+    func run(context: ResolutionContext) async -> AgentRunResult {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return .success(ResolutionContextPatch(agentID: id))
     }
 }

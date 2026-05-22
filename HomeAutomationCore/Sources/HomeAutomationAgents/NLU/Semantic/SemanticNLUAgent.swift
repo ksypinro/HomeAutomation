@@ -9,7 +9,7 @@ public struct SemanticNLUAgent: HomeAgent {
 
     public let id = AgentID.semanticNLU
     public let capabilities: Set<AgentCapability> = [.intentClassification, .deviceTypeExtraction]
-    public let timeoutNanoseconds: UInt64 = 60_000_000_000
+    public let timeoutNanoseconds: UInt64 = 560_000_000_000
     private let worker: SemanticNLUWorkerSession
     private let contextRetriever: ContextRetriever?
 

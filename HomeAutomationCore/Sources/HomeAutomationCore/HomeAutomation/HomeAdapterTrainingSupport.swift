@@ -24,6 +24,7 @@ public struct HomeAdapterTrainingExample: Sendable, Codable, Hashable {
 
 public enum HomeAdapterTrainingTask: String, Sendable, Codable, Hashable {
     case draftGeneration
+    case operationRouting
     case semanticNLU
     case slotExtraction
     case riskClassification
@@ -257,6 +258,33 @@ public enum HomeAdapterTrainingExporter {
 
         return [
             HomeAdapterTaskTrainingExample(
+                id: "nlu.operation.\(example.id)",
+                source: source,
+                task: .operationRouting,
+                input: example.text,
+                expectedOutputJSON: try encodedOutput(
+                    HomeOperationRoutingResult(
+                        operation: HomeOperationDetectionResult(
+                            domain: commandDomain(for: example.expected.domain),
+                            operation: example.automationIntent == .unsupported ? .unsupported : .executeDeviceCommand,
+                            confidence: 1,
+                            reason: "Dataset label"
+                        ),
+                        language: HomeLanguageDetectionResult(
+                            languageCode: example.language,
+                            isMixedLanguage: false,
+                            confidence: 1,
+                            unsupportedLanguageLikely: false
+                        ),
+                        domain: HomeDomainClassificationResult(
+                            domain: commandDomain(for: example.expected.domain),
+                            confidence: 1
+                        )
+                    )
+                ),
+                metadata: metadata
+            ),
+            HomeAdapterTaskTrainingExample(
                 id: "nlu.semantic.\(example.id)",
                 source: source,
                 task: .semanticNLU,
@@ -309,6 +337,19 @@ public enum HomeAdapterTrainingExporter {
                 metadata: metadata
             )
         ]
+    }
+
+    private static func commandDomain(for domainString: String) -> HomeAutomationCommandDomain {
+        switch domainString {
+        case "homeAutomation":
+            return .homeAutomation
+        case "appNavigation":
+            return .appNavigation
+        case "generalQuestion":
+            return .generalQuestion
+        default:
+            return .unsupported
+        }
     }
 
     private static func intentFamily(for intent: HomeAutomationIntent) -> HomeAutomationIntentFamily {

@@ -55,17 +55,21 @@ public struct AutomationDraftWorkerSession: Sendable {
         logger.debug("[Input] text: \(commandText, privacy: .public)")
         let normalizedInput = AutomationDraftInput(text: commandText, operation: input.operation)
 
-        if let draft {
-            let result = try await draft(input)
-            try validate(result, commandText: commandText)
-            logger.debug("[MockOutput] result: \(String(describing: result), privacy: .public)")
-            return AutomationDraftSessionResult(output: result)
-        }
-
         // Always compute deterministic parser output for hint and fallback
         let deterministic = parser.parse(commandText)
         if let deterministic {
             logger.debug("[DeterministicParser] result: \(String(describing: deterministic), privacy: .public)")
+        }
+
+        if let draft {
+            let result = try await draft(input)
+            let preserved = outputByPreservingParserGrounding(
+                in: result,
+                deterministic: deterministic
+            )
+            try validate(preserved, commandText: commandText)
+            logger.debug("[MockOutput] result: \(String(describing: preserved), privacy: .public)")
+            return AutomationDraftSessionResult(output: preserved)
         }
 
         // Retrieve RAG context
@@ -93,7 +97,7 @@ public struct AutomationDraftWorkerSession: Sendable {
             parserHintText = """
 
             A deterministic parser produced this draft (confidence=\(deterministic.confidence)):
-            - name: \(deterministic.name ?? "nil")
+            - name: \(deterministic.name)
             - trigger type: \(deterministic.trigger?.type.rawValue ?? "nil")
             - trigger time: \(deterministic.trigger?.time ?? "nil")
             - trigger repeatRule: \(deterministic.trigger?.repeatRule ?? "nil")
@@ -153,10 +157,14 @@ public struct AutomationDraftWorkerSession: Sendable {
                 to: Prompt(promptText),
                 generating: AutomationDraftOutput.self
             ).content
-            try validate(result, commandText: commandText)
-            logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
+            let preserved = outputByPreservingParserGrounding(
+                in: result,
+                deterministic: deterministic
+            )
+            try validate(preserved, commandText: commandText)
+            logger.debug("[FoundationModelOutput] result: \(String(describing: preserved), privacy: .public)")
             return AutomationDraftSessionResult(
-                output: result,
+                output: preserved,
                 retrievalReports: ragContext.reports
             )
         } catch {
@@ -169,6 +177,89 @@ public struct AutomationDraftWorkerSession: Sendable {
             }
             logger.error("[FoundationModelError] error: \(error.localizedDescription, privacy: .public)")
             throw error
+        }
+    }
+
+    private func outputByPreservingParserGrounding(
+        in output: AutomationDraftOutput,
+        deterministic: AutomationDraftOutput?
+    ) -> AutomationDraftOutput {
+        guard let deterministic else { return output }
+
+        let trigger = Self.triggerByPreservingParserCondition(
+            in: output.trigger,
+            deterministic: deterministic.trigger
+        )
+        let condition = output.condition ?? deterministic.condition
+        let unsupportedFragments = Self.mergedUnsupportedFragments(
+            output.unsupportedFragments,
+            deterministic.unsupportedFragments
+        )
+        let name = Self.isGenericModelName(output.name) ? deterministic.name : output.name
+
+        let preserved = AutomationDraftOutput(
+            name: name,
+            trigger: trigger,
+            condition: condition,
+            actionDescriptions: output.actionDescriptions,
+            unsupportedFragments: unsupportedFragments,
+            confidence: output.confidence
+        )
+
+        if preserved != output {
+            logger.info("[ParserGrounding] Preserved grounded deterministic automation draft fields dropped by model output.")
+        }
+        return preserved
+    }
+
+    private static func triggerByPreservingParserCondition(
+        in trigger: AutomationTriggerOutput?,
+        deterministic: AutomationTriggerOutput?
+    ) -> AutomationTriggerOutput? {
+        guard let trigger else {
+            return deterministic
+        }
+        guard let deterministic,
+              trigger.type == deterministic.type,
+              trigger.condition == nil,
+              let deterministicCondition = deterministic.condition else {
+            return trigger
+        }
+
+        return AutomationTriggerOutput(
+            type: trigger.type,
+            repeatRule: trigger.repeatRule,
+            time: trigger.time,
+            timezoneIdentifier: trigger.timezoneIdentifier,
+            description: trigger.description,
+            condition: deterministicCondition
+        )
+    }
+
+    private static func mergedUnsupportedFragments(
+        _ outputFragments: [String],
+        _ deterministicFragments: [String]
+    ) -> [String] {
+        var seen = Set<String>()
+        var merged: [String] = []
+        for fragment in outputFragments + deterministicFragments {
+            let trimmed = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = normalizedGroundingText(trimmed)
+            guard !trimmed.isEmpty, !key.isEmpty, !seen.contains(key) else {
+                continue
+            }
+            seen.insert(key)
+            merged.append(trimmed)
+        }
+        return merged
+    }
+
+    private static func isGenericModelName(_ name: String) -> Bool {
+        switch normalizedGroundingText(name) {
+        case "", "automation", "automation draft", "automationdraftoutput":
+            return true
+        default:
+            return false
         }
     }
 
