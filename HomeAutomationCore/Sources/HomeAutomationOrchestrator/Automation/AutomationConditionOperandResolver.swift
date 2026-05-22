@@ -266,27 +266,6 @@ public struct AutomationConditionOperandResolver: Sendable {
         )
         logger.debug("[Deterministic] description=\(description, privacy: .public) result=\(String(describing: deterministicResult), privacy: .public)")
 
-        // Check for ambiguity (tie in deterministic scoring)
-        let query = normalize(description)
-        let scored = devices.map { ($0, score($0, query: query)) }.filter { $0.1 > 0 }
-        let hasTie: Bool
-        if scored.count > 1 {
-            let sortedScored = scored.sorted { lhs, rhs in
-                if lhs.1 == rhs.1 {
-                    return lhs.0.displayName < rhs.0.displayName
-                }
-                return lhs.1 > rhs.1
-            }
-            hasTie = sortedScored[0].1 == sortedScored[1].1
-        } else {
-            hasTie = false
-        }
-
-        if hasTie {
-            logger.info("[Ambiguity] Detected tie in deterministic scoring, skipping FM to allow clarification.")
-            return deterministicResult
-        }
-
         // If FM unavailable, use deterministic
         guard foundationModelAvailability() else {
             logger.info("[Availability] Foundation model unavailable, using deterministic result.")

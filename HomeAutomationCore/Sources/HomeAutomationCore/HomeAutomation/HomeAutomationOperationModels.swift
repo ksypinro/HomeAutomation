@@ -34,6 +34,45 @@ public struct HomeOperationDetectionResult: Sendable, Hashable, Codable {
     }
 }
 
+@Generable
+public struct HomeOperationRoutingResult: Sendable, Hashable, Codable {
+    public let operation: HomeOperationDetectionResult
+    public let language: HomeLanguageDetectionResult
+    public let domain: HomeDomainClassificationResult
+
+    public init(
+        operation: HomeOperationDetectionResult,
+        language: HomeLanguageDetectionResult,
+        domain: HomeDomainClassificationResult
+    ) {
+        self.operation = operation
+        self.language = language
+        self.domain = domain
+    }
+
+    public static func fromSemanticFallback(
+        text: String,
+        operation: HomeOperationDetectionResult
+    ) -> HomeOperationRoutingResult {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let language = HomeLanguageDetectionResult(
+            languageCode: trimmed.isEmpty ? "und" : "en",
+            isMixedLanguage: false,
+            confidence: trimmed.isEmpty ? 0.2 : max(0.4, operation.confidence * 0.8),
+            unsupportedLanguageLikely: operation.domain == .unsupported
+        )
+        let domain = HomeDomainClassificationResult(
+            domain: operation.domain,
+            confidence: operation.confidence
+        )
+        return HomeOperationRoutingResult(
+            operation: operation,
+            language: language,
+            domain: domain
+        )
+    }
+}
+
 public struct SmartThingsRuleDocument: Sendable, Hashable, Codable {
     public let name: String
     public let jsonString: String

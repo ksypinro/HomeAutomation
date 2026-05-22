@@ -15,9 +15,7 @@ struct FMFirstMigrationTests {
         let policy = NLUModelCallPolicy(mode: .modelFirstWithHint)
         let highConfidenceState = AgentTextParser.deterministicState(for: "Turn on the bedroom lamp", confidence: 0.99)
 
-        #expect(policy.shouldUseModel(task: .language, deterministicState: highConfidenceState))
-        #expect(policy.shouldUseModel(task: .domain, deterministicState: highConfidenceState))
-        #expect(policy.shouldUseModel(task: .intentFamily, deterministicState: highConfidenceState))
+        #expect(policy.shouldUseModel(task: .semanticNLU, deterministicState: highConfidenceState))
         #expect(policy.shouldUseModel(task: .slotExtraction, deterministicState: highConfidenceState))
         #expect(policy.shouldUseModel(task: .riskClassification, deterministicState: highConfidenceState))
         #expect(policy.shouldUseModel(task: .operationDetection, deterministicState: highConfidenceState))
@@ -28,17 +26,17 @@ struct FMFirstMigrationTests {
         let policy = NLUModelCallPolicy(mode: .alwaysModel)
         let state = AgentTextParser.deterministicState(for: "Turn on the bedroom lamp", confidence: 0.99)
 
-        #expect(policy.shouldUseModel(task: .language, deterministicState: state))
-        #expect(!policy.shouldProvideHint(task: .language, deterministicState: state))
+        #expect(policy.shouldUseModel(task: .semanticNLU, deterministicState: state))
+        #expect(!policy.shouldProvideHint(task: .semanticNLU, deterministicState: state))
         #expect(!policy.shouldProvideHint(task: .riskClassification, deterministicState: state))
     }
 
-    @Test("thresholdGated legacy mode skips model for high-confidence language detection")
+    @Test("thresholdGated legacy mode skips model for high-confidence semantic NLU")
     func policyLegacyThresholdGatedSkipsModelForHighConfidence() {
         let policy = NLUModelCallPolicy(mode: .thresholdGated)
         let highConfidenceState = AgentTextParser.deterministicState(for: "Turn on the bedroom lamp", confidence: 0.99)
 
-        #expect(!policy.shouldUseModel(task: .language, deterministicState: highConfidenceState))
+        #expect(!policy.shouldUseModel(task: .semanticNLU, deterministicState: highConfidenceState))
     }
 
     @Test("modelFirstWithHint provides hint only when deterministic is above threshold")
@@ -48,9 +46,9 @@ struct FMFirstMigrationTests {
         let lowState = AgentTextParser.deterministicState(for: "do something vague please", confidence: 0.20)
 
         // High confidence deterministic → hint should be provided
-        #expect(policy.shouldProvideHint(task: .language, deterministicState: highState))
+        #expect(policy.shouldProvideHint(task: .semanticNLU, deterministicState: highState))
         // Low confidence deterministic → no hint (not reliable enough)
-        #expect(!policy.shouldProvideHint(task: .language, deterministicState: lowState))
+        #expect(!policy.shouldProvideHint(task: .semanticNLU, deterministicState: lowState))
     }
 
     @Test("default policy mode is modelFirstWithHint")
@@ -59,89 +57,37 @@ struct FMFirstMigrationTests {
         #expect(policy.mode == .modelFirstWithHint)
     }
 
-    // MARK: - LanguageAgentWorkerSession
+    // MARK: - SemanticNLUWorkerSession
 
-    @Test("LanguageWorkerSession invokes model even when deterministic confidence is high")
-    func languageWorkerInvokesModelForHighConfidenceInput() async throws {
+    @Test("SemanticNLUWorkerSession invokes model even when deterministic confidence is high")
+    func semanticNLUWorkerInvokesModelForHighConfidenceInput() async throws {
         let modelWasInvoked = ModelInvokedSpy()
-        let worker = LanguageAgentWorkerSession(
-            detect: { _ in
+        let worker = SemanticNLUWorkerSession(
+            classify: { _ in
                 await modelWasInvoked.record()
-                return HomeLanguageDetectionResult(
-                    languageCode: "en",
-                    isMixedLanguage: false,
-                    confidence: 0.97,
-                    unsupportedLanguageLikely: false
+                return HomeSemanticNLUResult(
+                    intent: HomeIntentFamilyResult(topFamilies: [.power], confidence: 0.95),
+                    deviceType: HomeDeviceTypeResult(deviceTypes: ["light"], confidence: 0.94)
                 )
             },
             foundationModelAvailability: { true }
         )
 
-        let result = try await worker.detectLanguage("Turn on the bedroom lamp")
+        let result = try await worker.classifySemanticNLU("Turn on the bedroom lamp")
 
         #expect(await modelWasInvoked.value())
-        #expect(result.languageCode == "en")
+        #expect(result.intent.topFamilies.contains(.power))
+        #expect(result.deviceType.deviceTypes.contains("light"))
     }
 
-    @Test("LanguageWorkerSession falls back to deterministic when FM unavailable")
-    func languageWorkerFallsBackWhenModelUnavailable() async throws {
-        let worker = LanguageAgentWorkerSession(
-            foundationModelAvailability: { false }
-        )
+    @Test("SemanticNLUWorkerSession falls back to deterministic when FM unavailable")
+    func semanticNLUWorkerFallsBackWhenModelUnavailable() async throws {
+        let worker = SemanticNLUWorkerSession(foundationModelAvailability: { false })
 
-        let result = try await worker.detectLanguage("Turn on the bedroom lamp")
+        let result = try await worker.classifySemanticNLU("Turn on the bedroom lamp")
 
-        #expect(result.languageCode == "en")
-        #expect(result.confidence >= 0.80)
-    }
-
-    // MARK: - DomainAgentWorkerSession
-
-    @Test("DomainWorkerSession invokes model even when deterministic confidence is high")
-    func domainWorkerInvokesModelForHighConfidenceInput() async throws {
-        let modelWasInvoked = ModelInvokedSpy()
-        let worker = DomainAgentWorkerSession(
-            classify: { _ in
-                await modelWasInvoked.record()
-                return HomeDomainClassificationResult(domain: .homeAutomation, confidence: 0.95)
-            },
-            foundationModelAvailability: { true }
-        )
-
-        let result = try await worker.classifyDomain("Turn on the bedroom lamp")
-
-        #expect(await modelWasInvoked.value())
-        #expect(result.domain == .homeAutomation)
-    }
-
-    @Test("DomainWorkerSession falls back to deterministic when FM unavailable")
-    func domainWorkerFallsBackWhenModelUnavailable() async throws {
-        let worker = DomainAgentWorkerSession(
-            foundationModelAvailability: { false }
-        )
-
-        let result = try await worker.classifyDomain("Turn on the bedroom lamp")
-
-        #expect(result.domain == .homeAutomation)
-    }
-
-    // MARK: - IntentFamilyAgentWorkerSession
-
-    @Test("IntentFamilyWorkerSession invokes model even when deterministic confidence is high")
-    func intentFamilyWorkerInvokesModelForHighConfidenceInput() async throws {
-        let modelWasInvoked = ModelInvokedSpy()
-        let worker = IntentFamilyAgentWorkerSession(
-            classify: { _ in
-                await modelWasInvoked.record()
-                return HomeIntentFamilyResult(topFamilies: [.power], confidence: 0.95)
-            },
-            foundationModelAvailability: { true }
-        )
-
-        let result = try await worker.classifyIntentFamily("Turn on the bedroom lamp")
-
-        #expect(await modelWasInvoked.value())
-        #expect(result.topFamilies.contains(.power))
+        #expect(result.intent.topFamilies.contains(.power))
+        #expect(result.deviceType.deviceTypes.contains("light"))
     }
 
     // MARK: - SlotExtractionAgentWorkerSession
@@ -301,7 +247,9 @@ struct FMFirstMigrationTests {
         let result = try await worker.detectOperation("Turn on the bedroom lamp")
 
         #expect(await modelWasInvoked.value())
-        #expect(result.operation == .executeDeviceCommand)
+        #expect(result.operation.operation == .executeDeviceCommand)
+        #expect(result.language.languageCode == "en")
+        #expect(result.domain.domain == .homeAutomation)
     }
 
     @Test("OperationDetectionWorkerSession invokes model for automation creation")
@@ -323,7 +271,8 @@ struct FMFirstMigrationTests {
         let result = try await worker.detectOperation("Turn on AC every day at 7 AM")
 
         #expect(await modelWasInvoked.value())
-        #expect(result.operation == HomeAutomationOperationKind.automationCreation)
+        #expect(result.operation.operation == HomeAutomationOperationKind.automationCreation)
+        #expect(result.domain.domain == .homeAutomation)
     }
 
     @Test("OperationDetectionWorkerSession falls back to rule-based when FM unavailable")
@@ -335,7 +284,9 @@ struct FMFirstMigrationTests {
         // Rule-based detector should still work for a clear device command
         let result = try await worker.detectOperation("Turn on the bedroom lamp")
 
-        #expect(result.operation == .executeDeviceCommand)
+        #expect(result.operation.operation == .executeDeviceCommand)
+        #expect(result.language.languageCode == "en")
+        #expect(result.domain.domain == .homeAutomation)
     }
 
     @Test("OperationDetectionWorkerSession safety preference: automationCreation detected for scheduled command")
@@ -348,7 +299,8 @@ struct FMFirstMigrationTests {
 
         let result = try await worker.detectOperation("Turn on AC every day at 7 AM")
 
-        #expect(result.operation == HomeAutomationOperationKind.automationCreation)
+        #expect(result.operation.operation == HomeAutomationOperationKind.automationCreation)
+        #expect(result.domain.domain == .homeAutomation)
     }
 
     @Test("OperationSemanticAnalyzerTool exposes deterministic semantic analysis")

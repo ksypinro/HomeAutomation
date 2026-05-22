@@ -108,22 +108,21 @@ struct OrchestratorInfrastructureTests {
         #expect(graph.goal == .automationCreation)
         #expect(GraphValidator().validate(graph).isEmpty)
         #expect(graph.nodes.map(\.id) == [
-            AgentID.automationDraft.rawValue,
-            AgentID.automationConditionOperandResolution.rawValue,
-            AgentID.automationActionResolution.rawValue,
+            AgentID.automationComponentSegmentation.rawValue,
+            AgentID.automationComponentFanOut.rawValue,
+            AgentID.automationDraftAssembly.rawValue,
             AgentID.automationValidation.rawValue,
             AgentID.smartThingsCompilation.rawValue,
             AgentID.smartThingsRuleCreation.rawValue,
             AgentID.automationResultAssembly.rawValue
         ])
-        #expect(graph.entryNodeIDs == [AgentID.automationDraft.rawValue])
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue)))
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue)))
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(graph.entryNodeIDs == [AgentID.automationComponentSegmentation.rawValue])
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationComponentSegmentation.rawValue, to: AgentID.automationComponentFanOut.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationComponentFanOut.rawValue, to: AgentID.automationDraftAssembly.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraftAssembly.rawValue, to: AgentID.automationValidation.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)))
-        #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationActionResolution.rawValue)))
+        #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
     }
 
     @Test
@@ -166,10 +165,7 @@ struct OrchestratorInfrastructureTests {
             .smartThingsCompilation,
             .smartThingsRuleCreation,
             .automationResultAssembly,
-            AgentID.language,
-            .domain,
-            .intentFamily,
-            .deviceType,
+            .semanticNLU,
             .slotExtraction,
             .riskClassification,
             .capabilityKnowledge,
@@ -381,7 +377,7 @@ struct OrchestratorInfrastructureTests {
     @Test
     func circuitBreakerOpensAfterThreshold() async {
         let registry = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
-        let breaker = await registry.breaker(for: .language)
+        let breaker = await registry.breaker(for: .semanticNLU)
 
         await breaker.recordFailure()
 
@@ -393,7 +389,7 @@ struct OrchestratorInfrastructureTests {
     func graphSchedulerSkipsOpenCircuitForNonMandatoryAgent() async {
         let circuitBreakers = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
         let registry = AgentRegistry(agents: [
-            FailingAnyAgent(id: .language),
+            FailingAnyAgent(id: .semanticNLU),
             SuccessfulAnyAgent(id: .unsupportedCommand)
         ])
         let contextStore = ResolutionContextStore(
@@ -403,13 +399,13 @@ struct OrchestratorInfrastructureTests {
             id: "non-mandatory-open-circuit",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language)),
+                GraphNode(id: AgentID.semanticNLU.rawValue, requirement: .byID(.semanticNLU)),
                 GraphNode(id: AgentID.unsupportedCommand.rawValue, requirement: .byID(.unsupportedCommand))
             ],
             edges: [
-                GraphEdge(from: AgentID.language.rawValue, to: AgentID.unsupportedCommand.rawValue)
+                GraphEdge(from: AgentID.semanticNLU.rawValue, to: AgentID.unsupportedCommand.rawValue)
             ],
-            entryNodeIDs: [AgentID.language.rawValue]
+            entryNodeIDs: [AgentID.semanticNLU.rawValue]
         )
         let scheduler = GraphScheduler()
         let policy = OrchestratorPolicyEngine(isModelAvailable: { true })
@@ -436,9 +432,9 @@ struct OrchestratorInfrastructureTests {
         let trace = await contextStore.snapshot().trace
 
         #expect(result.exit == nil)
-        #expect(trace.contains { $0.agentID == .language && $0.result == .skipped })
-        #expect(await circuitBreakers.allStatuses()[.language] == .open)
-        #expect(result.metrics.nodeStatuses[AgentID.language.rawValue] == .skipped)
+        #expect(trace.contains { $0.agentID == .semanticNLU && $0.result == .skipped })
+        #expect(await circuitBreakers.allStatuses()[.semanticNLU] == .open)
+        #expect(result.metrics.nodeStatuses[AgentID.semanticNLU.rawValue] == .skipped)
     }
 
     @Test

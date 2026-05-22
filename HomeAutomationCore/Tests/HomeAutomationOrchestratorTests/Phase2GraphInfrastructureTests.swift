@@ -10,12 +10,14 @@ struct Phase2GraphInfrastructureTests {
     func registryExposesManifestsForDefaultAgents() {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
 
-        let manifest = registry.manifest(for: .language)
+        let manifest = registry.manifest(for: .semanticNLU)
 
-        #expect(manifest?.id == .language)
-        #expect(manifest?.capabilities.contains(.languageDetection) == true)
+        #expect(manifest?.id == .semanticNLU)
+        #expect(manifest?.capabilities.contains(.intentClassification) == true)
+        #expect(manifest?.capabilities.contains(.deviceTypeExtraction) == true)
         #expect(manifest?.supportedOperations.contains(.executeDeviceCommand) == true)
-        #expect(manifest?.produces.contains("language") == true)
+        #expect(manifest?.produces.contains("intent") == true)
+        #expect(manifest?.produces.contains("deviceType") == true)
     }
 
     @Test
@@ -35,8 +37,8 @@ struct Phase2GraphInfrastructureTests {
                     priority: 10
                 ),
                 StubManifestAgent(
-                    id: .language,
-                    capabilities: [.languageDetection],
+                    id: .semanticNLU,
+                    capabilities: [.intentClassification, .deviceTypeExtraction],
                     operations: [.executeDeviceCommand],
                     priority: 0
                 )
@@ -65,8 +67,8 @@ struct Phase2GraphInfrastructureTests {
                     priority: 20
                 ),
                 StubManifestAgent(
-                    id: .language,
-                    capabilities: [.languageDetection],
+                    id: .semanticNLU,
+                    capabilities: [.intentClassification, .deviceTypeExtraction],
                     operations: [.executeDeviceCommand],
                     priority: 0
                 )
@@ -74,7 +76,7 @@ struct Phase2GraphInfrastructureTests {
         )
 
         #expect(registry.agents(for: .automationCreation).map(\.id) == [.operationDetection, .automationDraft])
-        #expect(registry.agents(for: .executeDeviceCommand).map(\.id) == [.operationDetection, .language])
+        #expect(registry.agents(for: .executeDeviceCommand).map(\.id) == [.operationDetection, .semanticNLU])
     }
 
     @Test
@@ -105,6 +107,8 @@ struct Phase2GraphInfrastructureTests {
         let context = await contextStore.snapshot()
         #expect(result.exit == nil)
         #expect(context.operation?.operation == .automationCreation)
+        #expect(context.language?.languageCode == "en")
+        #expect(context.domain?.domain == .homeAutomation)
         #expect(context.trace.map(\.agentID) == [.operationDetection])
         #expect(result.metrics.nodeStatuses[AgentID.operationDetection.rawValue] == .completed)
     }
@@ -243,15 +247,15 @@ struct Phase2GraphInfrastructureTests {
             id: "direct-command-minimal",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: "language", requirement: .byID(.language)),
-                GraphNode(id: "intent", requirement: .byID(.intentFamily)),
+                GraphNode(id: "semantic", requirement: .byID(.semanticNLU)),
+                GraphNode(id: "slots", requirement: .byID(.slotExtraction)),
                 GraphNode(id: "draft", requirement: .byID(.draftGeneration))
             ],
             edges: [
-                GraphEdge(from: "language", to: "intent"),
-                GraphEdge(from: "intent", to: "draft")
+                GraphEdge(from: "semantic", to: "slots"),
+                GraphEdge(from: "slots", to: "draft")
             ],
-            entryNodeIDs: ["language"]
+            entryNodeIDs: ["semantic"]
         )
 
         #expect(GraphValidator().validate(graph).isEmpty)
@@ -263,27 +267,27 @@ struct Phase2GraphInfrastructureTests {
             id: "duplicate",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: "language", requirement: .byID(.language)),
-                GraphNode(id: "language", requirement: .byID(.domain))
+                GraphNode(id: "semantic", requirement: .byID(.semanticNLU)),
+                GraphNode(id: "semantic", requirement: .byID(.slotExtraction))
             ],
             edges: [],
-            entryNodeIDs: ["language"]
+            entryNodeIDs: ["semantic"]
         )
 
-        #expect(GraphValidator().validate(graph).contains(.duplicateNodeID("language")))
+        #expect(GraphValidator().validate(graph).contains(.duplicateNodeID("semantic")))
     }
 
     @Test
     func graphValidatorDetectsMissingEdgeReferences() {
-        let edge = GraphEdge(from: "language", to: "missing")
+        let edge = GraphEdge(from: "semantic", to: "missing")
         let graph = OrchestrationGraph(
             id: "missing-ref",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: "language", requirement: .byID(.language))
+                GraphNode(id: "semantic", requirement: .byID(.semanticNLU))
             ],
             edges: [edge],
-            entryNodeIDs: ["language"]
+            entryNodeIDs: ["semantic"]
         )
 
         #expect(GraphValidator().validate(graph).contains(.missingEdgeEndpoint(edge: edge, missingNodeID: "missing")))
@@ -295,8 +299,8 @@ struct Phase2GraphInfrastructureTests {
             id: "cycle",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: "a", requirement: .byID(.language)),
-                GraphNode(id: "b", requirement: .byID(.domain))
+                GraphNode(id: "a", requirement: .byID(.semanticNLU)),
+                GraphNode(id: "b", requirement: .byID(.slotExtraction))
             ],
             edges: [
                 GraphEdge(from: "a", to: "b"),
@@ -314,9 +318,9 @@ struct Phase2GraphInfrastructureTests {
             id: "unreachable",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: "start", requirement: .byID(.language)),
-                GraphNode(id: "next", requirement: .byID(.domain)),
-                GraphNode(id: "orphan", requirement: .byID(.intentFamily))
+                GraphNode(id: "start", requirement: .byID(.semanticNLU)),
+                GraphNode(id: "next", requirement: .byID(.slotExtraction)),
+                GraphNode(id: "orphan", requirement: .byID(.riskClassification))
             ],
             edges: [
                 GraphEdge(from: "start", to: "next")
@@ -388,17 +392,17 @@ struct Phase2GraphInfrastructureTests {
             id: "language-only",
             goal: .executeDeviceCommand,
             nodes: [
-                GraphNode(id: AgentID.language.rawValue, requirement: .byID(.language))
+                GraphNode(id: AgentID.semanticNLU.rawValue, requirement: .byID(.semanticNLU))
             ],
             edges: [],
-            entryNodeIDs: [AgentID.language.rawValue]
+            entryNodeIDs: [AgentID.semanticNLU.rawValue]
         )
 
         let errors = GraphValidator().validate(graph, registry: registry)
 
         #expect(errors.contains {
             if case let .missingTerminalOutput(graphID, nodeID, _, _) = $0 {
-                return graphID == "language-only" && nodeID == AgentID.language.rawValue
+                return graphID == "language-only" && nodeID == AgentID.semanticNLU.rawValue
             }
             return false
         })

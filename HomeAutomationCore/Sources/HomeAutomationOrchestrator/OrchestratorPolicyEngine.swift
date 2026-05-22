@@ -125,7 +125,7 @@ public struct OrchestratorPolicyEngine: Sendable {
         switch agentID {
         case .draftGeneration:
             return 3
-        case .language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification:
+        case .semanticNLU, .slotExtraction, .riskClassification:
             return 1
         case .candidateRetrieval, .candidateRanking, .ruleFallback:
             return 1

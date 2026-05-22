@@ -6,10 +6,7 @@ struct AgentContractTests {
     @Test
     func definesAllPhaseOneAgentIdentities() {
         let ids: Set<AgentID> = [
-            .language,
-            .domain,
-            .intentFamily,
-            .deviceType,
+            .semanticNLU,
             .slotExtraction,
             .riskClassification,
             .capabilityKnowledge,
@@ -35,7 +32,7 @@ struct AgentContractTests {
             .resultSummary
         ]
 
-        #expect(ids.count == 27)
+        #expect(ids.count == 24)
     }
 
     @Test

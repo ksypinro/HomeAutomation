@@ -313,6 +313,56 @@ struct AutomationDraftAgentTests {
     }
 
     @Test
+    func automationDraftWorkerPreservesParserConditionWhenModelDropsIt() async throws {
+        let modelOutputWithoutCondition = AutomationDraftOutput(
+            name: "AutomationDraftOutput",
+            trigger: AutomationTriggerOutput(
+                type: .schedule,
+                repeatRule: "everyDay",
+                time: "07:00",
+                description: "Turn on bedroom AC everyday at 07:00"
+            ),
+            condition: nil,
+            actionDescriptions: ["Turn on bedroom AC"],
+            unsupportedFragments: [],
+            confidence: 0.9
+        )
+        let worker = AutomationDraftWorkerSession(
+            draft: { _ in modelOutputWithoutCondition },
+            foundationModelAvailability: { true }
+        )
+
+        let output = try await worker.createDraft(
+            AutomationDraftInput(
+                text: "Turn on bedroom AC everyday at 7 AM if the entry contact sensor is closed"
+            )
+        )
+
+        let condition = try #require(output.condition)
+        #expect(output.name == "Turn on bedroom AC everyDay at 07:00")
+        #expect(condition.type == .comparison)
+        #expect(condition.left?.description == "the entry contact sensor")
+        #expect(condition.operatorName == .equals)
+        #expect(condition.right?.stringValue == "closed")
+        #expect(condition.triggerPolicy == .never)
+
+        let draft = try output.makeRuleDraft()
+        guard case .comparison(let comparison) = draft.condition else {
+            Issue.record("Expected preserved schedule precondition")
+            return
+        }
+        #expect(comparison.left == .deviceAttribute(
+            description: "the entry contact sensor",
+            deviceID: nil,
+            capability: nil,
+            attribute: nil
+        ))
+        #expect(comparison.operatorName == .equals)
+        #expect(comparison.right == .literalString("closed"))
+        #expect(comparison.triggerPolicy == .never)
+    }
+
+    @Test
     func highConfidenceConditionalParserBypassesModelWhenAvailable() async throws {
         let worker = AutomationDraftWorkerSession(foundationModelAvailability: { true })
 

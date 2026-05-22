@@ -24,10 +24,8 @@ public struct HomeAdapterTrainingExample: Sendable, Codable, Hashable {
 
 public enum HomeAdapterTrainingTask: String, Sendable, Codable, Hashable {
     case draftGeneration
-    case languageDetection
-    case domainClassification
-    case intentFamilyClassification
-    case deviceTypeClassification
+    case operationRouting
+    case semanticNLU
     case slotExtraction
     case riskClassification
 }
@@ -260,47 +258,42 @@ public enum HomeAdapterTrainingExporter {
 
         return [
             HomeAdapterTaskTrainingExample(
-                id: "nlu.language.\(example.id)",
+                id: "nlu.operation.\(example.id)",
                 source: source,
-                task: .languageDetection,
+                task: .operationRouting,
                 input: example.text,
                 expectedOutputJSON: try encodedOutput(
-                    HomeLanguageDetectionResult(
-                        languageCode: example.language,
-                        isMixedLanguage: example.language.contains("_"),
-                        confidence: 1,
-                        unsupportedLanguageLikely: false
+                    HomeOperationRoutingResult(
+                        operation: HomeOperationDetectionResult(
+                            domain: commandDomain(for: example.expected.domain),
+                            operation: example.automationIntent == .unsupported ? .unsupported : .executeDeviceCommand,
+                            confidence: 1,
+                            reason: "Dataset label"
+                        ),
+                        language: HomeLanguageDetectionResult(
+                            languageCode: example.language,
+                            isMixedLanguage: false,
+                            confidence: 1,
+                            unsupportedLanguageLikely: false
+                        ),
+                        domain: HomeDomainClassificationResult(
+                            domain: commandDomain(for: example.expected.domain),
+                            confidence: 1
+                        )
                     )
                 ),
                 metadata: metadata
             ),
             HomeAdapterTaskTrainingExample(
-                id: "nlu.domain.\(example.id)",
+                id: "nlu.semantic.\(example.id)",
                 source: source,
-                task: .domainClassification,
+                task: .semanticNLU,
                 input: example.text,
                 expectedOutputJSON: try encodedOutput(
-                    HomeDomainClassificationResult(domain: .homeAutomation, confidence: 1)
-                ),
-                metadata: metadata
-            ),
-            HomeAdapterTaskTrainingExample(
-                id: "nlu.intent.\(example.id)",
-                source: source,
-                task: .intentFamilyClassification,
-                input: example.text,
-                expectedOutputJSON: try encodedOutput(
-                    HomeIntentFamilyResult(topFamilies: [intentFamily(for: example.automationIntent)], confidence: 1)
-                ),
-                metadata: metadata
-            ),
-            HomeAdapterTaskTrainingExample(
-                id: "nlu.deviceType.\(example.id)",
-                source: source,
-                task: .deviceTypeClassification,
-                input: example.text,
-                expectedOutputJSON: try encodedOutput(
-                    HomeDeviceTypeResult(deviceTypes: [example.deviceType], confidence: 1)
+                    HomeSemanticNLUResult(
+                        intent: HomeIntentFamilyResult(topFamilies: [intentFamily(for: example.automationIntent)], confidence: 1),
+                        deviceType: HomeDeviceTypeResult(deviceTypes: [example.deviceType], confidence: 1)
+                    )
                 ),
                 metadata: metadata
             ),
@@ -344,6 +337,19 @@ public enum HomeAdapterTrainingExporter {
                 metadata: metadata
             )
         ]
+    }
+
+    private static func commandDomain(for domainString: String) -> HomeAutomationCommandDomain {
+        switch domainString {
+        case "homeAutomation":
+            return .homeAutomation
+        case "appNavigation":
+            return .appNavigation
+        case "generalQuestion":
+            return .generalQuestion
+        default:
+            return .unsupported
+        }
     }
 
     private static func intentFamily(for intent: HomeAutomationIntent) -> HomeAutomationIntentFamily {

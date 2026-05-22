@@ -1,3 +1,4 @@
+import Foundation
 import HomeAutomationCore
 import HomeAutomationOrchestrator
 import Testing
@@ -36,12 +37,51 @@ struct AutomationConditionOperandResolverTests {
     }
 
     @Test
+    func strongDeterministicConditionMatchStillChecksFoundationModelAvailability() async throws {
+        let availabilitySpy = FoundationModelAvailabilitySpy()
+        let resolver = AutomationConditionOperandResolver(
+            registry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: {
+                availabilitySpy.record()
+                return false
+            }
+        )
+        let condition = HomeAutomationCondition.comparison(
+            HomeAutomationComparisonCondition(
+                left: .deviceAttribute(
+                    description: "living room ceiling light",
+                    deviceID: nil,
+                    capability: nil,
+                    attribute: nil
+                ),
+                operatorName: .equals,
+                right: .literalString("off")
+            )
+        )
+
+        let resolved = await resolver.resolve(condition)
+
+        guard case .comparison(let comparison) = resolved,
+              case .deviceAttribute(_, let deviceID, let capability, let attribute) = comparison.left else {
+            Issue.record("Expected resolved device attribute operand")
+            return
+        }
+        #expect(deviceID == "living_room_ceiling_light")
+        #expect(capability == "switch")
+        #expect(attribute == "switch")
+        #expect(availabilitySpy.wasCalled() == true)
+    }
+
+    @Test
     func ambiguousConditionRemainsUnresolvedForValidationClarification() async throws {
         let registry = MockHomeDeviceRegistry(devices: [
             windowSensor("left_bedroom_window", "Left Bedroom Window"),
             windowSensor("right_bedroom_window", "Right Bedroom Window")
         ])
-        let resolver = AutomationConditionOperandResolver(registry: registry)
+        let resolver = AutomationConditionOperandResolver(
+            registry: registry,
+            foundationModelAvailability: { false }
+        )
         let condition = HomeAutomationCondition.comparison(
             HomeAutomationComparisonCondition(
                 left: .deviceAttribute(
@@ -115,5 +155,22 @@ struct AutomationConditionOperandResolverTests {
             supportedCommands: ["contactSensor": []],
             currentState: ["contact": "closed"]
         )
+    }
+}
+
+private final class FoundationModelAvailabilitySpy: @unchecked Sendable {
+    private let lock = NSLock()
+    private var called = false
+
+    func record() {
+        lock.lock()
+        defer { lock.unlock() }
+        called = true
+    }
+
+    func wasCalled() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return called
     }
 }

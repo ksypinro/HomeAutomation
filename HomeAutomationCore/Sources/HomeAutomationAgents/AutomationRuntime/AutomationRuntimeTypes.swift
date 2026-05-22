@@ -26,6 +26,16 @@ public enum AutomationRuntimeContextKeys {
         scope: .root
     )
 
+    public static let componentPlan = ScopedContextKey<AutomationComponentPlan>(
+        ResolutionContextPatchKey.automationComponentPlan.rawValue,
+        scope: .root
+    )
+
+    public static let resolvedComponentSet = ScopedContextKey<AutomationResolvedComponentSet>(
+        ResolutionContextPatchKey.automationResolvedComponents.rawValue,
+        scope: .root
+    )
+
     public static let smartThingsCompilation = ScopedContextKey<SmartThingsCompilationOutput>(
         "smartThingsCompilation",
         scope: .backend("smartthings")

@@ -7,39 +7,6 @@ import Testing
 @Suite
 struct Phase2AgentTests {
     @Test
-    func languageAgentDetectsEnglish() async throws {
-        let agent = LanguageAgent { _ in
-            HomeLanguageDetectionResult(languageCode: "en", isMixedLanguage: false, confidence: 0.95, unsupportedLanguageLikely: false)
-        }
-
-        let result = try await agent.run("turn on light", context: Self.context())
-
-        #expect(result.languageCode == "en")
-    }
-
-    @Test
-    func domainAgentClassifiesHomeAutomation() async throws {
-        let agent = DomainAgent { _ in
-            HomeDomainClassificationResult(domain: .homeAutomation, confidence: 0.9)
-        }
-
-        let result = try await agent.run("turn on light", context: Self.context())
-
-        #expect(result.domain == .homeAutomation)
-    }
-
-    @Test
-    func intentFamilyAgentReturnsPowerFamily() async throws {
-        let agent = IntentFamilyAgent { _ in
-            HomeIntentFamilyResult(topFamilies: [.power], confidence: 0.9)
-        }
-
-        let result = try await agent.run("turn on light", context: Self.context())
-
-        #expect(result.topFamilies == [.power])
-    }
-
-    @Test
     func deterministicIntentKeepsExplicitPowerActionForWarmerByTurningOffAC() {
         let state = AgentTextParser.deterministicState(for: "Make bedroom warmer by turning off the AC")
 
@@ -49,14 +16,18 @@ struct Phase2AgentTests {
     }
 
     @Test
-    func deviceTypeAgentReturnsLightType() async throws {
-        let agent = DeviceTypeAgent { _ in
-            HomeDeviceTypeResult(deviceTypes: ["light"], confidence: 0.9)
+    func semanticNLUAgentReturnsIntentAndDeviceType() async throws {
+        let agent = SemanticNLUAgent { _ in
+            HomeSemanticNLUResult(
+                intent: HomeIntentFamilyResult(topFamilies: [.power], confidence: 0.92),
+                deviceType: HomeDeviceTypeResult(deviceTypes: ["light"], confidence: 0.91)
+            )
         }
 
         let result = try await agent.run("turn on light", context: Self.context())
 
-        #expect(result.deviceTypes == ["light"])
+        #expect(result.intent.topFamilies == [.power])
+        #expect(result.deviceType.deviceTypes == ["light"])
     }
 
     @Test
@@ -460,19 +431,20 @@ struct Phase2AgentTests {
         let tasks = Set(examples.map(\.task))
 
         #expect(jsonl.split(separator: "\n").count == examples.count)
-        #expect(tasks.contains(.languageDetection))
-        #expect(tasks.contains(.intentFamilyClassification))
+        #expect(tasks.contains(.operationRouting))
+        #expect(tasks.contains(.semanticNLU))
+        #expect(tasks.contains(.slotExtraction))
         #expect(tasks.contains(.riskClassification))
     }
 
     @Test
-    func nluWorkerSkipsModelForHighConfidenceDeterministicCommand() async throws {
-        let worker = LanguageAgentWorkerSession(foundationModelAvailability: { true })
+    func semanticNLUWorkerFallsBackDeterministicallyWhenModelUnavailable() async throws {
+        let worker = SemanticNLUWorkerSession(foundationModelAvailability: { false })
 
-        let result = try await worker.detectLanguage("Turn on the bedroom lamp")
+        let result = try await worker.classifySemanticNLU("Turn on the bedroom lamp")
 
-        #expect(result.languageCode == "en")
-        #expect(result.confidence >= 0.90)
+        #expect(result.intent.topFamilies.contains(.power))
+        #expect(result.deviceType.deviceTypes.contains("light"))
     }
 
     @Test

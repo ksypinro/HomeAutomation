@@ -37,12 +37,10 @@ flowchart TB
         Memory["ConversationMemory"]
     end
 
-    subgraph Agents["HomeAutomationAgents - 27 Specialist Agents"]
+    subgraph Agents["HomeAutomationAgents - Specialist Agents"]
         subgraph NLU["NLU Agents"]
-            LanguageAgent["LanguageAgent"]
-            DomainAgent["DomainAgent"]
-            IntentFamilyAgent["IntentFamilyAgent"]
-            DeviceTypeAgent["DeviceTypeAgent"]
+            OperationDetectionAgent["OperationDetectionAgent: operation + language + domain"]
+            SemanticNLUAgent["SemanticNLUAgent: intent + device type"]
             SlotExtractionAgent["SlotExtractionAgent"]
             RiskClassificationAgent["RiskClassificationAgent"]
         end
@@ -143,7 +141,7 @@ flowchart TD
     F --> G["BixbyFallbackAgent"]
     G --> H["UnsupportedCommandAgent if no deterministic match"]
 
-    E -->|Direct command + models available| I["Direct command graph: run 6 NLU agents in parallel"]
+    E -->|Direct command + models available| I["Direct command graph: run SemanticNLU, SlotExtraction, RiskClassification in parallel"]
     I --> J["Run NLU-informed knowledge and candidate retrieval in parallel"]
     J --> K["RetrievalJudgeAgent accepts or retries weak retrieval"]
     K --> L["Rank and hydrate scoped candidates"]
@@ -209,10 +207,10 @@ The main Swift package source folders each have their own detailed architecture 
 
 | Source folder | README | Focus |
 | --- | --- | --- |
-| `HomeAutomationCore/Sources/HomeAutomationCore` | [Core module README](HomeAutomationCore/Sources/HomeAutomationCore/README.md) | Domain contracts, canonical catalogs, policies, generated resources, mock registry, and Foundation Models support. |
-| `HomeAutomationCore/Sources/HomeAutomationAgents` | [Agents module README](HomeAutomationCore/Sources/HomeAutomationAgents/README.md) | Agent protocol, 27 specialist agents, group responsibilities, retrieval reports, agent flow, and safety constraints. |
-| `HomeAutomationCore/Sources/HomeAutomationRAG` | [RAG module README](HomeAutomationCore/Sources/HomeAutomationRAG/README.md) | Semantic content, embeddings, BM25, hybrid retrieval, indexing, retrieval flow, metadata filters, and retrieval invariants. |
-| `HomeAutomationCore/Sources/HomeAutomationOrchestrator` | [Orchestrator module README](HomeAutomationCore/Sources/HomeAutomationOrchestrator/README.md) | Planning, scheduling, context patching, event streaming, metrics, memory, circuit breakers, and fail-closed behavior. |
+| `HomeAutomationCore/Sources/HomeAutomationCore` | [Core module README](Docs/HomeAutomationCore.md) | Domain contracts, canonical catalogs, policies, generated resources, mock registry, and Foundation Models support. |
+| `HomeAutomationCore/Sources/HomeAutomationAgents` | [Agents module README](Docs/HomeAutomationAgents.md) | Agent protocol, specialist agents, group responsibilities, retrieval reports, agent flow, and safety constraints. |
+| `HomeAutomationCore/Sources/HomeAutomationRAG` | [RAG module README](Docs/HomeAutomationRAG.md) | Semantic content, embeddings, BM25, hybrid retrieval, indexing, retrieval flow, metadata filters, and retrieval invariants. |
+| `HomeAutomationCore/Sources/HomeAutomationOrchestrator` | [Orchestrator module README](Docs/HomeAutomationOrchestrator.md) | Planning, scheduling, context patching, event streaming, metrics, memory, circuit breakers, and fail-closed behavior. |
 
 | Module | Role |
 | --- | --- |
@@ -269,20 +267,18 @@ flowchart LR
 | `ConversationMemory` | Stores recent resolved turns and contributes low-priority memory hints for follow-up commands. |
 | `OrchestratorMetricsCollector` | Stores and serializes the latest orchestrator metrics. |
 
-### Agent Inventory (27 Specialist Agents)
+### Agent Inventory
 
-#### NLU Agents (6) — Parallel Signal Extraction
+#### NLU Agents — Consolidated Active Stack
 
 | Agent | Input | Output | Description |
 | --- | --- | --- | --- |
-| `LanguageAgent` | `String` | `HomeLanguageDetectionResult` | Detects BCP-47 language code, mixed-language flag, and confidence. Uses Foundation Models when available, falls back to `AgentTextParser` keyword detection. |
-| `DomainAgent` | `String` | `HomeDomainClassificationResult` | Classifies whether the command is `.homeAutomation` or `.unsupported`. Enables early pipeline exit for non-home commands. |
-| `IntentFamilyAgent` | `String` | `HomeIntentFamilyResult` | Identifies broad intent families (`.power`, `.temperature`, `.brightness`, `.lockUnlock`, `.routine`, `.statusQuery`, etc.) that drive tool selection and safety routing. |
-| `DeviceTypeAgent` | `String` | `HomeDeviceTypeResult` | Extracts normalized device type hints (`light`, `thermostat`, `lock`, etc.) to narrow candidate search space. |
+| `OperationDetectionAgent` | `String` | `HomeOperationRoutingResult` | Root-routing agent that produces operation, language, and domain in one Foundation Model call, with deterministic semantic analyzer fallback. |
+| `SemanticNLUAgent` | `String` | `HomeSemanticNLUResult` | Active direct-command semantic classifier that fuses intent-family and device-type extraction in one Foundation Model call. |
 | `SlotExtractionAgent` | `String` | `HomeSlotExtractionResult` | Extracts rooms, device nicknames, numeric values, units, and modes from the command text. |
 | `RiskClassificationAgent` | `String` | `HomeRiskClassificationResult` | Produces initial risk estimate (`.low`/`.medium`/`.high`/`.critical`) as advisory signal for downstream safety gates. |
 
-All 6 NLU agents run **in parallel** as dependency-ready graph nodes. The scheduler can start newly ready downstream nodes as soon as their direct dependencies finish, while unrelated NLU work continues. Each agent supports optional RAG few-shot enrichment via `ContextRetriever`.
+The active direct-command NLU graph runs `SemanticNLUAgent`, `SlotExtractionAgent`, and `RiskClassificationAgent` **in parallel**. Language and domain are already produced by the root routing graph, so direct command resolution no longer spends separate model calls on them. Each active NLU agent supports optional RAG few-shot enrichment via `ContextRetriever`.
 
 #### Knowledge Agents (4) - Context Hydration and Retrieval Quality
 

@@ -87,7 +87,12 @@ public enum AgentManifestDefaults {
                 .routineExecution,
                 .unsupported
             ]
-        case .automationDraft,
+        case .automationComponentSegmentation,
+             .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut,
+             .automationDraftAssembly,
+             .automationDraft,
              .automationActionResolution,
              .automationConditionOperandResolution,
              .automationValidation,
@@ -102,7 +107,7 @@ public enum AgentManifestDefaults {
 
     private static func consumes(for id: AgentID) -> Set<String> {
         switch id {
-        case .language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification:
+        case .semanticNLU, .slotExtraction, .riskClassification:
             return ["request.text"]
         case .capabilityKnowledge, .bixbyKnowledge, .commandExample, .candidateRetrieval:
             return ["request.text", "resolutionState"]
@@ -132,6 +137,16 @@ public enum AgentManifestDefaults {
             return ["request.text"]
         case .operationDetection:
             return ["request.text"]
+        case .automationComponentSegmentation:
+            return ["request.text", "operation"]
+        case .automationTriggerResolution:
+            return ["automationComponentPlan"]
+        case .automationConditionClauseResolution:
+            return ["automationComponentPlan"]
+        case .automationComponentFanOut:
+            return ["automationComponentPlan"]
+        case .automationDraftAssembly:
+            return ["automationComponentPlan", "automationResolvedComponents"]
         case .automationDraft:
             return ["request.text", "operation"]
         case .automationActionResolution:
@@ -153,14 +168,8 @@ public enum AgentManifestDefaults {
 
     private static func produces(for id: AgentID) -> Set<String> {
         switch id {
-        case .language:
-            return ["language", "resolutionState"]
-        case .domain:
-            return ["domain", "resolutionState"]
-        case .intentFamily:
-            return ["intent", "resolutionState"]
-        case .deviceType:
-            return ["deviceType", "resolutionState"]
+        case .semanticNLU:
+            return ["intent", "deviceType", "resolutionState"]
         case .slotExtraction:
             return ["slots", "resolutionState"]
         case .riskClassification:
@@ -196,7 +205,21 @@ public enum AgentManifestDefaults {
         case .unsupportedCommand, .clarification, .resultSummary:
             return ["resolution"]
         case .operationDetection:
-            return ["operation"]
+            return ["operation", "language", "domain"]
+        case .automationComponentSegmentation:
+            return ["automationComponentPlan"]
+        case .automationTriggerResolution:
+            return ["automationTriggerResolution"]
+        case .automationConditionClauseResolution:
+            return ["automationConditionOperandResolutionRecords"]
+        case .automationComponentFanOut:
+            return [
+                "automationResolvedComponents",
+                "automationResolvedActions",
+                "automationConditionOperandResolutionRecords"
+            ]
+        case .automationDraftAssembly:
+            return ["automationDraft"]
         case .automationDraft:
             return ["automationDraft", "retrievalReports"]
         case .automationActionResolution:
@@ -218,6 +241,15 @@ public enum AgentManifestDefaults {
 
     private static func consumedArtifacts(for id: AgentID) -> Set<ContextArtifactContract> {
         switch id {
+        case .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut:
+            return [.required(ContextArtifactKeys.automationComponentPlan())]
+        case .automationDraftAssembly:
+            return [
+                .required(ContextArtifactKeys.automationComponentPlan()),
+                .required(ContextArtifactKeys.automationResolvedComponents())
+            ]
         case .automationActionResolution,
              .automationConditionOperandResolution,
              .automationValidation,
@@ -237,6 +269,12 @@ public enum AgentManifestDefaults {
 
     private static func producedArtifacts(for id: AgentID) -> Set<ContextArtifactContract> {
         switch id {
+        case .automationComponentSegmentation:
+            return [.required(ContextArtifactKeys.automationComponentPlan())]
+        case .automationComponentFanOut:
+            return [.required(ContextArtifactKeys.automationResolvedComponents())]
+        case .automationDraftAssembly:
+            return [.required(ContextArtifactKeys.automationRuleDraft())]
         case .automationDraft:
             return [.required(ContextArtifactKeys.automationRuleDraft())]
         case .automationValidation:
@@ -273,7 +311,12 @@ public enum AgentManifestDefaults {
         switch id {
         case .draftGeneration:
             return AgentRetryPolicy(maxAttempts: 3)
-        case .language, .domain, .intentFamily, .deviceType, .slotExtraction, .riskClassification:
+        case .semanticNLU, .slotExtraction, .riskClassification:
+            return .singleRetry
+        case .automationComponentSegmentation,
+             .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut:
             return .singleRetry
         case .candidateRetrieval, .candidateRanking, .ruleFallback:
             return .singleRetry
@@ -286,7 +329,12 @@ public enum AgentManifestDefaults {
         switch id {
         case .operationDetection:
             return 100
-        case .automationDraft,
+        case .automationComponentSegmentation,
+             .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut,
+             .automationDraftAssembly,
+             .automationDraft,
              .automationActionResolution,
              .automationConditionOperandResolution,
              .automationValidation,

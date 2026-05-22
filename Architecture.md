@@ -50,12 +50,10 @@ flowchart TB
         Memory["ConversationMemory"]
     end
 
-    subgraph AgentLayer["HomeAutomationAgents - 27 Specialist Agents"]
+    subgraph AgentLayer["HomeAutomationAgents - Specialist Agents"]
         subgraph NLU["NLU Agents"]
-            LanguageAgent["LanguageAgent"]
-            DomainAgent["DomainAgent"]
-            IntentFamilyAgent["IntentFamilyAgent"]
-            DeviceTypeAgent["DeviceTypeAgent"]
+            OperationDetectionAgent["OperationDetectionAgent: operation + language + domain"]
+            SemanticNLUAgent["SemanticNLUAgent: intent + device type"]
             SlotExtractionAgent["SlotExtractionAgent"]
             RiskClassificationAgent["RiskClassificationAgent"]
         end
@@ -210,8 +208,8 @@ flowchart TD
     H2 --> H3["UnsupportedCommandAgent if needed"]
 
     G -->|Direct command + models available| I["Direct command graph"]
-    I --> J["Run NLU agents in parallel"]
-    J --> K["Merge language, domain, intent, device type, slot, and risk patches"]
+    I --> J["Run SemanticNLU, SlotExtraction, and RiskClassification in parallel"]
+    J --> K["Merge intent, device type, slot, and risk patches with root language/domain"]
     K --> L["Run NLU-informed knowledge agents and candidate retrieval in parallel"]
     L --> M["RetrievalJudgeAgent accepts or retries weak retrieval"]
     M --> N["CandidateRankingAgent scopes and ranks candidates"]
@@ -284,7 +282,7 @@ New scoped exchanges should use `ContextArtifactKey<Value>` and typed artifact h
 | Field | Purpose |
 | --- | --- |
 | `request` | Original command text and execution toggle. |
-| `language`, `domain`, `intent`, `deviceType`, `slots`, `risk` | NLU outputs produced by parallel agents. |
+| `language`, `domain`, `intent`, `deviceType`, `slots`, `risk` | NLU outputs. Root routing produces language/domain; the direct graph produces intent/device type through `SemanticNLUAgent` plus slots and risk in parallel. |
 | `resolutionState` | Bundled worker state for compatibility with existing resolver contracts. |
 | `retrievedCandidates` | Device/routine candidates from registry and semantic retrieval. |
 | `selectedCandidateIDs`, `aggregation` | Ranked candidate IDs and clarification metadata. |
@@ -301,37 +299,35 @@ New scoped exchanges should use `ContextArtifactKey<Value>` and typed artifact h
 
 ## 8. Agent Inventory
 
-The implemented system has 27 specialist agents.
+The implemented system has a consolidated active NLU stack.
 
 | # | Agent | Group | Role |
 | --- | --- | --- | --- |
-| 1 | `LanguageAgent` | NLU | Detects language and mixed-language state, with deterministic fallback support. |
-| 2 | `DomainAgent` | NLU | Classifies whether text belongs to home automation or another domain. |
-| 3 | `IntentFamilyAgent` | NLU | Identifies broad intent families such as power, temperature, brightness, media, lock, routine, or status. |
-| 4 | `DeviceTypeAgent` | NLU | Extracts normalized device-type hints. |
-| 5 | `SlotExtractionAgent` | NLU | Extracts rooms, nicknames, values, units, modes, and durations. |
-| 6 | `RiskClassificationAgent` | NLU | Produces an initial risk estimate and reason. |
-| 7 | `CapabilityKnowledgeAgent` | Knowledge | Retrieves relevant capability facts, then hydrates source-of-truth definitions from `HomeCapabilityRegistry`. |
-| 8 | `BixbyKnowledgeAgent` | Knowledge | Retrieves and hydrates relevant Bixby voice-command snippets. |
-| 9 | `CommandExampleAgent` | Knowledge | Retrieves similar generated command examples for few-shot context. |
-| 10 | `RetrievalJudgeAgent` | Knowledge | Reviews retrieval reports, fast-path accepts good retrieval, or performs one bounded reformulated retry for weak sources. |
-| 11 | `CandidateRetrievalAgent` | Candidates | Retrieves device/routine candidates from `MockHomeDeviceRegistry`, enhanced with semantic device hints. |
-| 12 | `CandidateRankingAgent` | Candidates | Scopes by strong room/device-type hints, ranks retrieved candidates, and decides whether clarification is needed. |
-| 13 | `CandidateShardAgent` | Candidates | Supports shard-level candidate selection for large candidate sets. |
-| 14 | `CandidateHydrationAgent` | Candidates | Hydrates selected candidate IDs into full `HomeCandidateRecord` values. |
-| 15 | `InstructionComposerAgent` | Draft | Builds `HomeModelInstructionPackage` using canonical data plus selected RAG slices. |
-| 16 | `DraftGenerationAgent` | Draft | Produces a `HomeCommandDraft` through the draft resolver. |
-| 17 | `DraftRepairAgent` | Draft | Attempts draft repair or lower-confidence fallback draft selection. |
-| 18 | `SafetyValidationAgent` | Safety | Validates target, capability, command, risk, and plan eligibility. Mandatory fail-closed gate. |
-| 19 | `ParameterValidationAgent` | Safety | Checks enum values, ranges, and required parameters. Mandatory fail-closed gate. |
-| 20 | `ConfirmationPolicyAgent` | Safety | Enforces high-risk and memory-derived-target confirmation. Mandatory fail-closed gate. |
-| 21 | `ExecutionPlanningAgent` | Execution | Converts valid drafts into deterministic execution plans. Mandatory fail-closed gate. |
-| 22 | `MockExecutionAgent` | Execution | Mutates `MockHomeDeviceRegistry` for allowed low-risk command steps only. Mandatory fail-closed gate. |
-| 23 | `RuleFallbackAgent` | Fallback | Runs deterministic rule-based resolution when models are unavailable or fallback is selected. |
-| 24 | `BixbyFallbackAgent` | Fallback | Maps Bixby-style voice intents or catalog utterances to drafts. |
-| 25 | `UnsupportedCommandAgent` | Fallback | Produces a clear unsupported result when no route can resolve safely. |
-| 26 | `ClarificationAgent` | Response | Converts ambiguity into a user-facing clarification result. |
-| 27 | `ResultSummaryAgent` | Response | Formats final result summaries from `HomeCommandResolution`. |
+| 1 | `OperationDetectionAgent` | OperationDetection | Root-routing model call that produces operation, language, and domain, using the semantic analyzer as advisory fallback. |
+| 2 | `SemanticNLUAgent` | NLU | Active direct-command model call that fuses intent-family and device-type extraction. |
+| 3 | `SlotExtractionAgent` | NLU | Extracts rooms, nicknames, values, units, modes, and durations. |
+| 4 | `RiskClassificationAgent` | NLU | Produces an initial risk estimate and reason. |
+| 5 | `CapabilityKnowledgeAgent` | Knowledge | Retrieves relevant capability facts, then hydrates source-of-truth definitions from `HomeCapabilityRegistry`. |
+| 6 | `BixbyKnowledgeAgent` | Knowledge | Retrieves and hydrates relevant Bixby voice-command snippets. |
+| 7 | `CommandExampleAgent` | Knowledge | Retrieves similar generated command examples for few-shot context. |
+| 8 | `RetrievalJudgeAgent` | Knowledge | Reviews retrieval reports, fast-path accepts good retrieval, or performs one bounded reformulated retry for weak sources. |
+| 9 | `CandidateRetrievalAgent` | Candidates | Retrieves device/routine candidates from `MockHomeDeviceRegistry`, enhanced with semantic device hints. |
+| 10 | `CandidateRankingAgent` | Candidates | Scopes by strong room/device-type hints, ranks retrieved candidates, and decides whether clarification is needed. |
+| 12 | `CandidateShardAgent` | Candidates | Supports shard-level candidate selection for large candidate sets. |
+| 13 | `CandidateHydrationAgent` | Candidates | Hydrates selected candidate IDs into full `HomeCandidateRecord` values. |
+| 14 | `InstructionComposerAgent` | Draft | Builds `HomeModelInstructionPackage` using canonical data plus selected RAG slices. |
+| 15 | `DraftGenerationAgent` | Draft | Produces a `HomeCommandDraft` through the draft resolver. |
+| 16 | `DraftRepairAgent` | Draft | Attempts draft repair or lower-confidence fallback draft selection. |
+| 17 | `SafetyValidationAgent` | Safety | Validates target, capability, command, risk, and plan eligibility. Mandatory fail-closed gate. |
+| 18 | `ParameterValidationAgent` | Safety | Checks enum values, ranges, and required parameters. Mandatory fail-closed gate. |
+| 19 | `ConfirmationPolicyAgent` | Safety | Enforces high-risk and memory-derived-target confirmation. Mandatory fail-closed gate. |
+| 20 | `ExecutionPlanningAgent` | Execution | Converts valid drafts into deterministic execution plans. Mandatory fail-closed gate. |
+| 21 | `MockExecutionAgent` | Execution | Mutates `MockHomeDeviceRegistry` for allowed low-risk command steps only. Mandatory fail-closed gate. |
+| 22 | `RuleFallbackAgent` | Fallback | Runs deterministic rule-based resolution when models are unavailable or fallback is selected. |
+| 23 | `BixbyFallbackAgent` | Fallback | Maps Bixby-style voice intents or catalog utterances to drafts. |
+| 24 | `UnsupportedCommandAgent` | Fallback | Produces a clear unsupported result when no route can resolve safely. |
+| 25 | `ClarificationAgent` | Response | Converts ambiguity into a user-facing clarification result. |
+| 26 | `ResultSummaryAgent` | Response | Formats final result summaries from `HomeCommandResolution`. |
 
 ## 9. Graph Execution Plan
 
@@ -506,18 +502,15 @@ HomeAutomation/
 |   |   |   |   |-- HomeAgent.swift
 |   |   |   |   `-- ResolutionContext.swift
 |   |   |   |-- NLU/
-|   |   |   |   |-- LanguageAgent.swift
-|   |   |   |   |-- DomainAgent.swift
-|   |   |   |   |-- IntentFamilyAgent.swift
-|   |   |   |   |-- DeviceTypeAgent.swift
-|   |   |   |   |-- SlotExtractionAgent.swift
-|   |   |   |   |-- RiskClassificationAgent.swift
-|   |   |   |   |-- LanguageAgentWorkerSession.swift
-|   |   |   |   |-- DomainAgentWorkerSession.swift
-|   |   |   |   |-- IntentFamilyAgentWorkerSession.swift
-|   |   |   |   |-- DeviceTypeAgentWorkerSession.swift
-|   |   |   |   |-- SlotExtractionAgentWorkerSession.swift
-|   |   |   |   `-- RiskClassificationAgentWorkerSession.swift
+|   |   |   |   |-- Semantic/
+|   |   |   |   |   |-- SemanticNLUAgent.swift
+|   |   |   |   |   `-- SemanticNLUWorkerSession.swift
+|   |   |   |   |-- Language/
+|   |   |   |   |-- Domain/
+|   |   |   |   |-- IntentFamily/
+|   |   |   |   |-- DeviceType/
+|   |   |   |   |-- SlotExtraction/
+|   |   |   |   `-- RiskClassification/
 |   |   |   |-- Knowledge/
 |   |   |   |   |-- KnowledgeInputs.swift
 |   |   |   |   |-- CapabilityKnowledgeAgent.swift
@@ -679,8 +672,9 @@ HomeAutomation/
 
 | Component | Role |
 | --- | --- |
-| `LanguageAgentWorkerSession`, `DomainAgentWorkerSession`, `IntentFamilyAgentWorkerSession`, `DeviceTypeAgentWorkerSession`, `SlotExtractionAgentWorkerSession`, `RiskClassificationAgentWorkerSession` | Per-agent Foundation Models worker sessions with deterministic fallback and deterministic-first model-call policy. |
-| `NLUModelCallPolicy` | Threshold policy that skips low-value NLU model calls when deterministic parsing is already high-confidence. |
+| `OperationDetectionWorkerSession` | Root-routing Foundation Models worker that emits operation, language, and domain together, with semantic analyzer fallback and automation-creation safety preference. |
+| `SemanticNLUWorkerSession`, `SlotExtractionAgentWorkerSession`, `RiskClassificationAgentWorkerSession` | Active direct-command NLU worker sessions with deterministic fallback and model-call policy. |
+| `NLUModelCallPolicy` | Model-call policy for model-first, deterministic hinting, and legacy threshold-gated NLU behavior. |
 | `AgentRAGSupport` | Internal helper for retrieving RAG context for agents. |
 | `KnowledgeRetrievalAgentOutput` | Knowledge snippets plus retrieval reports emitted by knowledge agents. |
 | `CapabilityKnowledgeAgent` | Retrieves and hydrates capability knowledge using NLU hints, hybrid retrieval, and canonical registry hydration. |

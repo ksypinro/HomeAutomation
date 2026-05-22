@@ -18,6 +18,8 @@ import OSLog
 /// let results = await resolver.resolveAll(["Turn on AC", "Turn off lamp"], ...)
 /// ```
 public struct AutomationActionResolver: Sendable {
+    public static let defaultMaxConcurrentActions = Int.max
+
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AutomationActionResolver")
     private let registry: AgentRegistry
     private let graphPlanner: GraphPlanner
@@ -30,7 +32,7 @@ public struct AutomationActionResolver: Sendable {
         graphPlanner: GraphPlanner,
         policy: OrchestratorPolicyEngine,
         circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
-        maxConcurrentActions: Int = 1
+        maxConcurrentActions: Int = Self.defaultMaxConcurrentActions
     ) {
         self.registry = registry
         self.graphPlanner = graphPlanner
@@ -57,6 +59,7 @@ public struct AutomationActionResolver: Sendable {
         // executeLowRiskCommands is false to prevent any mock execution.
         let request = CommandRequest(text: actionText, executeLowRiskCommands: false)
         let contextStore = ResolutionContextStore(request: request)
+        await seedDirectCommandRoutingContext(for: actionText, in: contextStore)
 
         let actionID = HomeAutomationTelemetryScope.current?.actionID ?? "a1"
         let execution = await executeDirectCommandPipeline(
@@ -117,8 +120,7 @@ public struct AutomationActionResolver: Sendable {
     ///   - actionDescriptions: Natural language action descriptions.
     ///   - eventBus: Event bus for publishing pipeline progress.
     ///   - runID: The run identifier for tracing.
-    /// - Returns: An array of results, one per action. If an action fails, the array
-    ///   will contain results only up to and including the failed action.
+    /// - Returns: An array of results, one per action, preserving input order.
     public func resolveAll(
         _ actionDescriptions: [String],
         eventBus: AgentEventBus,
@@ -259,6 +261,27 @@ public struct AutomationActionResolver: Sendable {
 
     private static func actionInvocationID(runID: UUID, actionID: String) -> String {
         "\(String(runID.uuidString.prefix(8)))-\(actionID)-\(AgentID.automationActionResolution.rawValue)"
+    }
+
+    private func seedDirectCommandRoutingContext(
+        for actionText: String,
+        in contextStore: ResolutionContextStore
+    ) async {
+        let deterministicState = AgentTextParser.deterministicState(
+            for: actionText,
+            confidence: 0.82,
+            riskReason: "Seeded automation action routing context"
+        )
+        let operation = HomeOperationDetectionResult(
+            domain: deterministicState.domain.domain,
+            operation: deterministicState.domain.domain == .homeAutomation ? .executeDeviceCommand : .unsupported,
+            confidence: deterministicState.domain.confidence,
+            reason: "Automation action subgraph seeded direct-command routing context"
+        )
+
+        await contextStore.setOperation(operation)
+        await contextStore.setLanguage(deterministicState.language)
+        await contextStore.setDomain(deterministicState.domain)
     }
 
     private static func namespacedPipelineEvent(

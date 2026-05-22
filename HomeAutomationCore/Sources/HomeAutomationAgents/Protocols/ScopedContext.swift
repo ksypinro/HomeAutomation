@@ -211,6 +211,26 @@ public enum ContextArtifactKeys {
         )
     }
 
+    public static func automationComponentPlan(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<AutomationComponentPlan> {
+        ContextArtifactKey(
+            "automationComponentPlan",
+            scope: scope,
+            debugDescription: "Segmented automation trigger, action, and condition components."
+        )
+    }
+
+    public static func automationResolvedComponents(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<AutomationResolvedComponentSet> {
+        ContextArtifactKey(
+            "automationResolvedComponents",
+            scope: scope,
+            debugDescription: "Resolved automation trigger, action, and condition component outputs."
+        )
+    }
+
     public static func automationPlan(
         in scope: ContextScope = .root
     ) -> ContextArtifactKey<HomeAutomationCreationPlan> {

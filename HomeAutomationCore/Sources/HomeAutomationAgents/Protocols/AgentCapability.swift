@@ -16,10 +16,7 @@ public struct AgentID: Sendable, Hashable, Codable, CustomStringConvertible {
 public extension AgentID {
     // NLU
     static let operationDetection = AgentID("operationDetection")
-    static let language = AgentID("language")
-    static let domain = AgentID("domain")
-    static let intentFamily = AgentID("intentFamily")
-    static let deviceType = AgentID("deviceType")
+    static let semanticNLU = AgentID("semanticNLU")
     static let slotExtraction = AgentID("slotExtraction")
     static let riskClassification = AgentID("riskClassification")
 
@@ -38,6 +35,11 @@ public extension AgentID {
 
     // Draft
     static let automationDraft = AgentID("automationDraft")
+    static let automationComponentSegmentation = AgentID("automationComponentSegmentation")
+    static let automationTriggerResolution = AgentID("automationTriggerResolution")
+    static let automationConditionClauseResolution = AgentID("automationConditionClauseResolution")
+    static let automationComponentFanOut = AgentID("automationComponentFanOut")
+    static let automationDraftAssembly = AgentID("automationDraftAssembly")
     static let automationActionResolution = AgentID("automationActionResolution")
     static let automationConditionOperandResolution = AgentID("automationConditionOperandResolution")
     static let instructionComposer = AgentID("instructionComposer")
@@ -70,8 +72,6 @@ public extension AgentID {
 /// What an agent can do, used by the registry and planner for dynamic lookup.
 public enum AgentCapability: String, Sendable, Hashable, Codable {
     case operationDetection
-    case languageDetection
-    case domainClassification
     case intentClassification
     case deviceTypeExtraction
     case slotExtraction
@@ -86,6 +86,11 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case draftGeneration
     case draftRepair
     case automationDrafting
+    case automationComponentSegmentation
+    case automationTriggerResolution
+    case automationConditionClauseResolution
+    case automationComponentFanOut
+    case automationDraftAssembly
     case automationActionResolution
     case automationConditionOperandResolution
     case automationValidation
