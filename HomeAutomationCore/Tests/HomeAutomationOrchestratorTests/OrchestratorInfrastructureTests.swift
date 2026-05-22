@@ -108,22 +108,21 @@ struct OrchestratorInfrastructureTests {
         #expect(graph.goal == .automationCreation)
         #expect(GraphValidator().validate(graph).isEmpty)
         #expect(graph.nodes.map(\.id) == [
-            AgentID.automationDraft.rawValue,
-            AgentID.automationConditionOperandResolution.rawValue,
-            AgentID.automationActionResolution.rawValue,
+            AgentID.automationComponentSegmentation.rawValue,
+            AgentID.automationComponentFanOut.rawValue,
+            AgentID.automationDraftAssembly.rawValue,
             AgentID.automationValidation.rawValue,
             AgentID.smartThingsCompilation.rawValue,
             AgentID.smartThingsRuleCreation.rawValue,
             AgentID.automationResultAssembly.rawValue
         ])
-        #expect(graph.entryNodeIDs == [AgentID.automationDraft.rawValue])
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue)))
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue)))
-        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue)))
+        #expect(graph.entryNodeIDs == [AgentID.automationComponentSegmentation.rawValue])
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationComponentSegmentation.rawValue, to: AgentID.automationComponentFanOut.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationComponentFanOut.rawValue, to: AgentID.automationDraftAssembly.rawValue)))
+        #expect(graph.edges.contains(GraphEdge(from: AgentID.automationDraftAssembly.rawValue, to: AgentID.automationValidation.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue)))
         #expect(graph.edges.contains(GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)))
-        #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationActionResolution.rawValue)))
+        #expect(!graph.edges.contains(GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue)))
     }
 
     @Test

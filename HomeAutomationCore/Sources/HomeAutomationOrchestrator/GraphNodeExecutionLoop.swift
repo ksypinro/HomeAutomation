@@ -281,13 +281,17 @@ extension GraphScheduler {
             )
             
             do {
+                let detachedExecutor = DetachedAgentExecutor()
                 result = try await withAgentTimeout(
                     agentID: agentID,
                     timeoutNanoseconds: selection.agent.timeoutNanoseconds
                 ) {
-                    await HomeAutomationTelemetryScope.$current.withValue(telemetryContext) {
-                        await selection.agent.run(context: context)
-                    }
+                    await detachedExecutor.runDetached(
+                        agent: selection.agent,
+                        context: context,
+                        telemetryContext: telemetryContext,
+                        priority: .userInitiated
+                    )
                 }
             } catch is AgentTimeoutError {
                 result = .retryableFailure(AgentFailure(

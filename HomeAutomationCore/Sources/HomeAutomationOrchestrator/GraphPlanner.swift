@@ -141,9 +141,9 @@ public struct GraphPlanner: Sendable {
 
     public static func automationCreationGraph() -> OrchestrationGraph {
         let stages: [(id: AgentID, policy: NodeExecutionPolicy)] = [
-            (.automationDraft, .required),
-            (.automationConditionOperandResolution, .required),
-            (.automationActionResolution, .required),
+            (.automationComponentSegmentation, .required),
+            (.automationComponentFanOut, .required),
+            (.automationDraftAssembly, .required),
             (.automationValidation, .safetyGate),
             (.smartThingsCompilation, .required),
             (.smartThingsRuleCreation, .required),
@@ -162,15 +162,14 @@ public struct GraphPlanner: Sendable {
                 )
             },
             edges: [
-                GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationConditionOperandResolution.rawValue),
-                GraphEdge(from: AgentID.automationDraft.rawValue, to: AgentID.automationActionResolution.rawValue),
-                GraphEdge(from: AgentID.automationConditionOperandResolution.rawValue, to: AgentID.automationValidation.rawValue),
-                GraphEdge(from: AgentID.automationActionResolution.rawValue, to: AgentID.automationValidation.rawValue),
+                GraphEdge(from: AgentID.automationComponentSegmentation.rawValue, to: AgentID.automationComponentFanOut.rawValue),
+                GraphEdge(from: AgentID.automationComponentFanOut.rawValue, to: AgentID.automationDraftAssembly.rawValue),
+                GraphEdge(from: AgentID.automationDraftAssembly.rawValue, to: AgentID.automationValidation.rawValue),
                 GraphEdge(from: AgentID.automationValidation.rawValue, to: AgentID.smartThingsCompilation.rawValue),
                 GraphEdge(from: AgentID.smartThingsCompilation.rawValue, to: AgentID.smartThingsRuleCreation.rawValue),
                 GraphEdge(from: AgentID.smartThingsRuleCreation.rawValue, to: AgentID.automationResultAssembly.rawValue)
             ],
-            entryNodeIDs: [AgentID.automationDraft.rawValue]
+            entryNodeIDs: [AgentID.automationComponentSegmentation.rawValue]
         )
     }
 

@@ -35,6 +35,11 @@ public extension AgentID {
 
     // Draft
     static let automationDraft = AgentID("automationDraft")
+    static let automationComponentSegmentation = AgentID("automationComponentSegmentation")
+    static let automationTriggerResolution = AgentID("automationTriggerResolution")
+    static let automationConditionClauseResolution = AgentID("automationConditionClauseResolution")
+    static let automationComponentFanOut = AgentID("automationComponentFanOut")
+    static let automationDraftAssembly = AgentID("automationDraftAssembly")
     static let automationActionResolution = AgentID("automationActionResolution")
     static let automationConditionOperandResolution = AgentID("automationConditionOperandResolution")
     static let instructionComposer = AgentID("instructionComposer")
@@ -81,6 +86,11 @@ public enum AgentCapability: String, Sendable, Hashable, Codable {
     case draftGeneration
     case draftRepair
     case automationDrafting
+    case automationComponentSegmentation
+    case automationTriggerResolution
+    case automationConditionClauseResolution
+    case automationComponentFanOut
+    case automationDraftAssembly
     case automationActionResolution
     case automationConditionOperandResolution
     case automationValidation

@@ -22,6 +22,8 @@ public enum ResolutionContextPatchKey: String, CaseIterable, Sendable {
     case draft
     case executionPlan
     case resolution
+    case automationComponentPlan
+    case automationResolvedComponents
     case automationDraft
     case automationResolvedActions
     case automationConditionOperandResolutionRecords

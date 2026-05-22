@@ -90,6 +90,66 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk.rawValue: output]) }
             ),
             ContextualHomeAgent(
+                agent: AutomationComponentSegmentationAgent(
+                    worker: AutomationComponentSegmentationWorkerSession(
+                        foundationModelAvailability: foundationModelAvailability
+                    )
+                ),
+                makeInput: { $0.request.text },
+                makePatch: { output, _ in automationComponentPlanPatch(output) }
+            ),
+            ContextualHomeAgent(
+                agent: AutomationComponentFanOutAgent(
+                    resolveComponents: { componentPlan, context in
+                        guard let agentRegistry = registryBox.registry else {
+                            return AutomationResolvedComponentSet(
+                                trigger: nil,
+                                actionResults: [],
+                                conditionResults: [],
+                                conditionTree: componentPlan.conditionTree,
+                                unsupportedFragments: ["Agent registry unavailable"]
+                            )
+                        }
+                        let actionResolver = AutomationActionResolver(
+                            registry: agentRegistry,
+                            graphPlanner: GraphPlanner(
+                                policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+                            ),
+                            policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+                        )
+                        let runner = AutomationComponentFanOutRunner(
+                            triggerAgent: AutomationTriggerResolutionAgent(
+                                worker: AutomationTriggerResolutionWorkerSession(
+                                    foundationModelAvailability: foundationModelAvailability
+                                )
+                            ),
+                            conditionAgent: AutomationConditionClauseResolutionAgent(
+                                worker: AutomationConditionClauseResolutionWorkerSession(
+                                    foundationModelAvailability: foundationModelAvailability
+                                )
+                            ),
+                            actionResolver: actionResolver,
+                            registry: registry
+                        )
+                        return await runner.resolve(plan: componentPlan, context: context)
+                    }
+                ),
+                makeInput: { context in
+                    try context.requireArtifact(for: ContextArtifactKeys.automationComponentPlan())
+                },
+                makePatch: { output, _ in automationResolvedComponentsPatch(output) }
+            ),
+            ContextualHomeAgent(
+                agent: AutomationDraftAssemblyAgent(),
+                makeInput: { context in
+                    AutomationDraftAssemblyInput(
+                        componentPlan: try context.requireArtifact(for: ContextArtifactKeys.automationComponentPlan()),
+                        resolvedComponents: try context.requireArtifact(for: ContextArtifactKeys.automationResolvedComponents())
+                    )
+                },
+                makePatch: { output, _ in automationDraftAssemblyPatch(output) }
+            ),
+            ContextualHomeAgent(
                 agent: AutomationDraftExtractionAgent(
                     draftAgent: AutomationDraftAgent(
                         worker: AutomationDraftWorkerSession(

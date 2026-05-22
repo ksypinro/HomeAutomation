@@ -216,7 +216,27 @@ extension AutomationPatternParser {
             )
         }
 
-        if let match = normalized.firstAutomationMatch(of: #"^(.+)\s+(above|greater than|over|below|less than|under)\s+(\d+)$"#),
+        if let match = normalized.firstAutomationMatch(
+            of: #"^(.+?)\s+(?:is\s+)?(at least|greater than or equal to|above or equal to|at most|less than or equal to|below or equal to)\s+(\d+(?:\.\d+)?)\s*(celsius|fahrenheit|degrees?|degree c|degrees c|degree f|degrees f)?$"#
+        ),
+           let value = Double(match[3]) {
+            let op: AutomationComparisonOperatorOutput = ["at least", "greater than or equal to", "above or equal to"].contains(match[2])
+                ? .greaterThanOrEquals
+                : .lessThanOrEquals
+            return AutomationConditionOutput(
+                type: .comparison,
+                left: AutomationConditionOperandOutput(type: .deviceAttribute, description: match[1]),
+                operatorName: op,
+                right: AutomationConditionOperandOutput(
+                    type: .literalNumber,
+                    numberValue: value,
+                    unit: normalizedConditionUnit(match[4])
+                ),
+                triggerPolicy: triggerPolicy
+            )
+        }
+
+        if let match = normalized.firstAutomationMatch(of: #"^(.+)\s+(above|greater than|over|below|less than|under)\s+(\d+(?:\.\d+)?)\s*(celsius|fahrenheit|degrees?|degree c|degrees c|degree f|degrees f)?$"#),
            let value = Double(match[3]) {
             let op: AutomationComparisonOperatorOutput = ["above", "greater than", "over"].contains(match[2])
                 ? .greaterThan
@@ -225,12 +245,28 @@ extension AutomationPatternParser {
                 type: .comparison,
                 left: AutomationConditionOperandOutput(type: .deviceAttribute, description: match[1]),
                 operatorName: op,
-                right: AutomationConditionOperandOutput(type: .literalNumber, numberValue: value),
+                right: AutomationConditionOperandOutput(
+                    type: .literalNumber,
+                    numberValue: value,
+                    unit: normalizedConditionUnit(match[4])
+                ),
                 triggerPolicy: triggerPolicy
             )
         }
 
         return nil
+    }
+
+    private static func normalizedConditionUnit(_ value: String) -> String? {
+        let normalized = normalized(value)
+        if normalized.isEmpty { return nil }
+        if normalized.contains("fahrenheit") || normalized.contains("degree f") || normalized.contains("degrees f") {
+            return "fahrenheit"
+        }
+        if normalized.contains("celsius") || normalized.contains("degree") {
+            return "celsius"
+        }
+        return normalized
     }
 
     internal static func logicalSegments(in normalized: String, separator: String) -> [String]? {

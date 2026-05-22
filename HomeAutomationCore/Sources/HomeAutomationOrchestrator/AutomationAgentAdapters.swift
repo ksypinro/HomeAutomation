@@ -3,6 +3,78 @@ import HomeAutomationAgents
 import HomeAutomationCore
 
 extension DefaultAgentRegistryFactory {
+    internal static func automationComponentPlanPatch(
+        _ output: AutomationComponentPlan
+    ) -> ResolutionContextPatch {
+        var patch = ResolutionContextPatch(
+            agentID: .automationComponentSegmentation,
+            scopedUpdates: [
+                .root: [
+                    ResolutionContextPatchKey.automationComponentPlan.rawValue: AnySendableValue(output)
+                ]
+            ]
+        )
+        patch.setArtifact(output, for: ContextArtifactKeys.automationComponentPlan())
+        return patch
+    }
+
+    internal static func automationResolvedComponentsPatch(
+        _ output: AutomationResolvedComponentSet
+    ) -> ResolutionContextPatch {
+        let aggregate = AutomationActionResolutionAggregate(
+            actionDescriptions: output.actionResults.enumerated().map { index, result in
+                result.resolvedAction?.originalText ?? "action\(index + 1)"
+            },
+            results: output.actionResults
+        )
+        var scopedUpdates: [ContextScope: [String: AnySendableValue]] = [
+            .root: [
+                ResolutionContextPatchKey.automationResolvedComponents.rawValue: AnySendableValue(output),
+                AutomationRuntimeContextKeys.actionResolutionAggregate.name: AnySendableValue(aggregate),
+                ResolutionContextPatchKey.automationResolvedActions.rawValue: AnySendableValue(aggregate.resolvedActions),
+                AutomationRuntimeContextKeys.conditionOperandResolutionRecords.name: AnySendableValue(output.conditionResults.flatMap(\.records))
+            ]
+        ]
+
+        for (index, result) in output.actionResults.enumerated() {
+            let scope = ContextScope.action("a\(index + 1)")
+            var values: [String: AnySendableValue] = [
+                "resolution": AnySendableValue(result.resolution)
+            ]
+            if let draft = result.draft {
+                values[ContextArtifactKeys.commandDraft(in: scope).name] = AnySendableValue(draft)
+            }
+            if let resolvedAction = result.resolvedAction {
+                values[ContextArtifactKeys.resolvedAction(in: scope).name] = AnySendableValue(resolvedAction)
+            }
+            scopedUpdates[scope] = values
+        }
+
+        for result in output.conditionResults {
+            let scope = ContextScope.condition(result.id)
+            if let record = result.records.first {
+                scopedUpdates[scope] = [
+                    AutomationRuntimeContextKeys.conditionOperandResolution(in: scope).name: AnySendableValue(record)
+                ]
+            }
+        }
+
+        var patch = ResolutionContextPatch(
+            agentID: .automationComponentFanOut,
+            scopedUpdates: scopedUpdates
+        )
+        patch.setArtifact(output, for: ContextArtifactKeys.automationResolvedComponents())
+        return patch
+    }
+
+    internal static func automationDraftAssemblyPatch(
+        _ output: HomeAutomationRuleDraft
+    ) -> ResolutionContextPatch {
+        var patch = ResolutionContextPatch(agentID: .automationDraftAssembly)
+        patch.setArtifact(output, for: ContextArtifactKeys.automationRuleDraft())
+        return patch
+    }
+
     internal static func automationConditionPatch(
         _ output: AutomationConditionResolutionOutput
     ) -> ResolutionContextPatch {

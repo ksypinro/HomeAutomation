@@ -87,7 +87,12 @@ public enum AgentManifestDefaults {
                 .routineExecution,
                 .unsupported
             ]
-        case .automationDraft,
+        case .automationComponentSegmentation,
+             .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut,
+             .automationDraftAssembly,
+             .automationDraft,
              .automationActionResolution,
              .automationConditionOperandResolution,
              .automationValidation,
@@ -132,6 +137,16 @@ public enum AgentManifestDefaults {
             return ["request.text"]
         case .operationDetection:
             return ["request.text"]
+        case .automationComponentSegmentation:
+            return ["request.text", "operation"]
+        case .automationTriggerResolution:
+            return ["automationComponentPlan"]
+        case .automationConditionClauseResolution:
+            return ["automationComponentPlan"]
+        case .automationComponentFanOut:
+            return ["automationComponentPlan"]
+        case .automationDraftAssembly:
+            return ["automationComponentPlan", "automationResolvedComponents"]
         case .automationDraft:
             return ["request.text", "operation"]
         case .automationActionResolution:
@@ -191,6 +206,20 @@ public enum AgentManifestDefaults {
             return ["resolution"]
         case .operationDetection:
             return ["operation", "language", "domain"]
+        case .automationComponentSegmentation:
+            return ["automationComponentPlan"]
+        case .automationTriggerResolution:
+            return ["automationTriggerResolution"]
+        case .automationConditionClauseResolution:
+            return ["automationConditionOperandResolutionRecords"]
+        case .automationComponentFanOut:
+            return [
+                "automationResolvedComponents",
+                "automationResolvedActions",
+                "automationConditionOperandResolutionRecords"
+            ]
+        case .automationDraftAssembly:
+            return ["automationDraft"]
         case .automationDraft:
             return ["automationDraft", "retrievalReports"]
         case .automationActionResolution:
@@ -212,6 +241,15 @@ public enum AgentManifestDefaults {
 
     private static func consumedArtifacts(for id: AgentID) -> Set<ContextArtifactContract> {
         switch id {
+        case .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut:
+            return [.required(ContextArtifactKeys.automationComponentPlan())]
+        case .automationDraftAssembly:
+            return [
+                .required(ContextArtifactKeys.automationComponentPlan()),
+                .required(ContextArtifactKeys.automationResolvedComponents())
+            ]
         case .automationActionResolution,
              .automationConditionOperandResolution,
              .automationValidation,
@@ -231,6 +269,12 @@ public enum AgentManifestDefaults {
 
     private static func producedArtifacts(for id: AgentID) -> Set<ContextArtifactContract> {
         switch id {
+        case .automationComponentSegmentation:
+            return [.required(ContextArtifactKeys.automationComponentPlan())]
+        case .automationComponentFanOut:
+            return [.required(ContextArtifactKeys.automationResolvedComponents())]
+        case .automationDraftAssembly:
+            return [.required(ContextArtifactKeys.automationRuleDraft())]
         case .automationDraft:
             return [.required(ContextArtifactKeys.automationRuleDraft())]
         case .automationValidation:
@@ -269,6 +313,11 @@ public enum AgentManifestDefaults {
             return AgentRetryPolicy(maxAttempts: 3)
         case .semanticNLU, .slotExtraction, .riskClassification:
             return .singleRetry
+        case .automationComponentSegmentation,
+             .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut:
+            return .singleRetry
         case .candidateRetrieval, .candidateRanking, .ruleFallback:
             return .singleRetry
         default:
@@ -280,7 +329,12 @@ public enum AgentManifestDefaults {
         switch id {
         case .operationDetection:
             return 100
-        case .automationDraft,
+        case .automationComponentSegmentation,
+             .automationTriggerResolution,
+             .automationConditionClauseResolution,
+             .automationComponentFanOut,
+             .automationDraftAssembly,
+             .automationDraft,
              .automationActionResolution,
              .automationConditionOperandResolution,
              .automationValidation,

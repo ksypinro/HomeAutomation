@@ -204,9 +204,9 @@ struct AutomationCreationFlowTests {
 
         #expect(graphRun.graphID == "automation-creation-graph")
         #expect(metrics.agentTraces.contains { $0.agentID == .operationDetection })
-        #expect(graphRun.nodeStatuses[AgentID.automationDraft.rawValue] == GraphNodeRunStatus.completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationConditionOperandResolution.rawValue] == GraphNodeRunStatus.completed)
-        #expect(graphRun.nodeStatuses[AgentID.automationActionResolution.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationComponentSegmentation.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationComponentFanOut.rawValue] == GraphNodeRunStatus.completed)
+        #expect(graphRun.nodeStatuses[AgentID.automationDraftAssembly.rawValue] == GraphNodeRunStatus.completed)
         #expect(graphRun.nodeStatuses[AgentID.automationValidation.rawValue] == GraphNodeRunStatus.completed)
         #expect(graphRun.nodeStatuses[AgentID.smartThingsCompilation.rawValue] == GraphNodeRunStatus.completed)
         #expect(graphRun.nodeStatuses[AgentID.automationResultAssembly.rawValue] == GraphNodeRunStatus.completed)
@@ -278,15 +278,17 @@ struct AutomationCreationFlowTests {
             return
         }
         #expect(stages.contains("operationDetection"))
-        #expect(stages.contains("automationDraft"))
-        #expect(stages.contains("automationActionResolution"))
-        #expect(stages.contains("automationConditionOperandResolution"))
+        #expect(stages.contains("automationComponentSegmentation"))
+        #expect(stages.contains("automationComponentFanOut"))
+        #expect(stages.contains("automationDraftAssembly"))
+        #expect(stages.contains("automationComponentFanOut/trigger:t1"))
+        #expect(stages.contains("automationComponentFanOut/action:a1"))
+        #expect(stages.contains("automationComponentFanOut/condition:c1"))
         #expect(stages.contains("automationValidation"))
         #expect(stages.contains("smartThingsCompilation"))
         #expect(stages.contains("automationResultAssembly"))
-        #expect(stages.contains { $0.hasPrefix("automationActionResolution:a1/") })
-        #expect(agentIDs.contains("ruleFallback:a1"))
-        #expect(agentIDs.contains("bixbyFallback:a1"))
+        #expect(agentIDs.contains("ruleFallback"))
+        #expect(agentIDs.contains("bixbyFallback"))
         #expect(plan.smartThingsRuleJSON?.contains(#""trigger" : "Never""#) == true)
     }
 
@@ -307,12 +309,9 @@ struct AutomationCreationFlowTests {
             }
         }
 
-        #expect(agentIDs.contains("automationActionResolution:a1"))
-        #expect(agentIDs.contains("automationActionResolution:a2"))
-        #expect(agentIDs.contains("ruleFallback:a1"))
-        #expect(agentIDs.contains("ruleFallback:a2"))
-        #expect(agentIDs.contains("bixbyFallback:a1"))
-        #expect(agentIDs.contains("bixbyFallback:a2"))
+        #expect(agentIDs.contains(AgentID.automationComponentFanOut.rawValue))
+        #expect(agentIDs.contains("ruleFallback"))
+        #expect(agentIDs.contains("bixbyFallback"))
     }
 
     @Test

@@ -23,6 +23,11 @@ extension DefaultAgentRegistryFactory {
             ("operationDetection", [.operationDetection]),
             ("nlu", [.semanticNLU, .slotExtraction, .riskClassification]),
             ("automation", [
+                .automationComponentSegmentation,
+                .automationComponentFanOut,
+                .automationDraftAssembly,
+                .automationTriggerResolution,
+                .automationConditionClauseResolution,
                 .automationDraft,
                 .automationConditionOperandResolution,
                 .automationActionResolution,

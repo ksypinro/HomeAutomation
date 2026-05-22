@@ -126,8 +126,14 @@ struct GraphGuardEvaluator: Sendable {
             return context.resolution != nil
         case ResolutionContextPatchKey.automationDraft.rawValue:
             return context.scopedValues[.root]?[ResolutionContextPatchKey.automationDraft.rawValue] != nil
+        case ResolutionContextPatchKey.automationComponentPlan.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationComponentPlan.rawValue] != nil
+        case ResolutionContextPatchKey.automationResolvedComponents.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationResolvedComponents.rawValue] != nil
         case ResolutionContextPatchKey.automationResolvedActions.rawValue:
             return context.scopedValues[.root]?[ResolutionContextPatchKey.automationResolvedActions.rawValue] != nil
+        case ResolutionContextPatchKey.automationConditionOperandResolutionRecords.rawValue:
+            return context.scopedValues[.root]?[ResolutionContextPatchKey.automationConditionOperandResolutionRecords.rawValue] != nil
         case ResolutionContextPatchKey.automationValidation.rawValue:
             return context.scopedValues[.root]?[ResolutionContextPatchKey.automationValidation.rawValue] != nil
         case ResolutionContextPatchKey.smartThingsRule.rawValue:
