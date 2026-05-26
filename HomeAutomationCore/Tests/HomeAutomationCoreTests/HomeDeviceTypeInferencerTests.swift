@@ -62,4 +62,41 @@ struct HomeDeviceTypeInferencerTests {
 
         #expect(result.deviceType == "switch")
     }
+
+    @Test
+    func expandedCategoryNameMapsToRequestedDeviceTypes() {
+        let smartLock = HomeDeviceTypeInferencer.infer(
+            deviceName: "Front Door",
+            capabilities: ["lock", "battery"],
+            categoryName: "Smart Lock"
+        )
+        let printer = HomeDeviceTypeInferencer.infer(
+            deviceName: "Workshop Printer",
+            capabilities: ["switch", "statusReport"],
+            categoryName: "3D Printer"
+        )
+        let television = HomeDeviceTypeInferencer.infer(
+            deviceName: "Media Room TV",
+            capabilities: ["switch", "audioVolume", "mediaPlayback", "mediaInputSource"],
+            categoryName: "Television"
+        )
+        let charger = HomeDeviceTypeInferencer.infer(
+            deviceName: "Garage EV Charger",
+            capabilities: ["powerMeter", "energyMeter", "switch"],
+            categoryName: "Electric Vehicle Charger"
+        )
+
+        #expect(smartLock.deviceType == "smartLock")
+        #expect(printer.deviceType == "printer3D")
+        #expect(["television", "tv"].contains(television.deviceType))
+        #expect(charger.deviceType == "electricVehicleCharger")
+    }
+
+    @Test
+    func relatedDeviceTypeFamiliesBridgeLegacyAndExpandedCategories() {
+        #expect(HomeDeviceTypeRelations.areRelated("smartLock", "lock"))
+        #expect(HomeDeviceTypeRelations.areRelated("smartPlug", "outlet"))
+        #expect(HomeDeviceTypeRelations.areRelated("television", "tv"))
+        #expect(HomeDeviceTypeRelations.matches("lock", in: ["smart lock"]))
+    }
 }

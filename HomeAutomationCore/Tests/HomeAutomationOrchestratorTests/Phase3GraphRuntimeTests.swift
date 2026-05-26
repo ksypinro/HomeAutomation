@@ -271,6 +271,22 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
+    func graphRuntimeResolvesNumberSuffixedDeviceNames() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(devices: Self.numberedBulbs()),
+            foundationModelAvailability: { false }
+        )
+
+        let compact = try await orchestrator.resolve("Turn on bulb2", executeLowRiskCommands: false)
+        let spaced = try await orchestrator.resolve("Turn on bulb 3", executeLowRiskCommands: false)
+        let compactOne = try await orchestrator.resolve("Turn on bulb1", executeLowRiskCommands: false)
+
+        #expect(compact.draft?.targetDeviceID == "bulb_2")
+        #expect(spaced.draft?.targetDeviceID == "bulb_3")
+        #expect(compactOne.draft?.targetDeviceID == "bulb_1")
+    }
+
+    @Test
     func directCommandMatrixResolvesThroughGraphRuntime() async throws {
         let commands = [
             "Turn on the TV",
@@ -530,6 +546,38 @@ private extension Phase3GraphRuntimeTests {
             supportedCommands: ["lock": ["lock", "unlock"]],
             riskLevel: .high
         )
+    }
+
+    static func numberedBulbs() -> [HomeCandidateRecord] {
+        [
+            HomeCandidateRecord(
+                id: "bulb_1",
+                displayName: "Bulb1",
+                deviceType: "light",
+                room: nil,
+                capabilities: ["switch"],
+                supportedCommands: ["switch": ["on", "off"]],
+                currentState: ["switch": "off"]
+            ),
+            HomeCandidateRecord(
+                id: "bulb_2",
+                displayName: "Bulb2",
+                deviceType: "light",
+                room: nil,
+                capabilities: ["switch"],
+                supportedCommands: ["switch": ["on", "off"]],
+                currentState: ["switch": "off"]
+            ),
+            HomeCandidateRecord(
+                id: "bulb_3",
+                displayName: "Bulb 3",
+                deviceType: "light",
+                room: nil,
+                capabilities: ["switch"],
+                supportedCommands: ["switch": ["on", "off"]],
+                currentState: ["switch": "off"]
+            )
+        ]
     }
 
     func runMockExecutionGraph(contextStore: ResolutionContextStore) async -> GraphSchedulerResult {

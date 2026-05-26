@@ -57,7 +57,7 @@ public struct AgentFindDevicesTool: Tool {
 
             let queryMatches = query.isEmpty || query.split(separator: " ").allSatisfy { haystack.contains($0) }
             let roomMatches = room.map { device.room?.agentNormalizedHomeTokenString == $0 } ?? true
-            let typeMatches = deviceType.map { device.deviceType.agentNormalizedHomeTokenString == $0 } ?? true
+            let typeMatches = deviceType.map { HomeDeviceTypeRelations.areRelated(device.deviceType, $0) } ?? true
             return queryMatches && roomMatches && typeMatches
         }
         .prefix(limit)

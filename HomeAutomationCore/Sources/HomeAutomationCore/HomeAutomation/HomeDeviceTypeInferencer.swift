@@ -45,7 +45,7 @@ public enum HomeDeviceTypeInferencer {
             addTextMatches(
                 category,
                 catalog: catalog,
-                baseScore: 0.92,
+                baseScore: 1.08,
                 evidencePrefix: "SmartThings category",
                 addScore: addScore
             )
@@ -136,8 +136,11 @@ public enum HomeDeviceTypeInferencer {
             }
             return lhs.value.score > rhs.value.score
         }
-        let runnerUpScore = sortedScores.dropFirst().first?.value.score ?? 0
-        let ambiguityPenalty = best.value.score - runnerUpScore < 0.12 ? 0.12 : 0
+        let runnerUp = sortedScores.dropFirst().first
+        let runnerUpScore = runnerUp?.value.score ?? 0
+        let ambiguityPenalty = runnerUp.map { runnerUp in
+            best.value.score - runnerUpScore < 0.12 && !HomeDeviceTypeRelations.areRelated(best.key, runnerUp.key) ? 0.12 : 0
+        } ?? 0
         let confidence = min(0.98, max(0.35, best.value.score)) - ambiguityPenalty
 
         return HomeDeviceTypeInferenceResult(
@@ -164,7 +167,7 @@ public enum HomeDeviceTypeInferencer {
             let terms = matchTerms(for: deviceType)
             if terms.exact.contains(normalized) {
                 addScore(deviceType.id, baseScore, "\(evidencePrefix) matched \(value)")
-            } else if terms.partial.contains(where: { normalized.contains($0) || $0.contains(normalized) }) {
+            } else if terms.partial.contains(where: { textValuePartiallyMatches(normalized, term: $0) }) {
                 addScore(deviceType.id, baseScore * 0.72, "\(evidencePrefix) partially matched \(value)")
             }
         }
@@ -367,6 +370,16 @@ public enum HomeDeviceTypeInferencer {
         let paddedText = " \(normalizedText) "
         let paddedPhrase = " \(normalizedPhrase) "
         return paddedText.contains(paddedPhrase)
+    }
+
+    private static func textValuePartiallyMatches(_ normalizedText: String, term: String) -> Bool {
+        let normalizedTerm = term.normalizedHomeTokenString
+        guard !normalizedTerm.isEmpty else { return false }
+        let words = normalizedTerm.split(separator: " ")
+        guard words.count > 1 else {
+            return normalizedText == normalizedTerm
+        }
+        return normalizedText.contains(normalizedTerm) || normalizedTerm.contains(normalizedText)
     }
 
     private static func looksLikeOpaqueID(_ value: String?) -> Bool {

@@ -76,10 +76,10 @@ public extension DeviceRegistryProtocol {
         if query.contains(name) { total += 8 }
         if query.contains(type) { total += 5 }
         if let room, query.contains(room) { total += 5 }
-        for alias in aliases where !alias.isEmpty && query.contains(alias) {
+        for alias in aliases where !alias.isEmpty && containsTokenPhrase(query, phrase: alias) {
             total += 4
         }
-        if hintedTypes.contains(type) { total += 4 }
+        if HomeDeviceTypeRelations.matches(type, in: hintedTypes) { total += 4 }
         if let room, hintedRooms.contains(room) { total += 4 }
         if hintedNicknames.contains(name) { total += 4 }
 
@@ -134,5 +134,11 @@ public extension DeviceRegistryProtocol {
         }
 
         return total
+    }
+
+    private static func containsTokenPhrase(_ normalizedText: String, phrase: String) -> Bool {
+        let normalizedPhrase = phrase.normalizedHomeTokenString
+        guard !normalizedPhrase.isEmpty else { return false }
+        return " \(normalizedText) ".contains(" \(normalizedPhrase) ")
     }
 }

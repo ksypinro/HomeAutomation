@@ -168,6 +168,10 @@ public enum AgentTextParser {
         append("valve", to: &values, if: normalized.contains("valve"))
         append("routine", to: &values, if: containsAny(normalized, ["routine", "scene", "movie time", "good night"]))
 
+        for deviceType in HomeAutomationKnowledgeBase.shared.deviceTypes where deviceTypeMatches(deviceType, normalized: normalized) {
+            append(deviceType.id, to: &values, if: true)
+        }
+
         return values
     }
 
@@ -209,6 +213,55 @@ public enum AgentTextParser {
         guard condition, !values.contains(value) else { return }
         values.append(value)
     }
+
+    private static func deviceTypeMatches(_ deviceType: HomeCatalogDeviceType, normalized: String) -> Bool {
+        candidateDeviceTypeTerms(for: deviceType).contains { term in
+            let words = term.split(separator: " ")
+            if words.count == 1 {
+                return normalized.agentTokenSet.contains(String(words[0]))
+            }
+            return normalized.contains(term)
+        }
+    }
+
+    private static func candidateDeviceTypeTerms(for deviceType: HomeCatalogDeviceType) -> [String] {
+        let rawTerms = [splitCamelCase(deviceType.id), deviceType.displayName] + deviceType.aliases + deviceType.exampleNames
+        var seen = Set<String>()
+        return rawTerms.compactMap { rawTerm in
+            let normalized = rawTerm
+                .replacingOccurrences(of: #"\bdevice$"#, with: "", options: .regularExpression)
+                .agentNormalizedHomeTokenString
+            guard !normalized.isEmpty,
+                  !genericDeviceTypeTerms.contains(normalized),
+                  seen.insert(normalized).inserted else {
+                return nil
+            }
+            return normalized
+        }
+    }
+
+    private static func splitCamelCase(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: "([a-z0-9])([A-Z])",
+            with: "$1 $2",
+            options: .regularExpression
+        )
+    }
+
+    private static let genericDeviceTypeTerms: Set<String> = [
+        "device",
+        "service",
+        "system",
+        "equipment",
+        "electronics",
+        "general",
+        "monitor",
+        "sensor",
+        "meter",
+        "unit",
+        "machine",
+        "controls"
+    ]
 
     private static func append(_ value: HomeAutomationIntentFamily, to values: inout [HomeAutomationIntentFamily]) {
         guard !values.contains(value) else { return }
@@ -266,6 +319,11 @@ public extension String {
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .replacingOccurrences(
                 of: "([a-z0-9])([A-Z])",
+                with: "$1 $2",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: "([a-z])([0-9])",
                 with: "$1 $2",
                 options: .regularExpression
             )
