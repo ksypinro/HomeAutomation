@@ -1,13 +1,13 @@
 import Foundation
 
-public actor MockHomeDeviceRegistry {
+public actor MockHomeDeviceRegistry: DeviceRegistryProtocol {
     private var devices: [HomeCandidateRecord]
 
     public init(devices: [HomeCandidateRecord] = MockHomeDeviceRegistry.defaultDevices) {
         self.devices = devices
     }
 
-    public func allDevices() -> [HomeCandidateRecord] {
+    public func allDevices() async -> [HomeCandidateRecord] {
         devices
     }
 
@@ -15,7 +15,7 @@ public actor MockHomeDeviceRegistry {
         text: String,
         hints: HomeResolutionState,
         limit: Int = 80
-    ) -> [HomeCandidateRecord] {
+    ) async -> [HomeCandidateRecord] {
         let query = text.normalizedHomeTokenString
         let hintedRooms = Set(hints.slots.rooms.map(\.normalizedHomeTokenString))
         let hintedTypes = Set(hints.deviceType.deviceTypes.map(\.normalizedHomeTokenString))
@@ -53,7 +53,7 @@ public actor MockHomeDeviceRegistry {
         return Array(devices.prefix(limit))
     }
 
-    public func executeLowRiskPlan(_ plan: HomeAutomationExecutionPlan) throws -> HomeCandidateRecord {
+    public func executeLowRiskPlan(_ plan: HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord {
         guard let originalStep = plan.steps.last(where: { $0.type == "command" }) ?? plan.steps.first else {
             throw FoundationLabCoreError.invalidRequest("Missing execution step")
         }
@@ -299,10 +299,10 @@ public actor MockHomeDeviceRegistry {
         if query.contains(name) { total += 8 }
         if query.contains(type) { total += 5 }
         if let room, query.contains(room) { total += 5 }
-        for alias in aliases where !alias.isEmpty && query.contains(alias) {
+        for alias in aliases where !alias.isEmpty && containsTokenPhrase(query, phrase: alias) {
             total += 4
         }
-        if hintedTypes.contains(type) { total += 4 }
+        if HomeDeviceTypeRelations.matches(type, in: hintedTypes) { total += 4 }
         if let room, hintedRooms.contains(room) { total += 4 }
         if hintedNicknames.contains(name) { total += 4 }
 
@@ -357,6 +357,12 @@ public actor MockHomeDeviceRegistry {
         }
 
         return total
+    }
+
+    private func containsTokenPhrase(_ normalizedText: String, phrase: String) -> Bool {
+        let normalizedPhrase = phrase.normalizedHomeTokenString
+        guard !normalizedPhrase.isEmpty else { return false }
+        return " \(normalizedText) ".contains(" \(normalizedPhrase) ")
     }
 }
 
@@ -688,6 +694,11 @@ extension String {
         folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .replacingOccurrences(
                 of: "([a-z0-9])([A-Z])",
+                with: "$1 $2",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: "([A-Za-z])([0-9])",
                 with: "$1 $2",
                 options: .regularExpression
             )

@@ -6675,6 +6675,3253 @@
           "Alexa.SceneController"
         ]
       }
+    },
+    {
+      "id": "accessManagementService",
+      "displayName": "Access Management Service",
+      "category": "security",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Access Management Service",
+        "Access Management Service device",
+        "accessManagementService"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Access Management Service"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "activeSpeaker",
+      "displayName": "Active Speaker",
+      "category": "media",
+      "aliases": [
+        "speaker",
+        "smart speaker",
+        "wireless speaker"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Active Speaker",
+        "Active Speaker device",
+        "activeSpeaker"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Active Speaker"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "activityTracker",
+      "displayName": "Activity Tracker",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Activity Tracker",
+        "Activity Tracker device",
+        "activityTracker"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Activity Tracker"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "airCompressor",
+      "displayName": "Air Compressor",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "temperatureMeasurement",
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Air Compressor",
+        "Air Compressor device",
+        "airCompressor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Air Compressor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "airer",
+      "displayName": "Airer",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "temperatureMeasurement",
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Airer",
+        "Airer device",
+        "airer"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Airer"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "airQualityMonitor",
+      "displayName": "Air Quality Monitor",
+      "category": "climate",
+      "aliases": [
+        "air quality detector",
+        "air quality sensor",
+        "AQI monitor"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "airQualitySensor"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "relativeHumidityMeasurement"
+      ],
+      "optionalCapabilities": [
+        "carbonDioxideMeasurement",
+        "carbonMonoxideDetector"
+      ],
+      "exampleNames": [
+        "Air Quality Monitor",
+        "Air Quality Monitor device",
+        "airQualityMonitor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Air Quality Monitor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "arcFaultCircuitInterrupter",
+      "displayName": "Arc Fault Circuit Interrupter",
+      "category": "power",
+      "aliases": [
+        "AFCI",
+        "arc fault breaker"
+      ],
+      "riskLevel": "high",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "optionalCapabilities": [
+        "statusReport"
+      ],
+      "exampleNames": [
+        "Arc Fault Circuit Interrupter",
+        "Arc Fault Circuit Interrupter device",
+        "arcFaultCircuitInterrupter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Arc Fault Circuit Interrupter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "audioSystem",
+      "displayName": "Audio System",
+      "category": "media",
+      "aliases": [
+        "stereo",
+        "sound system"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Audio System",
+        "Audio System device",
+        "audioSystem"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Audio System"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "avPlayer",
+      "displayName": "AV Player",
+      "category": "media",
+      "aliases": [
+        "media player"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "AV Player",
+        "AV Player device",
+        "avPlayer"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "AV Player"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "bathroomGeneral",
+      "displayName": "Bathroom General",
+      "category": "general",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Bathroom General",
+        "Bathroom General device",
+        "bathroomGeneral"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Bathroom General"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "battery",
+      "displayName": "Battery",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "battery"
+      ],
+      "recommendedCapabilities": [
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Battery",
+        "Battery device",
+        "battery"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Battery"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "batteryCharger",
+      "displayName": "Battery Charger",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "battery"
+      ],
+      "recommendedCapabilities": [
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Battery Charger",
+        "Battery Charger device",
+        "batteryCharger"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Battery Charger"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "bloodPressureMonitor",
+      "displayName": "Blood Pressure Monitor",
+      "category": "health",
+      "aliases": [
+        "blood pressure cuff"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Blood Pressure Monitor",
+        "Blood Pressure Monitor device",
+        "bloodPressureMonitor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Blood Pressure Monitor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "bodyCompositionAnalyser",
+      "displayName": "Body Composition Analyser",
+      "category": "health",
+      "aliases": [
+        "body composition analyzer"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Body Composition Analyser",
+        "Body Composition Analyser device",
+        "bodyCompositionAnalyser"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Body Composition Analyser"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "bodyScale",
+      "displayName": "Body Scale",
+      "category": "health",
+      "aliases": [
+        "scale",
+        "smart scale"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Body Scale",
+        "Body Scale device",
+        "bodyScale"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Body Scale"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "bodyThermometer",
+      "displayName": "Body Thermometer",
+      "category": "general",
+      "aliases": [
+        "thermometer"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "temperatureMeasurement"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Body Thermometer",
+        "Body Thermometer device",
+        "bodyThermometer"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Body Thermometer"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "businessEquipment",
+      "displayName": "Business Equipment",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Business Equipment",
+        "Business Equipment device",
+        "businessEquipment"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Business Equipment"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "circuitBreaker",
+      "displayName": "Circuit Breaker",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "high",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "optionalCapabilities": [
+        "statusReport"
+      ],
+      "exampleNames": [
+        "Circuit Breaker",
+        "Circuit Breaker device",
+        "circuitBreaker"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Circuit Breaker"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "clothesWasherDryer",
+      "displayName": "Clothes Washer Dryer",
+      "category": "appliance",
+      "aliases": [
+        "washer dryer",
+        "combo washer dryer"
+      ],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "startStop"
+      ],
+      "recommendedCapabilities": [
+        "switch",
+        "mode",
+        "runCycle"
+      ],
+      "optionalCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Clothes Washer Dryer",
+        "Clothes Washer Dryer device",
+        "clothesWasherDryer"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Clothes Washer Dryer"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "coffeeMachine",
+      "displayName": "Coffee Machine",
+      "category": "appliance",
+      "aliases": [
+        "coffee maker"
+      ],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Coffee Machine",
+        "Coffee Machine device",
+        "coffeeMachine"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Coffee Machine"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "computer",
+      "displayName": "Computer",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Computer",
+        "Computer device",
+        "computer"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Computer"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "condenser",
+      "displayName": "Condenser",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "thermostatMode",
+        "thermostatCoolingSetpoint",
+        "thermostatHeatingSetpoint",
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Condenser",
+        "Condenser device",
+        "condenser"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Condenser"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "condensingUnit",
+      "displayName": "Condensing Unit",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "thermostatMode",
+        "thermostatCoolingSetpoint",
+        "thermostatHeatingSetpoint",
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Condensing Unit",
+        "Condensing Unit device",
+        "condensingUnit"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Condensing Unit"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "continuousGlucoseMeter",
+      "displayName": "Continuous Glucose Meter",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Continuous Glucose Meter",
+        "Continuous Glucose Meter device",
+        "continuousGlucoseMeter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Continuous Glucose Meter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "cookerHood",
+      "displayName": "Cooker Hood",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Cooker Hood",
+        "Cooker Hood device",
+        "cookerHood"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Cooker Hood"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "credentialManagementService",
+      "displayName": "Credential Management Service",
+      "category": "security",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Credential Management Service",
+        "Credential Management Service device",
+        "credentialManagementService"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Credential Management Service"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "cyclingCadenceSensor",
+      "displayName": "Cycling Cadence Sensor",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Cycling Cadence Sensor",
+        "Cycling Cadence Sensor device",
+        "cyclingCadenceSensor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Cycling Cadence Sensor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "cyclingPowerMeter",
+      "displayName": "Cycling Power Meter",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Cycling Power Meter",
+        "Cycling Power Meter device",
+        "cyclingPowerMeter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Cycling Power Meter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "cyclingSpeedSensor",
+      "displayName": "Cycling Speed Sensor",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Cycling Speed Sensor",
+        "Cycling Speed Sensor device",
+        "cyclingSpeedSensor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Cycling Speed Sensor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "dataStorageUnit",
+      "displayName": "Data Storage Unit",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Data Storage Unit",
+        "Data Storage Unit device",
+        "dataStorageUnit"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Data Storage Unit"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "decorativeLighting",
+      "displayName": "Decorative Lighting",
+      "category": "lighting",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "switchLevel"
+      ],
+      "optionalCapabilities": [
+        "colorControl",
+        "colorTemperature",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Decorative Lighting",
+        "Decorative Lighting device",
+        "decorativeLighting"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Decorative Lighting"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "desktopPC",
+      "displayName": "Desktop PC",
+      "category": "electronics",
+      "aliases": [
+        "desktop",
+        "PC"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Desktop PC",
+        "Desktop PC device",
+        "desktopPC"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Desktop PC"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "deviceOwnershipTransferService",
+      "displayName": "Device Ownership Transfer Service",
+      "category": "security",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Device Ownership Transfer Service",
+        "Device Ownership Transfer Service device",
+        "deviceOwnershipTransferService"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Device Ownership Transfer Service"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "display",
+      "displayName": "Display",
+      "category": "media",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Display",
+        "Display device",
+        "display"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Display"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "dryerLaundry",
+      "displayName": "Dryer Laundry",
+      "category": "appliance",
+      "aliases": [
+        "dryer",
+        "laundry dryer",
+        "tumble dryer"
+      ],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "startStop"
+      ],
+      "recommendedCapabilities": [
+        "switch",
+        "mode",
+        "runCycle"
+      ],
+      "optionalCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Dryer Laundry",
+        "Dryer Laundry device",
+        "dryerLaundry"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Dryer Laundry"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "electricMeter",
+      "displayName": "Electric Meter",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "powerMeter"
+      ],
+      "recommendedCapabilities": [
+        "energyMeter",
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "Electric Meter",
+        "Electric Meter device",
+        "electricMeter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Electric Meter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "electricVehicleCharger",
+      "displayName": "Electric Vehicle Charger",
+      "category": "power",
+      "aliases": [
+        "EV charger",
+        "car charger"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "powerMeter"
+      ],
+      "recommendedCapabilities": [
+        "energyMeter",
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "Electric Vehicle Charger",
+        "Electric Vehicle Charger device",
+        "electricVehicleCharger"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Electric Vehicle Charger"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "electronics",
+      "displayName": "Electronics",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Electronics",
+        "Electronics device",
+        "electronics"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Electronics"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "emergencyLighting",
+      "displayName": "Emergency Lighting",
+      "category": "lighting",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "switchLevel"
+      ],
+      "optionalCapabilities": [
+        "colorControl",
+        "colorTemperature",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Emergency Lighting",
+        "Emergency Lighting device",
+        "emergencyLighting"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Emergency Lighting"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "energyGenerator",
+      "displayName": "Energy Generator",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "powerMeter"
+      ],
+      "recommendedCapabilities": [
+        "energyMeter",
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "Energy Generator",
+        "Energy Generator device",
+        "energyGenerator"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Energy Generator"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "energyMonitor",
+      "displayName": "Energy Monitor",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "powerMeter"
+      ],
+      "recommendedCapabilities": [
+        "energyMeter",
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "Energy Monitor",
+        "Energy Monitor device",
+        "energyMonitor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Energy Monitor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "exerciseMachine",
+      "displayName": "Exercise Machine",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Exercise Machine",
+        "Exercise Machine device",
+        "exerciseMachine"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Exercise Machine"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "fireplace",
+      "displayName": "Fireplace",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "thermostatMode",
+        "thermostatCoolingSetpoint",
+        "thermostatHeatingSetpoint",
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Fireplace",
+        "Fireplace device",
+        "fireplace"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Fireplace"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "fitnessDevice",
+      "displayName": "Fitness Device",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Fitness Device",
+        "Fitness Device device",
+        "fitnessDevice"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Fitness Device"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "foodProbe",
+      "displayName": "Food Probe",
+      "category": "general",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "temperatureMeasurement"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Food Probe",
+        "Food Probe device",
+        "foodProbe"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Food Probe"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "furnace",
+      "displayName": "Furnace",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "thermostatMode",
+        "thermostatCoolingSetpoint",
+        "thermostatHeatingSetpoint",
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Furnace",
+        "Furnace device",
+        "furnace"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Furnace"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "genericSensor",
+      "displayName": "Generic Sensor",
+      "category": "general",
+      "aliases": [
+        "sensor"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Generic Sensor",
+        "Generic Sensor device",
+        "genericSensor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Generic Sensor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "glucoseMeter",
+      "displayName": "Glucose Meter",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Glucose Meter",
+        "Glucose Meter device",
+        "glucoseMeter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Glucose Meter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "grinder",
+      "displayName": "Grinder",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Grinder",
+        "Grinder device",
+        "grinder"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Grinder"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "groundFaultCircuitInterrupter",
+      "displayName": "Ground Fault Circuit Interrupter",
+      "category": "power",
+      "aliases": [
+        "GFCI",
+        "ground fault breaker"
+      ],
+      "riskLevel": "high",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "optionalCapabilities": [
+        "statusReport"
+      ],
+      "exampleNames": [
+        "Ground Fault Circuit Interrupter",
+        "Ground Fault Circuit Interrupter device",
+        "groundFaultCircuitInterrupter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Ground Fault Circuit Interrupter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "handset",
+      "displayName": "Handset",
+      "category": "media",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Handset",
+        "Handset device",
+        "handset"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Handset"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "heartRateMonitor",
+      "displayName": "Heart Rate Monitor",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Heart Rate Monitor",
+        "Heart Rate Monitor device",
+        "heartRateMonitor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Heart Rate Monitor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "hvac",
+      "displayName": "HVAC",
+      "category": "climate",
+      "aliases": [
+        "heating and cooling",
+        "climate system"
+      ],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "thermostatMode",
+        "thermostatCoolingSetpoint",
+        "thermostatHeatingSetpoint",
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "HVAC",
+        "HVAC device",
+        "hvac"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "HVAC"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "iceMachine",
+      "displayName": "Ice Machine",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Ice Machine",
+        "Ice Machine device",
+        "iceMachine"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Ice Machine"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "indoorGarden",
+      "displayName": "Indoor Garden",
+      "category": "general",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Indoor Garden",
+        "Indoor Garden device",
+        "indoorGarden"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Indoor Garden"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "inverter",
+      "displayName": "Inverter",
+      "category": "power",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "powerMeter"
+      ],
+      "recommendedCapabilities": [
+        "energyMeter",
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "Inverter",
+        "Inverter device",
+        "inverter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Inverter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "lightingControls",
+      "displayName": "Lighting Controls",
+      "category": "lighting",
+      "aliases": [
+        "light switch",
+        "dimmer",
+        "lighting control"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "switchLevel"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Lighting Controls",
+        "Lighting Controls device",
+        "lightingControls"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Lighting Controls"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "mattress",
+      "displayName": "Mattress",
+      "category": "general",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Mattress",
+        "Mattress device",
+        "mattress"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Mattress"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "medicalDevice",
+      "displayName": "Medical Device",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Medical Device",
+        "Medical Device device",
+        "medicalDevice"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Medical Device"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "microwaveOven",
+      "displayName": "Microwave Oven",
+      "category": "appliance",
+      "aliases": [
+        "microwave"
+      ],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Microwave Oven",
+        "Microwave Oven device",
+        "microwaveOven"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Microwave Oven"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "muscleOxygenMonitor",
+      "displayName": "Muscle Oxygen Monitor",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Muscle Oxygen Monitor",
+        "Muscle Oxygen Monitor device",
+        "muscleOxygenMonitor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Muscle Oxygen Monitor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "musicalInstrument",
+      "displayName": "Musical Instrument",
+      "category": "media",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Musical Instrument",
+        "Musical Instrument device",
+        "musicalInstrument"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Musical Instrument"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "networkingEquipment",
+      "displayName": "Networking Equipment",
+      "category": "electronics",
+      "aliases": [
+        "router",
+        "network hardware"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "reboot",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "Networking Equipment",
+        "Networking Equipment device",
+        "networkingEquipment"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Networking Equipment"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "notebookPC",
+      "displayName": "Notebook PC",
+      "category": "electronics",
+      "aliases": [
+        "laptop",
+        "notebook"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Notebook PC",
+        "Notebook PC device",
+        "notebookPC"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Notebook PC"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "opticalAugmentedRFIDReader",
+      "displayName": "Optical Augmented RFID Reader",
+      "category": "general",
+      "aliases": [
+        "RFID reader"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Optical Augmented RFID Reader",
+        "Optical Augmented RFID Reader device",
+        "opticalAugmentedRFIDReader"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Optical Augmented RFID Reader"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "personalHealthDevice",
+      "displayName": "Personal Health Device",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Personal Health Device",
+        "Personal Health Device device",
+        "personalHealthDevice"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Personal Health Device"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "portableElectronics",
+      "displayName": "Portable Electronics",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Portable Electronics",
+        "Portable Electronics device",
+        "portableElectronics"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Portable Electronics"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "portableHVAC",
+      "displayName": "Portable HVAC",
+      "category": "climate",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "temperatureMeasurement",
+        "thermostatMode",
+        "thermostatCoolingSetpoint",
+        "thermostatHeatingSetpoint",
+        "fanSpeed"
+      ],
+      "optionalCapabilities": [
+        "relativeHumidityMeasurement"
+      ],
+      "exampleNames": [
+        "Portable HVAC",
+        "Portable HVAC device",
+        "portableHVAC"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Portable HVAC"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "portableStove",
+      "displayName": "Portable Stove",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Portable Stove",
+        "Portable Stove device",
+        "portableStove"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Portable Stove"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "printer",
+      "displayName": "Printer",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Printer",
+        "Printer device",
+        "printer"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Printer"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "printer3D",
+      "displayName": "3D Printer",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "3D Printer",
+        "3D Printer device",
+        "printer3D"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "3D Printer"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "printerMultiFunction",
+      "displayName": "Printer Multi-Function",
+      "category": "electronics",
+      "aliases": [
+        "printer multi function",
+        "multi function printer",
+        "MFP"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Printer Multi-Function",
+        "Printer Multi-Function device",
+        "printerMultiFunction"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Printer Multi-Function"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "pulseOximeter",
+      "displayName": "Pulse Oximeter",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Pulse Oximeter",
+        "Pulse Oximeter device",
+        "pulseOximeter"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Pulse Oximeter"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "pump",
+      "displayName": "Pump",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "powerMeter"
+      ],
+      "optionalCapabilities": [
+        "timer"
+      ],
+      "exampleNames": [
+        "Pump",
+        "Pump device",
+        "pump"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Pump"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "pvArraySystem",
+      "displayName": "PV Array System",
+      "category": "power",
+      "aliases": [
+        "solar array",
+        "PV array"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "powerMeter"
+      ],
+      "recommendedCapabilities": [
+        "energyMeter",
+        "statusReport"
+      ],
+      "optionalCapabilities": [
+        "switch"
+      ],
+      "exampleNames": [
+        "PV Array System",
+        "PV Array System device",
+        "pvArraySystem"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "PV Array System"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "range",
+      "displayName": "Range",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Range",
+        "Range device",
+        "range"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Range"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "receiver",
+      "displayName": "Receiver",
+      "category": "media",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Receiver",
+        "Receiver device",
+        "receiver"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Receiver"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "robotCleaner",
+      "displayName": "Robot Cleaner",
+      "category": "appliance",
+      "aliases": [
+        "robot vacuum",
+        "vacuum"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "robotCleanerMovement"
+      ],
+      "recommendedCapabilities": [
+        "switch",
+        "mode",
+        "battery"
+      ],
+      "optionalCapabilities": [
+        "locator"
+      ],
+      "exampleNames": [
+        "Robot Cleaner",
+        "Robot Cleaner device",
+        "robotCleaner"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Robot Cleaner"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "scanner",
+      "displayName": "Scanner",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Scanner",
+        "Scanner device",
+        "scanner"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Scanner"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "securityPanel",
+      "displayName": "Security Panel",
+      "category": "general",
+      "aliases": [
+        "security system",
+        "alarm panel"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Security Panel",
+        "Security Panel device",
+        "securityPanel"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Security Panel"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "server",
+      "displayName": "Server",
+      "category": "electronics",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "statusReport",
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [
+        "reboot",
+        "powerMeter"
+      ],
+      "exampleNames": [
+        "Server",
+        "Server device",
+        "server"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Server"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "setTopBox",
+      "displayName": "Set Top Box",
+      "category": "media",
+      "aliases": [
+        "cable box"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Set Top Box",
+        "Set Top Box device",
+        "setTopBox"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Set Top Box"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "sleepMonitor",
+      "displayName": "Sleep Monitor",
+      "category": "health",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "battery"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Sleep Monitor",
+        "Sleep Monitor device",
+        "sleepMonitor"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Sleep Monitor"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "smartLock",
+      "displayName": "Smart Lock",
+      "category": "security",
+      "aliases": [
+        "lock",
+        "smart door lock",
+        "deadbolt"
+      ],
+      "riskLevel": "high",
+      "requiredCapabilities": [
+        "lock"
+      ],
+      "recommendedCapabilities": [
+        "lockCodes",
+        "battery"
+      ],
+      "optionalCapabilities": [
+        "tamperAlert",
+        "contactSensor"
+      ],
+      "exampleNames": [
+        "Smart Lock",
+        "Smart Lock device",
+        "smartLock"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Smart Lock"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "smartPlug",
+      "displayName": "Smart Plug",
+      "category": "power",
+      "aliases": [
+        "plug",
+        "smart outlet",
+        "outlet"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Smart Plug",
+        "Smart Plug device",
+        "smartPlug"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Smart Plug"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "steamCloset",
+      "displayName": "Steam Closet",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "startStop"
+      ],
+      "recommendedCapabilities": [
+        "switch",
+        "mode",
+        "runCycle"
+      ],
+      "optionalCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Steam Closet",
+        "Steam Closet device",
+        "steamCloset"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Steam Closet"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "telephony",
+      "displayName": "Telephony",
+      "category": "media",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Telephony",
+        "Telephony device",
+        "telephony"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Telephony"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "television",
+      "displayName": "Television",
+      "category": "media",
+      "aliases": [
+        "TV",
+        "smart TV"
+      ],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "audioVolume",
+        "mediaPlayback"
+      ],
+      "optionalCapabilities": [
+        "mediaInputSource",
+        "channel",
+        "appSelector"
+      ],
+      "exampleNames": [
+        "Television",
+        "Television device",
+        "television"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Television"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "vendingMachine",
+      "displayName": "Vending Machine",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Vending Machine",
+        "Vending Machine device",
+        "vendingMachine"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Vending Machine"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "virtualDevice",
+      "displayName": "Virtual Device",
+      "category": "security",
+      "aliases": [],
+      "riskLevel": "low",
+      "requiredCapabilities": [
+        "statusReport"
+      ],
+      "recommendedCapabilities": [
+        "softwareUpdate"
+      ],
+      "optionalCapabilities": [],
+      "exampleNames": [
+        "Virtual Device",
+        "Virtual Device device",
+        "virtualDevice"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Virtual Device"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "washerLaundry",
+      "displayName": "Washer Laundry",
+      "category": "appliance",
+      "aliases": [
+        "washer",
+        "washing machine",
+        "laundry washer"
+      ],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "startStop"
+      ],
+      "recommendedCapabilities": [
+        "switch",
+        "mode",
+        "runCycle"
+      ],
+      "optionalCapabilities": [
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Washer Laundry",
+        "Washer Laundry device",
+        "washerLaundry"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Washer Laundry"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "waterDispenser",
+      "displayName": "Water Dispenser",
+      "category": "appliance",
+      "aliases": [],
+      "riskLevel": "medium",
+      "requiredCapabilities": [
+        "switch"
+      ],
+      "recommendedCapabilities": [
+        "startStop",
+        "mode"
+      ],
+      "optionalCapabilities": [
+        "timer",
+        "powerMeter",
+        "energyMeter"
+      ],
+      "exampleNames": [
+        "Water Dispenser",
+        "Water Dispenser device",
+        "waterDispenser"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Water Dispenser"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
+    },
+    {
+      "id": "waterValve",
+      "displayName": "Water Valve",
+      "category": "appliance",
+      "aliases": [
+        "valve",
+        "water shutoff valve"
+      ],
+      "riskLevel": "high",
+      "requiredCapabilities": [
+        "valve"
+      ],
+      "recommendedCapabilities": [
+        "waterSensor"
+      ],
+      "optionalCapabilities": [
+        "battery"
+      ],
+      "exampleNames": [
+        "Water Valve",
+        "Water Valve device",
+        "waterValve"
+      ],
+      "platformMappings": {
+        "appleHomeKitCategories": [],
+        "appleHomeKitServices": [],
+        "smartThingsDeviceTypes": [
+          "Water Valve"
+        ],
+        "smartThingsCapabilities": [],
+        "googleDeviceTypes": [],
+        "googleTraits": [],
+        "alexaDisplayCategories": [],
+        "alexaInterfaces": []
+      }
     }
   ],
   "rooms": [

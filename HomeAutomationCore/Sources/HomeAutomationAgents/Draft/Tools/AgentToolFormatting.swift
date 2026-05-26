@@ -1,7 +1,7 @@
 import Foundation
 import HomeAutomationCore
 
-func agentToolDevice(_ id: String, in registry: MockHomeDeviceRegistry) async -> HomeCandidateRecord? {
+func agentToolDevice(_ id: String, in registry: any DeviceRegistryProtocol) async -> HomeCandidateRecord? {
     let devices = await registry.allDevices()
     return devices.first { $0.id == id }
 }

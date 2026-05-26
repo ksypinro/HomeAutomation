@@ -7,6 +7,13 @@ import Testing
 @Suite
 struct Phase2AgentTests {
     @Test
+    func normalizationSplitsNumberSuffixedDeviceNames() {
+        #expect("bulb2".agentNormalizedHomeTokenString == "bulb 2")
+        #expect("Bulb2".agentNormalizedHomeTokenString == "bulb 2")
+        #expect("bulb 2".agentNormalizedHomeTokenString == "bulb 2")
+    }
+
+    @Test
     func deterministicIntentKeepsExplicitPowerActionForWarmerByTurningOffAC() {
         let state = AgentTextParser.deterministicState(for: "Make bedroom warmer by turning off the AC")
 
@@ -63,7 +70,7 @@ struct Phase2AgentTests {
 
         #expect(state.slots.rooms == ["living room"])
         #expect(state.slots.modes.isEmpty)
-        #expect(state.deviceType.deviceTypes == ["tv"])
+        #expect(state.deviceType.deviceTypes == ["tv", "television"])
     }
 
     @Test

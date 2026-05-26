@@ -5,11 +5,11 @@ import HomeAutomationCore
 public struct AgentGetDeviceStateTool: Tool {
     public let name = "getCurrentDeviceState"
     public let description = "Reads current state values for a device ID."
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         outputSizeStore: AgentToolOutputSizeStore = .shared
     ) {
         self.registry = registry

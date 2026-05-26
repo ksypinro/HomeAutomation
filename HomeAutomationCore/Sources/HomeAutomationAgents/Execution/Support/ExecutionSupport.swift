@@ -202,11 +202,11 @@ public enum AgentExecutionPlanner {
     }
 }
 
-/// Executes allowed command steps through the mock registry.
+/// Executes allowed command steps through the configured device registry.
 public struct AgentPlanExecutor: Sendable {
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
 
-    public init(registry: MockHomeDeviceRegistry) {
+    public init(registry: any DeviceRegistryProtocol) {
         self.registry = registry
     }
 

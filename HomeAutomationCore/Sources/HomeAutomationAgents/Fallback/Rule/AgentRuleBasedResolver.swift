@@ -12,14 +12,14 @@ import HomeAutomationRAG
 /// 4. Deterministic safety validation via `AgentCommandValidator`
 /// 5. Low-risk execution via `AgentPlanExecutor`
 public struct AgentRuleBasedResolver: HomeCommandResolving {
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let validator: AgentCommandValidator
     private let executor: AgentPlanExecutor
     private let bixbyFallbackMapper: AgentBixbyFallbackMapper
     private let contextRetriever: ContextRetriever?
 
     public init(
-        registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         validator: AgentCommandValidator = AgentCommandValidator(),
         bixbyFallbackMapper: AgentBixbyFallbackMapper = AgentBixbyFallbackMapper(),
         contextRetriever: ContextRetriever? = nil
@@ -271,8 +271,8 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
 
         var total = 0
         if normalized.contains(name) { total += 20 }
-        if aliases.contains(where: { !$0.isEmpty && normalized.contains($0) }) { total += 14 }
-        if normalized.contains(type) || intent.deviceTypeHints.contains(type) { total += 7 }
+        if aliases.contains(where: { !$0.isEmpty && containsTokenPhrase(normalized, phrase: $0) }) { total += 14 }
+        if normalized.contains(type) || HomeDeviceTypeRelations.matches(type, in: intent.deviceTypeHints) { total += 7 }
         if let room, normalized.contains(room) { total += 6 }
 
         let overlap = queryTokens.intersection(nameTokens).count
@@ -294,6 +294,12 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
         }
 
         return total
+    }
+
+    private func containsTokenPhrase(_ normalizedText: String, phrase: String) -> Bool {
+        let normalizedPhrase = phrase.agentNormalizedHomeTokenString
+        guard !normalizedPhrase.isEmpty else { return false }
+        return " \(normalizedText) ".contains(" \(normalizedPhrase) ")
     }
 
     private func semanticHints(for text: String, memoryHints: [MemoryHint]) async -> AgentSemanticHints {

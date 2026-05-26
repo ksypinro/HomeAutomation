@@ -22,7 +22,7 @@ extension HomeCandidateResolverSupport {
             let room = candidate.room?.agentNormalizedHomeTokenString
 
             if normalized.contains(label) { score += 20 }
-            if normalized.contains(type) || types.contains(type) { score += 8 }
+            if normalized.contains(type) || HomeDeviceTypeRelations.matches(type, in: types) { score += 8 }
             if let room, normalized.contains(room) || rooms.contains(room) { score += 8 }
 
             let overlap = normalized.agentTokenSet.intersection(label.agentTokenSet).count

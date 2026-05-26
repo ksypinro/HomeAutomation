@@ -7,14 +7,14 @@ public struct AutomationComponentFanOutRunner: Sendable {
     private let triggerAgent: AutomationTriggerResolutionAgent
     private let conditionAgent: AutomationConditionClauseResolutionAgent
     private let actionResolver: AutomationActionResolver
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ComponentFanOut")
 
     public init(
         triggerAgent: AutomationTriggerResolutionAgent,
         conditionAgent: AutomationConditionClauseResolutionAgent,
         actionResolver: AutomationActionResolver,
-        registry: MockHomeDeviceRegistry
+        registry: any DeviceRegistryProtocol
     ) {
         self.triggerAgent = triggerAgent
         self.conditionAgent = conditionAgent

@@ -53,10 +53,12 @@ public struct AvailableDeviceTypesTool: Tool {
     // MARK: - Default Catalog
 
     public static func defaultCatalog() -> [DeviceTypeCatalogEntry] {
-        HomeAutomationKnowledgeBase.shared.deviceTypes.map { catalogType in
+        let hasRoutine = HomeAutomationKnowledgeBase.shared.deviceTypes.contains { $0.id == "routine" }
+        let hasRobotCleaner = HomeAutomationKnowledgeBase.shared.deviceTypes.contains { $0.id == "robotCleaner" }
+        let entries = HomeAutomationKnowledgeBase.shared.deviceTypes.map { catalogType in
             var id = catalogType.id
-            if id == "scene" { id = "routine" }
-            else if id == "vacuum" { id = "robotCleaner" }
+            if id == "scene", !hasRoutine { id = "routine" }
+            else if id == "vacuum", !hasRobotCleaner { id = "robotCleaner" }
             return DeviceTypeCatalogEntry(
                 id: id,
                 displayName: catalogType.displayName,
@@ -64,6 +66,8 @@ public struct AvailableDeviceTypesTool: Tool {
                 description: Self.descriptionForDeviceType(catalogType)
             )
         }
+        var seen = Set<String>()
+        return entries.filter { seen.insert($0.id).inserted }
     }
 
     private static func descriptionForDeviceType(_ type: HomeCatalogDeviceType) -> String {

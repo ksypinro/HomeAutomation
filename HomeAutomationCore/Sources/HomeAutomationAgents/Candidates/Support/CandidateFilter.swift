@@ -26,7 +26,7 @@ extension HomeCandidateResolverSupport {
                 .filter { !$0.isEmpty }
         )
         if !types.isEmpty {
-            let typeMatches = scoped.filter { types.contains($0.deviceType.agentNormalizedHomeTokenString) }
+            let typeMatches = scoped.filter { HomeDeviceTypeRelations.matches($0.deviceType, in: types) }
             if !typeMatches.isEmpty {
                 scoped = typeMatches
             }

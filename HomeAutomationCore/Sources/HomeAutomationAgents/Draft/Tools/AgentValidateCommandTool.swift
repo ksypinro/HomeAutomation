@@ -5,11 +5,11 @@ import HomeAutomationCore
 public struct AgentValidateCommandTool: Tool {
     public let name = "validateCommand"
     public let description = "Pre-validates whether a device supports a capability command."
-    private let registry: MockHomeDeviceRegistry
+    private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
 
     public init(
-        registry: MockHomeDeviceRegistry,
+        registry: any DeviceRegistryProtocol,
         outputSizeStore: AgentToolOutputSizeStore = .shared
     ) {
         self.registry = registry

@@ -3,7 +3,7 @@ import HomeAutomationCore
 import HomeAutomationRAG
 import os
 
-/// Retrieves candidate devices from the mock registry, merging semantic RAG matches
+/// Retrieves candidate devices from the configured registry, merging semantic RAG matches
 /// and conversation-memory-hinted devices.
 public struct CandidateRetrievalAgent: HomeAgent {
     public typealias Input = CandidateRetrievalInput
@@ -20,7 +20,7 @@ public struct CandidateRetrievalAgent: HomeAgent {
     }
 
     public init(
-        registry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         contextRetriever: ContextRetriever? = nil
     ) {
         self.retrieve = { input in

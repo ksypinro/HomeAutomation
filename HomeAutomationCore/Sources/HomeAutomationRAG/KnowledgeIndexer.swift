@@ -87,7 +87,7 @@ public actor KnowledgeIndexer {
     ///   cache or rebuilt from scratch.
     @discardableResult
     public func indexCanonicalKnowledge(
-        deviceRegistry: MockHomeDeviceRegistry = MockHomeDeviceRegistry(),
+        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         includeCatalogDevices: Bool = true
     ) async -> KnowledgeIndexingResult {
         let devices = await deviceRegistry.allDevices()
