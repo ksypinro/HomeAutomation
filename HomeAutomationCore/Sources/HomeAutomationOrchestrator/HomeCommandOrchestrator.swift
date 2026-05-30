@@ -213,7 +213,12 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 }
                 let eventBus = AgentEventBus()
                 let runID = UUID()
+                let traceID = runID.uuidString
+                let runSpanID = TelemetryTraceContext.makeSpanID()
                 let runTelemetryContext = HomeAutomationTelemetryContext(
+                    traceID: traceID,
+                    spanID: runSpanID,
+                    spanKind: .run,
                     runID: runID.uuidString,
                     stage: "input",
                     runtimeMode: "graph"
@@ -258,6 +263,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 let detectedOperation = rootRouting.detectedOperation
                 let operation = rootRouting.routedOperation
                 let pipelineTelemetryContext = HomeAutomationTelemetryContext(
+                    traceID: traceID,
+                    spanID: runSpanID,
+                    spanKind: .run,
                     runID: runID.uuidString,
                     operation: operation.operation.rawValue,
                     runtimeMode: "graph"

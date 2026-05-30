@@ -1,0 +1,53 @@
+name: Home Automation CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      live_eval:
+        description: "Run live FoundationModel evaluation"
+        required: false
+        default: "false"
+
+jobs:
+  build-test-eval:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: HomeAutomationCore
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift build
+        run: swift build
+      - name: Swift test
+        run: swift test
+      - name: Deterministic evaluation
+        run: swift run home-automation-eval --mode deterministic --suite all --output .build/evaluation
+      - name: Upload deterministic evaluation artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deterministic-evaluation
+          path: HomeAutomationCore/.build/evaluation
+
+  live-eval:
+    runs-on: macos-15
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live_eval == 'true' }}
+    defaults:
+      run:
+        working-directory: HomeAutomationCore
+    steps:
+      - uses: actions/checkout@v4
+      - name: Live FoundationModel evaluation
+        env:
+          HOME_AUTOMATION_EVAL_LIVE: "1"
+        run: swift run home-automation-eval --mode live --suite all --require-live-model true --output .build/evaluation-live
+      - name: Upload live evaluation artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-evaluation
+          path: HomeAutomationCore/.build/evaluation-live

@@ -1,9 +1,10 @@
 import Foundation
 
-public actor DailyTextLogWriter {
+public actor DailyTextLogWriter: TelemetrySink {
     private let directoryURL: URL
     private var currentDateKey: String?
     private var fileHandle: FileHandle?
+    private var sinkStats = TelemetrySinkStats()
 
     public init(directoryURL: URL) {
         self.directoryURL = directoryURL
@@ -13,16 +14,29 @@ public actor DailyTextLogWriter {
         try? fileHandle?.close()
     }
 
-    public func append(_ event: HomeAutomationTelemetryEvent) async {
+    public func append(_ event: ObservabilityEvent) async {
         do {
             let line = try Self.render(event)
             let handle = try fileHandle(for: event.timestamp)
             if let data = (line + "\n").data(using: .utf8) {
                 try handle.write(contentsOf: data)
+                sinkStats.appendedCount += 1
             }
         } catch {
-            // Telemetry must never break command resolution.
+            sinkStats.writeFailureCount += 1
         }
+    }
+
+    public func append(_ event: HomeAutomationTelemetryEvent) async {
+        await append(event.observabilityEvent)
+    }
+
+    public func flush() async {
+        try? fileHandle?.synchronize()
+    }
+
+    public func stats() async -> TelemetrySinkStats {
+        sinkStats
     }
 
     private func fileHandle(for date: Date) throws -> FileHandle {
@@ -52,13 +66,16 @@ public actor DailyTextLogWriter {
         return handle
     }
 
-    private static func render(_ event: HomeAutomationTelemetryEvent) throws -> String {
+    private static func render(_ event: ObservabilityEvent) throws -> String {
         let timestamp = isoFormatter.string(from: event.timestamp)
         let tags = [
             tag("RUN", shortRunID(event.runID)),
+            tag("TRACE", shortRunID(event.traceID)),
+            tag("SPAN", shortRunID(event.spanID)),
             tag("INV", event.agentInvocationID),
             tag("OP", event.operation),
             tag("GRAPH", event.graphID),
+            tag("COMP", event.componentID),
             tag("ACTION", event.actionID),
             tag("COND", event.conditionID),
             tag("AGENT", event.agentID),
@@ -109,4 +126,3 @@ public actor DailyTextLogWriter {
         return formatter
     }
 }
-

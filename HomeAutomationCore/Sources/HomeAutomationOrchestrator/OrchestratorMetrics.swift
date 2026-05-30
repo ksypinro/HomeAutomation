@@ -262,6 +262,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var automationMetrics: OrchestratorAutomationMetrics
     public var foundationModelUsage: FoundationModelUsageMetrics
     public var retrievalQuality: RetrievalQualityMetrics
+    public var metricsV2: RunMetricsV2?
 
     public init(command: String) {
         self.command = command
@@ -280,6 +281,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.automationMetrics = OrchestratorAutomationMetrics()
         self.foundationModelUsage = FoundationModelUsageMetrics()
         self.retrievalQuality = RetrievalQualityMetrics()
+        self.metricsV2 = nil
     }
 
     public mutating func captureEvaluationFields(
@@ -336,6 +338,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         )
         retrievalQuality = Self.retrievalQualityMetrics(context: context, agentStatuses: agentStatuses)
         captureFoundationModelFields(context: context)
+        metricsV2 = RunMetricsV2.derive(from: self)
     }
 
     public mutating func captureAutomationFields(
@@ -377,6 +380,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
             skippedNodeIDs: statuses.filter { $0.value == .skipped }.map(\.key).sorted(),
             nodeDurations: [:]
         )
+        metricsV2 = RunMetricsV2.derive(from: self)
     }
 
     private static func automationPlan(from resolution: HomeCommandResolution) -> HomeAutomationCreationPlan? {

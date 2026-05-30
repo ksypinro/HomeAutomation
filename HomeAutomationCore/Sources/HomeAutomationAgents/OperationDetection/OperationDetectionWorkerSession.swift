@@ -154,10 +154,19 @@ public struct OperationDetectionWorkerSession: Sendable {
             instructions: Instructions(instructionsText)
         )
         do {
-            let modelResult = try await session.respond(
-                to: Prompt("User command:\n\(text)"),
-                generating: HomeOperationRoutingResult.self
-            ).content
+            let prompt = "User command:\n\(text)"
+            let modelResult = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.operationDetection.rawValue,
+                policyMode: modelCallPolicy.mode.rawValue,
+                modelAvailability: "available",
+                promptCharacterCount: instructionsText.count + prompt.count,
+                selectedToolNames: ["analyzeHomeOperation"]
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: HomeOperationRoutingResult.self
+                ).content
+            }
             logger.debug("[FoundationModelOutput] result: \(String(describing: modelResult), privacy: .public)")
 
             let semanticResult = ruleDetect(text)

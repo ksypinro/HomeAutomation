@@ -8,9 +8,15 @@ import OSLog
 /// allowing external observers (like UI) to track the orchestrator's progress in real-time.
 public struct OrchestratorPipelineEvent: Sendable, Identifiable {
     public let id: String
+    public let sequence: Int?
     public let runID: UUID
     public let stage: String
     public let agentID: String?
+    public let traceID: String?
+    public let spanID: String?
+    public let parentSpanID: String?
+    public let componentKind: String?
+    public let componentID: String?
     public let status: EventStatus
     public let detail: String
     public let timestamp: Date
@@ -27,16 +33,44 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
         runID: UUID,
         stage: String,
         agentID: String? = nil,
+        sequence: Int? = nil,
+        traceID: String? = HomeAutomationTelemetryScope.current?.traceID,
+        spanID: String? = HomeAutomationTelemetryScope.current?.spanID,
+        parentSpanID: String? = HomeAutomationTelemetryScope.current?.parentSpanID,
+        componentKind: String? = HomeAutomationTelemetryScope.current?.componentKind,
+        componentID: String? = HomeAutomationTelemetryScope.current?.componentID,
         status: EventStatus,
         detail: String = ""
     ) {
         self.id = UUID().uuidString
+        self.sequence = sequence
         self.runID = runID
         self.stage = stage
         self.agentID = agentID
+        self.traceID = traceID
+        self.spanID = spanID
+        self.parentSpanID = parentSpanID
+        self.componentKind = componentKind
+        self.componentID = componentID
         self.status = status
         self.detail = detail
         self.timestamp = Date()
+    }
+
+    public func assigningSequence(_ sequence: Int) -> OrchestratorPipelineEvent {
+        OrchestratorPipelineEvent(
+            runID: runID,
+            stage: stage,
+            agentID: agentID,
+            sequence: sequence,
+            traceID: traceID,
+            spanID: spanID,
+            parentSpanID: parentSpanID,
+            componentKind: componentKind,
+            componentID: componentID,
+            status: status,
+            detail: detail
+        )
     }
 }
 
@@ -49,31 +83,47 @@ public actor AgentEventBus {
     private var events: [OrchestratorPipelineEvent] = []
     private var continuations: [UUID: AsyncStream<OrchestratorPipelineEvent>.Continuation] = [:]
     private var isFinished = false
+    private let replayLimit: Int
+    private var nextSequence = 1
 
-    public init() {}
+    public init(replayLimit: Int = 1_000) {
+        self.replayLimit = max(1, replayLimit)
+    }
 
     /// Publishes a new event to the bus and delivers it to all active continuations.
     ///
     /// - Parameter event: The `OrchestratorPipelineEvent` to broadcast.
     public func publish(_ event: OrchestratorPipelineEvent) async {
         guard !isFinished else { return }
-        logger.debug("Publishing event for runID: \(event.runID, privacy: .public), stage: \(event.stage, privacy: .public), status: \(event.status.rawValue, privacy: .public)")
+        let sequenced = event.sequence == nil ? event.assigningSequence(nextSequence) : event
+        nextSequence = max(nextSequence + 1, (sequenced.sequence ?? nextSequence) + 1)
+        logger.debug("Publishing event for runID: \(sequenced.runID, privacy: .public), stage: \(sequenced.stage, privacy: .public), status: \(sequenced.status.rawValue, privacy: .public)")
         await HomeAutomationTelemetry.shared.log(
             "pipeline.event",
             context: HomeAutomationTelemetryContext(
-                runID: event.runID.uuidString,
-                stage: event.stage,
-                agentID: event.agentID
+                traceID: sequenced.traceID,
+                spanID: sequenced.spanID,
+                parentSpanID: sequenced.parentSpanID,
+                spanKind: .event,
+                runID: sequenced.runID.uuidString,
+                stage: sequenced.stage,
+                agentID: sequenced.agentID,
+                componentKind: sequenced.componentKind,
+                componentID: sequenced.componentID
             ),
-            status: event.status.rawValue,
+            status: sequenced.status.rawValue,
             payload: [
-                "eventID": event.id,
-                "detail": event.detail
+                "eventID": sequenced.id,
+                "sequence": String(sequenced.sequence ?? 0),
+                "detail": sequenced.detail
             ]
         )
-        events.append(event)
+        events.append(sequenced)
+        if events.count > replayLimit {
+            events.removeFirst(events.count - replayLimit)
+        }
         for continuation in continuations.values {
-            continuation.yield(event)
+            continuation.yield(sequenced)
         }
     }
 
@@ -109,6 +159,7 @@ public actor AgentEventBus {
         events = []
         continuations = [:]
         isFinished = false
+        nextSequence = 1
     }
 
     /// Finishes active event streams after all previously published events have been yielded.

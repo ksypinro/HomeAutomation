@@ -97,10 +97,18 @@ public struct SemanticNLUWorkerSession: Sendable {
             instructions: Instructions(instructionsText)
         )
         do {
-            let result = try await session.respond(
-                to: Prompt(prompt),
-                generating: HomeSemanticNLUResult.self
-            ).content
+            let result = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.semanticNLU.rawValue,
+                policyMode: modelCallPolicy.mode.rawValue,
+                modelAvailability: "available",
+                promptCharacterCount: instructionsText.count + prompt.count,
+                selectedToolNames: ["getAvailableDeviceTypes"]
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: HomeSemanticNLUResult.self
+                ).content
+            }
             logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
             return result
         } catch {

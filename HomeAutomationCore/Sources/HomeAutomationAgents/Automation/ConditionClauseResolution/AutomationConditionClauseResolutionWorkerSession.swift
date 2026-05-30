@@ -36,10 +36,18 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
             let session = LanguageModelSession(
                 instructions: Instructions(AutomationConditionClauseResolutionPromptBuilder.instructions)
             )
-            let fmOutput = try await session.respond(
-                to: Prompt(prompt),
-                generating: AutomationConditionClauseFMOutput.self
-            ).content
+            let fmOutput = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.automationConditionClauseResolution.rawValue,
+                policyMode: "model-first-with-fallback",
+                modelAvailability: "available",
+                promptCharacterCount: AutomationConditionClauseResolutionPromptBuilder.instructions.count + prompt.count,
+                selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"]
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: AutomationConditionClauseFMOutput.self
+                ).content
+            }
             let output = try result(from: fmOutput, input: input, fallback: fallback)
             logger.debug("[FoundationModelOutput] \(String(describing: output), privacy: .public)")
             return output

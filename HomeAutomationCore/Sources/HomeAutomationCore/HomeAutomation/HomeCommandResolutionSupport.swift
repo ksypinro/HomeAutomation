@@ -180,15 +180,23 @@ public struct FoundationHomeCommandDraftResolver: HomeCommandDraftResolving {
 
         do {
             let draft: HomeCommandDraft
-            switch package.generationMode {
-            case .greedy:
-                draft = try await session.respond(
-                    to: Prompt(package.prompt),
-                    generating: HomeCommandDraft.self,
-                    options: Self.generationOptions(for: package.generationMode)
-                ).content
-            case .defaultSampling:
-                draft = try await session.respond(to: Prompt(package.prompt), generating: HomeCommandDraft.self).content
+            draft = try await FoundationModelCallRecorder.record(
+                agentID: "draftGeneration",
+                policyMode: String(describing: package.generationMode),
+                promptCharacterCount: package.prompt.count,
+                selectedToolNames: package.tools.map(\.name),
+                estimatedToolOutputCharacterCount: package.contextBudgetReport?.estimatedToolOutputCharacterCount ?? 0
+            ) {
+                switch package.generationMode {
+                case .greedy:
+                    return try await session.respond(
+                        to: Prompt(package.prompt),
+                        generating: HomeCommandDraft.self,
+                        options: Self.generationOptions(for: package.generationMode)
+                    ).content
+                case .defaultSampling:
+                    return try await session.respond(to: Prompt(package.prompt), generating: HomeCommandDraft.self).content
+                }
             }
             logger.debug("[resolveDraft] FoundationModelOutput: \(String(describing: draft), privacy: .public)")
             return draft

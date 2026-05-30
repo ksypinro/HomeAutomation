@@ -38,10 +38,17 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
             let session = LanguageModelSession(
                 instructions: Instructions(AutomationComponentSegmentationPromptBuilder.instructions)
             )
-            let output = try await session.respond(
-                to: Prompt(prompt),
-                generating: AutomationComponentPlanFMOutput.self
-            ).content
+            let output = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.automationComponentSegmentation.rawValue,
+                policyMode: "model-first-with-fallback",
+                modelAvailability: "available",
+                promptCharacterCount: AutomationComponentSegmentationPromptBuilder.instructions.count + prompt.count
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: AutomationComponentPlanFMOutput.self
+                ).content
+            }
             let plan = plan(from: output, fallback: fallback)
             guard !plan.actions.isEmpty else {
                 if let fallback { return fallback }

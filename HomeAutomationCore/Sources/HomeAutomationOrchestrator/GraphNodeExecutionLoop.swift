@@ -232,16 +232,12 @@ extension GraphScheduler {
             return GraphNodeOutcome(nodeID: node.id, exit: nil)
         }
 
-        await eventBus.publish(
-            OrchestratorPipelineEvent(
-                runID: runID,
-                stage: node.id,
-                agentID: agentID.rawValue,
-                status: .running
-            )
-        )
+        let nodeSpanID = TelemetryTraceContext.makeSpanID()
         let baseTelemetryContext = (HomeAutomationTelemetryScope.current ?? HomeAutomationTelemetryContext())
             .merging(
+                spanID: nodeSpanID,
+                parentSpanID: HomeAutomationTelemetryScope.current?.spanID,
+                spanKind: .graphNode,
                 runID: runID.uuidString,
                 operation: graph.goal.rawValue,
                 graphID: graph.id,
@@ -249,6 +245,23 @@ extension GraphScheduler {
                 graphNodeID: node.id,
                 agentID: agentID.rawValue
             )
+        await HomeAutomationTelemetryScope.$current.withValue(baseTelemetryContext) {
+            await eventBus.publish(
+                OrchestratorPipelineEvent(
+                    runID: runID,
+                    stage: node.id,
+                    agentID: agentID.rawValue,
+                    status: .running
+                )
+            )
+        }
+        await HomeAutomationTelemetry.shared.log(
+            "graph.node.started",
+            context: baseTelemetryContext,
+            status: .running,
+            spanKind: .graphNode,
+            completedAt: nil
+        )
 
         var attemptCount = 0
         var result: AgentRunResult
@@ -261,6 +274,9 @@ extension GraphScheduler {
             await metrics.markQueuedStart(nodeID: node.id, at: start)
             await metrics.markRunning(nodeID: node.id, agentID: agentID, startedAt: start)
             let telemetryContext = baseTelemetryContext.merging(
+                spanID: TelemetryTraceContext.makeSpanID(),
+                parentSpanID: nodeSpanID,
+                spanKind: .agentAttempt,
                 agentInvocationID: Self.agentInvocationID(
                     runID: runID,
                     actionID: baseTelemetryContext.actionID,
@@ -375,14 +391,26 @@ extension GraphScheduler {
         }
 
         let effectiveResult = transitionExit ?? result
-        await eventBus.publish(
-            OrchestratorPipelineEvent(
-                runID: runID,
-                stage: node.id,
-                agentID: agentID.rawValue,
-                status: eventStatus(for: effectiveResult),
-                detail: detail(for: effectiveResult)
+        await HomeAutomationTelemetryScope.$current.withValue(baseTelemetryContext) {
+            await eventBus.publish(
+                OrchestratorPipelineEvent(
+                    runID: runID,
+                    stage: node.id,
+                    agentID: agentID.rawValue,
+                    status: eventStatus(for: effectiveResult),
+                    detail: detail(for: effectiveResult)
+                )
             )
+        }
+        await HomeAutomationTelemetry.shared.log(
+            "graph.node.completed",
+            context: baseTelemetryContext,
+            status: eventStatus(for: effectiveResult) == .completed ? .completed : .failed,
+            spanKind: .graphNode,
+            durationMs: end.timeIntervalSince(start) * 1_000,
+            payload: TelemetryPayload(values: [
+                "detail": .string(detail(for: effectiveResult))
+            ])
         )
         await metrics.markFinished(
             nodeID: node.id,

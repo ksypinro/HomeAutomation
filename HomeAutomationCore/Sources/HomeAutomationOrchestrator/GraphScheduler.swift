@@ -19,14 +19,42 @@ public struct GraphScheduler: Sendable {
         options: GraphSchedulerExecutionOptions = GraphSchedulerExecutionOptions()
     ) async -> GraphSchedulerResult {
         logger.info("Starting graph \(graph.id, privacy: .public) for runID: \(runID, privacy: .public)")
-        let metrics = GraphRunMetricsRecorder(graph: graph)
-        let initialContext = await measuredSnapshot(
-            contextStore: contextStore,
-            graph: graph,
-            runID: runID,
-            metrics: metrics,
-            stage: "validation"
+        let graphStartedAt = Date()
+        let inheritedTelemetry = HomeAutomationTelemetryScope.current
+        let graphTelemetryContext = (inheritedTelemetry ?? HomeAutomationTelemetryContext())
+            .merging(
+                traceID: inheritedTelemetry?.traceID ?? runID.uuidString,
+                spanID: TelemetryTraceContext.makeSpanID(),
+                parentSpanID: inheritedTelemetry?.spanID,
+                spanKind: .graph,
+                runID: runID.uuidString,
+                operation: graph.goal.rawValue,
+                graphID: graph.id,
+                stage: graph.id,
+                runtimeMode: "graph"
+            )
+        await HomeAutomationTelemetry.shared.log(
+            "graph.started",
+            context: graphTelemetryContext,
+            status: .running,
+            spanKind: .graph,
+            startedAt: graphStartedAt,
+            completedAt: nil,
+            payload: TelemetryPayload(values: [
+                "nodeCount": .int(graph.nodes.count),
+                "entryNodeCount": .int(graph.entryNodeIDs.count)
+            ])
         )
+        let metrics = GraphRunMetricsRecorder(graph: graph)
+        let initialContext = await HomeAutomationTelemetryScope.$current.withValue(graphTelemetryContext) {
+            await measuredSnapshot(
+                contextStore: contextStore,
+                graph: graph,
+                runID: runID,
+                metrics: metrics,
+                stage: "validation"
+            )
+        }
         let validationErrors = GraphValidator().validate(
             graph,
             registry: registry,
@@ -64,10 +92,11 @@ public struct GraphScheduler: Sendable {
         let transitionPolicy = GraphTransitionPolicy()
         var interruption: GraphCheckpointRecord?
 
-        let firstExit = await withTaskGroup(
+        let firstExit = await HomeAutomationTelemetryScope.$current.withValue(graphTelemetryContext) {
+            await withTaskGroup(
             of: GraphNodeOutcome.self,
             returning: AgentRunResult?.self
-        ) { group in
+            ) { group in
             var runningNodeIDs = Set<String>()
             var firstExit: AgentRunResult?
 
@@ -290,9 +319,19 @@ public struct GraphScheduler: Sendable {
                 )
             }
             return firstExit
+            }
         }
 
         if let interruption {
+            await HomeAutomationTelemetry.shared.log(
+                "graph.completed",
+                context: graphTelemetryContext,
+                status: .skipped,
+                spanKind: .graph,
+                startedAt: graphStartedAt,
+                durationMs: Date().timeIntervalSince(graphStartedAt) * 1_000,
+                payload: TelemetryPayload(values: ["interrupted": .bool(true)])
+            )
             return GraphSchedulerResult(
                 exit: nil,
                 metrics: await metrics.finish(),
@@ -301,6 +340,15 @@ public struct GraphScheduler: Sendable {
         }
 
         if let firstExit {
+            await HomeAutomationTelemetry.shared.log(
+                "graph.completed",
+                context: graphTelemetryContext,
+                status: .failed,
+                spanKind: .graph,
+                startedAt: graphStartedAt,
+                durationMs: Date().timeIntervalSince(graphStartedAt) * 1_000,
+                payload: TelemetryPayload(values: ["terminalExit": .bool(true)])
+            )
             return GraphSchedulerResult(exit: firstExit, metrics: await metrics.finish())
         }
 
@@ -312,6 +360,14 @@ public struct GraphScheduler: Sendable {
             dependencies: dependencies,
             context: await contextStore.snapshot(),
             lastCompletedNodeID: dependencies.completedNodeIDs.sorted().last
+        )
+        await HomeAutomationTelemetry.shared.log(
+            "graph.completed",
+            context: graphTelemetryContext,
+            status: .completed,
+            spanKind: .graph,
+            startedAt: graphStartedAt,
+            durationMs: Date().timeIntervalSince(graphStartedAt) * 1_000
         )
         return GraphSchedulerResult(exit: nil, metrics: await metrics.finish())
     }

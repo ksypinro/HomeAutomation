@@ -153,10 +153,17 @@ public struct AutomationDraftWorkerSession: Sendable {
 
         let session = LanguageModelSession(instructions: Instructions(instructions))
         do {
-            let result = try await session.respond(
-                to: Prompt(promptText),
-                generating: AutomationDraftOutput.self
-            ).content
+            let result = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.automationDraft.rawValue,
+                policyMode: "model-first-with-parser-fallback",
+                modelAvailability: "available",
+                promptCharacterCount: instructions.count + promptText.count
+            ) {
+                try await session.respond(
+                    to: Prompt(promptText),
+                    generating: AutomationDraftOutput.self
+                ).content
+            }
             let preserved = outputByPreservingParserGrounding(
                 in: result,
                 deterministic: deterministic
