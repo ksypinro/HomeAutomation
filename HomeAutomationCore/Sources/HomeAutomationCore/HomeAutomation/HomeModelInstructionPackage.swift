@@ -14,6 +14,7 @@ public struct HomeModelInstructionPackage: @unchecked Sendable {
     public let useAdapter: Bool
     public let generationMode: HomeGenerationMode
     public let contextBudgetReport: HomeModelContextBudgetReport?
+    public let deterministicFallbackInput: HomeFinalResolutionInput?
 
     public init(
         instructions: Instructions,
@@ -22,7 +23,8 @@ public struct HomeModelInstructionPackage: @unchecked Sendable {
         tools: [any Tool] = [],
         useAdapter: Bool,
         generationMode: HomeGenerationMode,
-        contextBudgetReport: HomeModelContextBudgetReport? = nil
+        contextBudgetReport: HomeModelContextBudgetReport? = nil,
+        deterministicFallbackInput: HomeFinalResolutionInput? = nil
     ) {
         self.instructions = instructions
         self.instructionText = instructionText
@@ -31,5 +33,6 @@ public struct HomeModelInstructionPackage: @unchecked Sendable {
         self.useAdapter = useAdapter
         self.generationMode = generationMode
         self.contextBudgetReport = contextBudgetReport
+        self.deterministicFallbackInput = deterministicFallbackInput
     }
 }
