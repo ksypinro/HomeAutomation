@@ -10,7 +10,7 @@ public struct SmartThingsCompilationAgent: HomeAgent {
     public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let compiler: SmartThingsRuleCompiler
 
-    public init(compiler: SmartThingsRuleCompiler = SmartThingsRuleCompiler()) {
+    public init(compiler: SmartThingsRuleCompiler) {
         self.compiler = compiler
     }
 

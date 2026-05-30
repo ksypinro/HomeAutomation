@@ -46,6 +46,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let registry: AgentRegistry
     private let graphPlanner: GraphPlanner
     private let policy: OrchestratorPolicyEngine
+    private let scheduler: GraphScheduler
     private let metricsCollector: OrchestratorMetricsCollector
     private let conversationMemory: ConversationMemory
     private let circuitBreakers: CircuitBreakerRegistry
@@ -53,66 +54,105 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
 
     public init(
+        dependencies: HomeAutomationRuntimeDependencies
+    ) {
+        self.registry = dependencies.agentRegistry
+        self.graphPlanner = dependencies.graphPlanner
+        self.policy = dependencies.policy
+        self.scheduler = dependencies.scheduler
+        self.metricsCollector = dependencies.metricsCollector
+        self.conversationMemory = dependencies.conversationMemory
+        self.circuitBreakers = dependencies.circuitBreakers
+        self.deviceRegistry = dependencies.deviceRegistry
+        self.smartThingsRuleCreator = dependencies.smartThingsRuleCreator
+    }
+
+    public convenience init(
+        coordinator: HomeAutomationCoordinator
+    ) {
+        self.init(dependencies: coordinator.makeRuntimeDependencies())
+    }
+
+    public convenience init(
         registry: AgentRegistry,
         policy: OrchestratorPolicyEngine,
-        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
-        metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
-        conversationMemory: ConversationMemory = ConversationMemory(),
-        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
-        automationDraftAgent: AutomationDraftAgent = AutomationDraftAgent(),
+        graphPlanner: GraphPlanner,
+        scheduler: GraphScheduler,
+        metricsCollector: OrchestratorMetricsCollector,
+        conversationMemory: ConversationMemory,
+        circuitBreakers: CircuitBreakerRegistry,
+        deviceRegistry: any DeviceRegistryProtocol,
+        automationDraftAgent: AutomationDraftAgent? = nil,
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         }
     ) {
-        self.registry = registry
-        self.graphPlanner = GraphPlanner(policy: policy)
-        self.policy = policy
-        self.deviceRegistry = deviceRegistry
-        self.metricsCollector = metricsCollector
-        self.conversationMemory = conversationMemory
-        self.circuitBreakers = circuitBreakers
-        self.smartThingsRuleCreator = smartThingsRuleCreator
-
+        _ = automationDraftAgent
+        _ = foundationModelAvailability
+        self.init(
+            dependencies: HomeAutomationRuntimeDependencies(
+                agentRegistry: registry,
+                graphPlanner: graphPlanner,
+                policy: policy,
+                scheduler: scheduler,
+                metricsCollector: metricsCollector,
+                conversationMemory: conversationMemory,
+                circuitBreakers: circuitBreakers,
+                deviceRegistry: deviceRegistry,
+                smartThingsRuleCreator: smartThingsRuleCreator
+            )
+        )
     }
 
     public convenience init(
-        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
+        deviceRegistry: (any DeviceRegistryProtocol)? = nil,
         contextRetriever: ContextRetriever? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
-        metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
-        conversationMemory: ConversationMemory = ConversationMemory(),
-        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
+        metricsCollector: OrchestratorMetricsCollector? = nil,
+        conversationMemory: ConversationMemory? = nil,
+        circuitBreakers: CircuitBreakerRegistry? = nil,
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) {
-        let policy = OrchestratorPolicyEngine(
-            isModelAvailable: foundationModelAvailability,
-            modelAvailabilityStatus: foundationModelAvailabilityStatus
-        )
         self.init(
-            registry: DefaultAgentRegistryFactory.make(
-                registry: deviceRegistry,
+            coordinator: HomeAutomationCoordinator(
+                deviceRegistry: deviceRegistry,
                 contextRetriever: contextRetriever,
                 foundationModelAvailability: foundationModelAvailability,
+                foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
+                metricsCollector: metricsCollector,
+                conversationMemory: conversationMemory,
+                circuitBreakers: circuitBreakers,
                 smartThingsRuleCreator: smartThingsRuleCreator
-            ),
-            policy: policy,
+            )
+        )
+    }
+
+    public static func makeDependencies(
+        deviceRegistry: (any DeviceRegistryProtocol)? = nil,
+        contextRetriever: ContextRetriever? = nil,
+        foundationModelAvailability: @escaping @Sendable () -> Bool = {
+            SystemLanguageModel.default.isAvailable
+        },
+        foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
+        metricsCollector: OrchestratorMetricsCollector? = nil,
+        conversationMemory: ConversationMemory? = nil,
+        circuitBreakers: CircuitBreakerRegistry? = nil,
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
+    ) -> HomeAutomationRuntimeDependencies {
+        HomeAutomationCoordinator(
             deviceRegistry: deviceRegistry,
+            contextRetriever: contextRetriever,
+            foundationModelAvailability: foundationModelAvailability,
+            foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
             metricsCollector: metricsCollector,
             conversationMemory: conversationMemory,
             circuitBreakers: circuitBreakers,
-            automationDraftAgent: AutomationDraftAgent(
-                worker: AutomationDraftWorkerSession(
-                    foundationModelAvailability: foundationModelAvailability,
-                    contextRetriever: contextRetriever
-                )
-            ),
-            smartThingsRuleCreator: smartThingsRuleCreator,
-            foundationModelAvailability: foundationModelAvailability
-        )
+            smartThingsRuleCreator: smartThingsRuleCreator
+        ).makeRuntimeDependencies()
     }
 
     /// Initializes a fully configured, RAG-enabled orchestrator.
@@ -120,30 +160,35 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     /// This async initializer prepares the Vector Store and indexes all canonical
     /// device capability knowledge before returning the orchestrator.
     public static func makeRAGEnabled(
-        deviceRegistry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
+        deviceRegistry: (any DeviceRegistryProtocol)? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
         foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
-        metricsCollector: OrchestratorMetricsCollector = OrchestratorMetricsCollector(),
+        metricsCollector: OrchestratorMetricsCollector? = nil,
         indexCache: VectorIndexCache = VectorIndexCache(),
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) async -> HomeCommandOrchestrator {
-        let conversationMemory = ConversationMemory()
-        let circuitBreakers = CircuitBreakerRegistry()
-        let indexer = KnowledgeIndexer(cache: indexCache)
-        await indexer.indexCanonicalKnowledge(deviceRegistry: deviceRegistry)
-        let retriever = await indexer.makeRetriever()
-        return HomeCommandOrchestrator(
+        let baseCoordinator = HomeAutomationCoordinator(
             deviceRegistry: deviceRegistry,
-            contextRetriever: retriever,
             foundationModelAvailability: foundationModelAvailability,
             foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
             metricsCollector: metricsCollector,
-            conversationMemory: conversationMemory,
-            circuitBreakers: circuitBreakers,
             smartThingsRuleCreator: smartThingsRuleCreator
         )
+        let indexer = baseCoordinator.ragCoordinator.makeKnowledgeIndexer(cache: indexCache)
+        await indexer.indexCanonicalKnowledge(deviceRegistry: baseCoordinator.deviceRegistry)
+        let retriever = await indexer.makeRetriever()
+        return HomeAutomationCoordinator(
+            deviceRegistry: baseCoordinator.deviceRegistry,
+            contextRetriever: retriever,
+            foundationModelAvailability: foundationModelAvailability,
+            foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
+            metricsCollector: baseCoordinator.metricsCollector,
+            conversationMemory: baseCoordinator.conversationMemory,
+            circuitBreakers: baseCoordinator.circuitBreakers,
+            smartThingsRuleCreator: smartThingsRuleCreator
+        ).makeOrchestrator()
     }
 
     /// Synchronously waits for the complete resolution of a user command.
@@ -473,7 +518,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             for: text,
             context: await contextStore.snapshot()
         )
-        let schedulerResult = await GraphScheduler().execute(
+        let schedulerResult = await scheduler.execute(
             plan.graph,
             registry: registry,
             contextStore: contextStore,
@@ -517,7 +562,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             AutomationPipelineEventBridge(eventBus: eventBus, runID: runID),
             for: AutomationRuntimeContextKeys.pipelineEventBridge
         )
-        let schedulerResult = await GraphScheduler().execute(
+        let schedulerResult = await scheduler.execute(
             graph,
             registry: registry,
             contextStore: contextStore,
@@ -563,7 +608,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             context: await contextStore.snapshot(),
             operation: .unsupported
         ).graph
-        let schedulerResult = await GraphScheduler().execute(
+        let schedulerResult = await scheduler.execute(
             graph,
             registry: registry,
             contextStore: contextStore,
@@ -627,7 +672,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ) async -> DirectCommandExecutionResult {
         logger.debug("Generating graph execution plan.")
         let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
-        let scheduler = GraphScheduler()
         let result = await scheduler.execute(
             plan.graph,
             registry: registry,

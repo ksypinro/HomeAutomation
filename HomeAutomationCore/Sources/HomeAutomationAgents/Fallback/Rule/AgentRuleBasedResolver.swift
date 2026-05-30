@@ -19,14 +19,15 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
     private let contextRetriever: ContextRetriever?
 
     public init(
-        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
-        validator: AgentCommandValidator = AgentCommandValidator(),
-        bixbyFallbackMapper: AgentBixbyFallbackMapper = AgentBixbyFallbackMapper(),
+        registry: any DeviceRegistryProtocol,
+        validator: AgentCommandValidator,
+        executor: AgentPlanExecutor,
+        bixbyFallbackMapper: AgentBixbyFallbackMapper,
         contextRetriever: ContextRetriever? = nil
     ) {
         self.registry = registry
         self.validator = validator
-        self.executor = AgentPlanExecutor(registry: registry)
+        self.executor = executor
         self.bixbyFallbackMapper = bixbyFallbackMapper
         self.contextRetriever = contextRetriever
     }

@@ -38,7 +38,11 @@ public struct GraphSubgraphSchedulerResult: Sendable {
 }
 
 public struct GraphSubgraphRunner: Sendable {
-    public init() {}
+    private let scheduler: GraphScheduler
+
+    public init(scheduler: GraphScheduler) {
+        self.scheduler = scheduler
+    }
 
     public func execute(
         descriptor: GraphSubgraphDescriptor,
@@ -50,7 +54,7 @@ public struct GraphSubgraphRunner: Sendable {
         circuitBreakers: CircuitBreakerRegistry,
         runID: UUID
     ) async -> GraphSubgraphSchedulerResult {
-        let result = await GraphScheduler().execute(
+        let result = await scheduler.execute(
             graph,
             registry: registry,
             contextStore: contextStore,

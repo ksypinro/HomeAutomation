@@ -505,7 +505,10 @@ struct RAGTests {
             fallback: TFIDFEmbeddingProvider()
         )
         let firstIndexer = KnowledgeIndexer(embeddingProvider: firstProvider, cache: cache)
-        let firstResult = await firstIndexer.indexCanonicalKnowledge(includeCatalogDevices: false)
+        let firstResult = await firstIndexer.indexCanonicalKnowledge(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            includeCatalogDevices: false
+        )
         await cache.waitForPendingSave()
 
         let secondProvider = FallbackEmbeddingProvider(
@@ -513,7 +516,10 @@ struct RAGTests {
             fallback: TFIDFEmbeddingProvider()
         )
         let secondIndexer = KnowledgeIndexer(embeddingProvider: secondProvider, cache: cache)
-        let secondResult = await secondIndexer.indexCanonicalKnowledge(includeCatalogDevices: false)
+        let secondResult = await secondIndexer.indexCanonicalKnowledge(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            includeCatalogDevices: false
+        )
         let retriever = await secondIndexer.makeRetriever()
         let results = await retriever.retrieve("bedroom lamp", topK: 1)
 

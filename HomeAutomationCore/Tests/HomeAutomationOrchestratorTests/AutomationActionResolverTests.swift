@@ -53,10 +53,14 @@ struct AutomationActionResolverTests {
     @Test
     func directGraphActionResolutionSeedsRoutingState() async throws {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let scheduler = GraphScheduler()
         let resolver = AutomationActionResolver(
             registry: registry,
             graphPlanner: GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { true })),
-            policy: OrchestratorPolicyEngine(isModelAvailable: { true })
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            scheduler: scheduler,
+            subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
+            circuitBreakers: CircuitBreakerRegistry()
         )
 
         let result = await resolver.resolve(
@@ -88,6 +92,7 @@ struct AutomationActionResolverTests {
         let registry = AgentRegistry(
             agents: [SlowSuccessAgent(delayNanoseconds: 200_000_000)]
         )
+        let scheduler = GraphScheduler()
         let resolver = AutomationActionResolver(
             registry: registry,
             graphPlanner: GraphPlanner(
@@ -95,7 +100,10 @@ struct AutomationActionResolverTests {
                     providers: [StaticDirectCommandGraphProvider(graph: graph)]
                 )
             ),
-            policy: OrchestratorPolicyEngine(isModelAvailable: { true })
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            scheduler: scheduler,
+            subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
+            circuitBreakers: CircuitBreakerRegistry()
         )
         let eventBus = AgentEventBus()
         let runID = UUID()

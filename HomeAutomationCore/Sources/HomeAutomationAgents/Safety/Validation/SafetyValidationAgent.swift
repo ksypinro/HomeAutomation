@@ -15,7 +15,7 @@ public struct SafetyValidationAgent: HomeAgent {
         self.validate = validate
     }
 
-    public init(validator: AgentCommandValidator = AgentCommandValidator()) {
+    public init(validator: AgentCommandValidator) {
         self.validate = { input in
             validator.validate(input.draft, input: input.finalInput)
         }

@@ -196,6 +196,38 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func coordinatorBuildsRuntimeDependenciesFromOneCompositionRoot() {
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        let dependencies = coordinator.makeRuntimeDependencies()
+        let context = ResolutionContext(
+            request: CommandRequest(text: "turn on bedroom AC", executeLowRiskCommands: false)
+        )
+        let graph = dependencies.graphPlanner.plan(for: context.request.text, context: context).graph
+
+        #expect(dependencies.policy.modelAvailabilityStatus() == "unavailable")
+        #expect(graph.id == "direct-command-fallback-graph")
+        #expect(dependencies.agentRegistry.agent(for: .operationDetection) != nil)
+        #expect(dependencies.agentRegistry.agent(for: .automationComponentFanOut) != nil)
+    }
+
+    @Test
+    func coordinatorAcceptsProtocolBackedAgentRegistryFactory() {
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false },
+            agentRegistryFactory: EmptyAgentRegistryFactory()
+        )
+
+        let dependencies = coordinator.makeRuntimeDependencies()
+
+        #expect(dependencies.agentRegistry.agent(for: .operationDetection) == nil)
+    }
+
+    @Test
     func defaultRegistrySatisfiesAutomationCreationGraph() {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
         let graph = GraphPlanner.automationCreationGraph()
@@ -499,6 +531,15 @@ struct OrchestratorInfrastructureTests {
         }
 
         #expect(blockedDraft.targetDeviceID == "front_door_lock")
+    }
+}
+
+private struct EmptyAgentRegistryFactory: HomeAutomationAgentRegistryFactory {
+    func makeAgentRegistry(
+        dependencies: HomeAutomationAgentFactoryDependencies
+    ) -> AgentRegistry {
+        _ = dependencies
+        return AgentRegistry(agents: [])
     }
 }
 

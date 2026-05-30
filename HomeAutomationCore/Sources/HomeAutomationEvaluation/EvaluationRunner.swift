@@ -8,15 +8,18 @@ public struct EvaluationRunner: Sendable {
     public let mode: EvaluationMode
     public let requireLiveModel: Bool
     public let suites: Set<String>
+    private let coordinator: any EvaluationCoordinating
 
     public init(
         mode: EvaluationMode,
         requireLiveModel: Bool = false,
-        suites: Set<String> = ["all"]
+        suites: Set<String> = ["all"],
+        coordinator: (any EvaluationCoordinating)? = nil
     ) {
         self.mode = mode
         self.requireLiveModel = requireLiveModel
         self.suites = suites
+        self.coordinator = coordinator ?? EvaluationCoordinator()
     }
 
     public func run(cases: [EvaluationCase] = EvaluationCorpus.defaultCases) async -> EvaluationSuiteResult {
@@ -80,13 +83,7 @@ public struct EvaluationRunner: Sendable {
             return await runRAGCase(testCase, startedAt: startedAt)
         }
 
-        let registry = testCase.fixture.devices.isEmpty
-            ? MockHomeDeviceRegistry()
-            : MockHomeDeviceRegistry(devices: testCase.fixture.devices)
-        let orchestrator = HomeCommandOrchestrator(
-            deviceRegistry: registry,
-            foundationModelAvailability: { mode == .live }
-        )
+        let orchestrator = coordinator.makeOrchestrator(for: testCase, mode: mode)
 
         do {
             let result = try await orchestrator.resolve(testCase.input, executeLowRiskCommands: false)
@@ -122,7 +119,7 @@ public struct EvaluationRunner: Sendable {
 
     private func runRAGCase(_ testCase: EvaluationCase, startedAt: Date) async -> EvaluationCaseResult {
         let chunks = DocumentChunker().automationChunks()
-        let indexer = KnowledgeIndexer()
+        let indexer = coordinator.makeKnowledgeIndexer()
         _ = await indexer.index(chunks: chunks)
         let retriever = await indexer.makeRetriever()
         let expectedSources = testCase.expected.smartThingsJSONContains

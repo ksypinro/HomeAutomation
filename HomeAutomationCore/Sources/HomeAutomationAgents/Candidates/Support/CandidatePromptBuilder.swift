@@ -17,7 +17,7 @@ public struct CandidateResolutionPromptPackage: Sendable, Equatable {
 public struct CandidateResolutionPromptBuilder: Sendable {
     private let budgeter: FoundationModelContextBudgeter
 
-    public init(budgeter: FoundationModelContextBudgeter = FoundationModelContextBudgeter()) {
+    public init(budgeter: FoundationModelContextBudgeter) {
         self.budgeter = budgeter
     }
 

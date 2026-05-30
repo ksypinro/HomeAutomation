@@ -16,11 +16,6 @@ public struct MockExecutionAgent: HomeAgent {
         self.execute = execute
     }
 
-    public init(registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry()) {
-        let executor = AgentPlanExecutor(registry: registry)
-        self.execute = executor.executeLowRiskPlan
-    }
-
     public func run(_ input: HomeAutomationExecutionPlan, context: ResolutionContext) async throws -> HomeCandidateRecord {
         try await execute(input)
     }

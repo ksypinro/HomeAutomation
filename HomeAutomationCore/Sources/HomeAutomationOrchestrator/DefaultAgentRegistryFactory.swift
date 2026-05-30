@@ -11,30 +11,40 @@ import OSLog
 /// and contextual mappers, yielding a ready-to-use `AgentRegistry`.
 public enum DefaultAgentRegistryFactory {
     public static func make(
-        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
         contextRetriever: ContextRetriever? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) -> AgentRegistry {
-        let candidateResolver = HomeCandidateResolverSupport(
-            foundationModelAvailability: foundationModelAvailability
-        )
-        let toolProvider = AgentToolProvider(registry: registry)
-        let instructionFactory = AgentInstructionSetFactory(
-            toolProvider: toolProvider,
-            contextRetriever: contextRetriever
-        )
-        let draftResolver = AgentDraftResolver()
-        let commandValidator = AgentCommandValidator()
-        let ruleResolver = AgentRuleBasedResolver(
-            registry: registry,
-            validator: commandValidator,
-            contextRetriever: contextRetriever
-        )
-        let bixbyMapper = AgentBixbyFallbackMapper()
-        let executor = AgentPlanExecutor(registry: registry)
+        HomeAutomationCoordinator(
+            contextRetriever: contextRetriever,
+            foundationModelAvailability: foundationModelAvailability,
+            smartThingsRuleCreator: smartThingsRuleCreator
+        ).makeAgentRegistry()
+    }
+
+    public static func make(
+        registry: any DeviceRegistryProtocol,
+        contextRetriever: ContextRetriever? = nil,
+        foundationModelAvailability: @escaping @Sendable () -> Bool = {
+            SystemLanguageModel.default.isAvailable
+        },
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
+        graphCoordinator: GraphCoordinator,
+        scheduler: GraphScheduler,
+        circuitBreakers: CircuitBreakerRegistry,
+        constructionServices: HomeAutomationAgentConstructionServices,
+        automationCoordinator: AutomationCoordinator,
+        smartThingsCoordinator: SmartThingsCoordinator
+    ) -> AgentRegistry {
+        let candidateResolver = constructionServices.candidateResolver
+        let instructionFactory = constructionServices.instructionFactory
+        let draftResolver = constructionServices.draftResolver
+        let commandValidator = constructionServices.commandValidator
+        let ruleResolver = constructionServices.ruleResolver
+        let bixbyMapper = constructionServices.bixbyMapper
+        let executor = constructionServices.executor
         let registryBox = AgentRegistryBox()
 
         let agents: [any AnyHomeAgent] = [
@@ -90,11 +100,7 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: { output, _ in patch(.riskClassification, [ResolutionContextPatchKey.risk.rawValue: output]) }
             ),
             ContextualHomeAgent(
-                agent: AutomationComponentSegmentationAgent(
-                    worker: AutomationComponentSegmentationWorkerSession(
-                        foundationModelAvailability: foundationModelAvailability
-                    )
-                ),
+                agent: automationCoordinator.componentSegmentationAgent,
                 makeInput: { $0.request.text },
                 makePatch: { output, _ in automationComponentPlanPatch(output) }
             ),
@@ -110,26 +116,10 @@ public enum DefaultAgentRegistryFactory {
                                 unsupportedFragments: ["Agent registry unavailable"]
                             )
                         }
-                        let actionResolver = AutomationActionResolver(
-                            registry: agentRegistry,
-                            graphPlanner: GraphPlanner(
-                                policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
-                            ),
-                            policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
-                        )
-                        let runner = AutomationComponentFanOutRunner(
-                            triggerAgent: AutomationTriggerResolutionAgent(
-                                worker: AutomationTriggerResolutionWorkerSession(
-                                    foundationModelAvailability: foundationModelAvailability
-                                )
-                            ),
-                            conditionAgent: AutomationConditionClauseResolutionAgent(
-                                worker: AutomationConditionClauseResolutionWorkerSession(
-                                    foundationModelAvailability: foundationModelAvailability
-                                )
-                            ),
-                            actionResolver: actionResolver,
-                            registry: registry
+                        let runner = automationCoordinator.makeComponentFanOutRunner(
+                            agentRegistry: agentRegistry,
+                            graphCoordinator: graphCoordinator,
+                            deviceRegistry: registry
                         )
                         return await runner.resolve(plan: componentPlan, context: context)
                     }
@@ -151,12 +141,7 @@ public enum DefaultAgentRegistryFactory {
             ),
             ContextualHomeAgent(
                 agent: AutomationDraftExtractionAgent(
-                    draftAgent: AutomationDraftAgent(
-                        worker: AutomationDraftWorkerSession(
-                            foundationModelAvailability: foundationModelAvailability,
-                            contextRetriever: contextRetriever
-                        )
-                    )
+                    draftAgent: automationCoordinator.makeAutomationDraftAgent()
                 ),
                 makeInput: { context in
                     AutomationDraftInput(
@@ -195,12 +180,9 @@ public enum DefaultAgentRegistryFactory {
                         guard let agentRegistry = registryBox.registry else {
                             return []
                         }
-                        let resolver = AutomationActionResolver(
-                            registry: agentRegistry,
-                            graphPlanner: GraphPlanner(
-                                policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
-                            ),
-                            policy: OrchestratorPolicyEngine(isModelAvailable: foundationModelAvailability)
+                        let resolver = automationCoordinator.makeActionResolver(
+                            agentRegistry: agentRegistry,
+                            graphCoordinator: graphCoordinator
                         )
                         return await resolver.resolveAll(
                             actionDescriptions,
@@ -215,7 +197,7 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: automationActionPatch
             ),
             ContextualHomeAgent(
-                agent: AutomationValidationAgent(),
+                agent: AutomationValidationAgent(policy: automationCoordinator.validationPolicy),
                 makeInput: { context in
                     let draft = try context.requireArtifact(for: ContextArtifactKeys.automationRuleDraft())
                     let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate)
@@ -235,7 +217,7 @@ public enum DefaultAgentRegistryFactory {
                 }
             ),
             ContextualHomeAgent(
-                agent: SmartThingsCompilationAgent(),
+                agent: SmartThingsCompilationAgent(compiler: smartThingsCoordinator.ruleCompiler),
                 makeInput: { context in
                     let draft = try context.requireArtifact(for: ContextArtifactKeys.automationRuleDraft())
                     guard let aggregate = context.scopedValue(for: AutomationRuntimeContextKeys.actionResolutionAggregate) else {

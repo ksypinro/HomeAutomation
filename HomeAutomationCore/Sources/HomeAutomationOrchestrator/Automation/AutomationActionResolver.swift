@@ -24,6 +24,7 @@ public struct AutomationActionResolver: Sendable {
     private let registry: AgentRegistry
     private let graphPlanner: GraphPlanner
     private let policy: OrchestratorPolicyEngine
+    private let subgraphRunner: GraphSubgraphRunner
     private let circuitBreakers: CircuitBreakerRegistry
     private let maxConcurrentActions: Int
 
@@ -31,12 +32,15 @@ public struct AutomationActionResolver: Sendable {
         registry: AgentRegistry,
         graphPlanner: GraphPlanner,
         policy: OrchestratorPolicyEngine,
-        circuitBreakers: CircuitBreakerRegistry = CircuitBreakerRegistry(),
+        scheduler: GraphScheduler,
+        subgraphRunner: GraphSubgraphRunner,
+        circuitBreakers: CircuitBreakerRegistry,
         maxConcurrentActions: Int = Self.defaultMaxConcurrentActions
     ) {
         self.registry = registry
         self.graphPlanner = graphPlanner
         self.policy = policy
+        self.subgraphRunner = subgraphRunner
         self.circuitBreakers = circuitBreakers
         self.maxConcurrentActions = max(1, maxConcurrentActions)
     }
@@ -312,7 +316,7 @@ public struct AutomationActionResolver: Sendable {
             scopeID: actionID,
             inputSummary: text
         )
-        let result = await GraphSubgraphRunner().execute(
+        let result = await subgraphRunner.execute(
             descriptor: descriptor,
             graph: plan.graph,
             registry: registry,

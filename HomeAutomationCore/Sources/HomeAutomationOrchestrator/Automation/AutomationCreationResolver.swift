@@ -32,8 +32,8 @@ public struct AutomationCreationResolver: Sendable {
         automationDraftAgent: AutomationDraftAgent,
         actionResolver: AutomationActionResolver,
         conditionOperandResolver: AutomationConditionOperandResolver,
-        automationValidationAgent: AutomationValidationAgent = AutomationValidationAgent(),
-        smartThingsCompiler: SmartThingsRuleCompiler = SmartThingsRuleCompiler(),
+        automationValidationAgent: AutomationValidationAgent,
+        smartThingsCompiler: SmartThingsRuleCompiler,
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) {
         self.automationDraftAgent = automationDraftAgent

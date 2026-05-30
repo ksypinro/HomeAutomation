@@ -55,7 +55,7 @@ public struct HomeCandidateResolverSupport: Sendable {
     public init(
         shardSize: Int = 20,
         metrics: HomeCandidateResolverMetrics? = nil,
-        promptBuilder: CandidateResolutionPromptBuilder = CandidateResolutionPromptBuilder(),
+        promptBuilder: CandidateResolutionPromptBuilder,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         }

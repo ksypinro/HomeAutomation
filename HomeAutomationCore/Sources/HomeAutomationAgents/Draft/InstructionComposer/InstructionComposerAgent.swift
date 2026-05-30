@@ -21,10 +21,6 @@ public struct InstructionComposerAgent: HomeAgent {
         self.compose = { input in await factory.makePackageWithRAG(from: input) }
     }
 
-    public init(registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry()) {
-        self.init(factory: AgentInstructionSetFactory(toolProvider: AgentToolProvider(registry: registry)))
-    }
-
     public func run(_ input: HomeFinalResolutionInput, context: ResolutionContext) async throws -> HomeModelInstructionPackage {
         logger.debug("[run] Executing InstructionComposerAgent")
         return try await compose(input)

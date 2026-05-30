@@ -17,7 +17,7 @@ public struct DraftRepairAgent: HomeAgent {
         self.repair = repair
     }
 
-    public init(resolver: AgentDraftResolver = AgentDraftResolver()) {
+    public init(resolver: AgentDraftResolver) {
         self.repair = resolver.resolveDraftWithReport
     }
 

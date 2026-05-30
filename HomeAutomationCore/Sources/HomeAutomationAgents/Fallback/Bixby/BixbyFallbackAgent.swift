@@ -387,7 +387,7 @@ public struct BixbyFallbackAgent: HomeAgent {
         self.match = match
     }
 
-    public init(mapper: AgentBixbyFallbackMapper = AgentBixbyFallbackMapper()) {
+    public init(mapper: AgentBixbyFallbackMapper) {
         self.match = { input in
             mapper.matches(text: input.text, devices: input.devices)
         }
