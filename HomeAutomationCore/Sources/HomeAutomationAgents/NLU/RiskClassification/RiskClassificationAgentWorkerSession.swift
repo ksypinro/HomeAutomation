@@ -64,7 +64,14 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
         let session = LanguageModelSession(instructions: Instructions(instructionsText))
         do {
             let prompt = text + hintText
-            let modelResult = try await session.respond(to: Prompt(prompt), generating: HomeRiskClassificationResult.self).content
+            let modelResult = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.riskClassification.rawValue,
+                policyMode: modelCallPolicy.mode.rawValue,
+                modelAvailability: "available",
+                promptCharacterCount: instructionsText.count + prompt.count
+            ) {
+                try await session.respond(to: Prompt(prompt), generating: HomeRiskClassificationResult.self).content
+            }
             logger.debug("[FoundationModelOutput] result: \(String(describing: modelResult), privacy: .public)")
             // Safety floor merge: deterministic high/critical can never be downgraded by model
             let merged = Self.mergeWithSafetyFloor(model: modelResult, rule: fallback)

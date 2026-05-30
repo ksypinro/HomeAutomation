@@ -323,10 +323,17 @@ public struct AutomationConditionOperandResolver: Sendable {
 
         do {
             let session = LanguageModelSession(instructions: Instructions(instructionsText))
-            let fmResult = try await session.respond(
-                to: Prompt(prompt),
-                generating: ConditionOperandFMResult.self
-            ).content
+            let fmResult = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.automationConditionOperandResolution.rawValue,
+                policyMode: "condition-operand-compatibility",
+                modelAvailability: "available",
+                promptCharacterCount: instructionsText.count + prompt.count
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: ConditionOperandFMResult.self
+                ).content
+            }
             logger.debug("[FoundationModelOutput] result: \(String(describing: fmResult), privacy: .public)")
 
             // Validate FM output against device registry

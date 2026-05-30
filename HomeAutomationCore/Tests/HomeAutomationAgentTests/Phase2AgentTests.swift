@@ -494,6 +494,49 @@ struct Phase2AgentTests {
     }
 
     @Test
+    func draftResolverUsesDeterministicFallbackAfterModelFailures() async throws {
+        let device = try await Self.device(id: "bedroom_ac")
+        let package = Self.package(
+            fallbackInput: HomeFinalResolutionInput(
+                rawText: "Turn on bedroom AC",
+                resolutionState: Self.state("Turn on bedroom AC"),
+                hydratedCandidates: [device],
+                aggregation: HomeCandidateAggregationResult(
+                    finalCandidateIDs: [device.id],
+                    needsClarification: false,
+                    confidence: 0.95
+                ),
+                capabilityDecision: HomeCapabilityDecision(
+                    selectedCapability: "switch",
+                    selectedCommand: "on",
+                    targetDeviceID: device.id,
+                    alternatives: [],
+                    evidence: ["Deterministic test capability decision"],
+                    confidence: 0.95
+                )
+            )
+        )
+        let metrics = AgentDraftResolverMetrics()
+        let resolver = AgentDraftResolver(
+            adapterProvider: HomeAdapterModelProvider(
+                adapterSource: HomeStaticAdapterModelSource(configuration: nil)
+            ),
+            metrics: metrics,
+            resolver: ThrowingDraftResolver()
+        )
+
+        let draft = try await resolver.resolveDraft(from: package)
+        let report = try #require(await metrics.lastReport())
+
+        #expect(draft.targetDeviceID == "bedroom_ac")
+        #expect(draft.capability == "switch")
+        #expect(draft.command == "on")
+        #expect(draft.intent == .turnOn)
+        #expect(report.selectedAttemptName == "deterministic/fallback")
+        #expect(report.attempts.last?.outcome == "fallback")
+    }
+
+    @Test
     func draftResolverSkipsRemainingAdapterAttemptsAfterAdapterFailure() async throws {
         let metrics = AgentDraftResolverMetrics()
         let resolver = AgentDraftResolver(
@@ -772,14 +815,15 @@ struct Phase2AgentTests {
         )
     }
 
-    private static func package() -> HomeModelInstructionPackage {
+    private static func package(fallbackInput: HomeFinalResolutionInput? = nil) -> HomeModelInstructionPackage {
         HomeModelInstructionPackage(
             instructions: Instructions("Resolve a test command."),
             instructionText: "Resolve a test command.",
             prompt: "Test command",
             tools: [],
             useAdapter: false,
-            generationMode: .greedy
+            generationMode: .greedy,
+            deterministicFallbackInput: fallbackInput
         )
     }
 }

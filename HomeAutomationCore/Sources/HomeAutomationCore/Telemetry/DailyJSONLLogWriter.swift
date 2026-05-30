@@ -1,9 +1,10 @@
 import Foundation
 
-public actor DailyJSONLLogWriter {
+public actor DailyJSONLLogWriter: TelemetrySink {
     private let directoryURL: URL
     private var currentDateKey: String?
     private var fileHandle: FileHandle?
+    private var sinkStats = TelemetrySinkStats()
 
     public init(directoryURL: URL) {
         self.directoryURL = directoryURL
@@ -13,16 +14,29 @@ public actor DailyJSONLLogWriter {
         try? fileHandle?.close()
     }
 
-    public func append(_ event: HomeAutomationTelemetryEvent) async {
+    public func append(_ event: ObservabilityEvent) async {
         do {
             let line = try Self.render(event)
             let handle = try fileHandle(for: event.timestamp)
             if let data = (line + "\n").data(using: .utf8) {
                 try handle.write(contentsOf: data)
+                sinkStats.appendedCount += 1
             }
         } catch {
-            // Telemetry must never break command resolution.
+            sinkStats.writeFailureCount += 1
         }
+    }
+
+    public func append(_ event: HomeAutomationTelemetryEvent) async {
+        await append(event.observabilityEvent)
+    }
+
+    public func flush() async {
+        try? fileHandle?.synchronize()
+    }
+
+    public func stats() async -> TelemetrySinkStats {
+        sinkStats
     }
 
     private func fileHandle(for date: Date) throws -> FileHandle {
@@ -52,13 +66,17 @@ public actor DailyJSONLLogWriter {
         return handle
     }
 
-    private static func render(_ event: HomeAutomationTelemetryEvent) throws -> String {
+    private static func render(_ event: ObservabilityEvent) throws -> String {
         var object: [String: Any] = [
             "schemaVersion": event.schemaVersion,
             "timestamp": isoFormatter.string(from: event.timestamp),
             "eventType": event.eventType,
-            "payload": event.payload
+            "spanKind": event.spanKind.rawValue,
+            "payload": event.payload.mapValues(anyValue)
         ]
+        set(&object, "traceID", event.traceID)
+        set(&object, "spanID", event.spanID)
+        set(&object, "parentSpanID", event.parentSpanID)
         set(&object, "runID", event.runID)
         set(&object, "operation", event.operation)
         set(&object, "graphID", event.graphID)
@@ -66,21 +84,26 @@ public actor DailyJSONLLogWriter {
         set(&object, "graphNodeID", event.graphNodeID)
         set(&object, "agentID", event.agentID)
         set(&object, "agentInvocationID", event.agentInvocationID)
+        set(&object, "componentKind", event.componentKind)
+        set(&object, "componentID", event.componentID)
         set(&object, "actionID", event.actionID)
         set(&object, "conditionID", event.conditionID)
         set(&object, "attempt", event.attempt)
         set(&object, "runtimeMode", event.runtimeMode)
-        set(&object, "status", event.status)
+        set(&object, "status", event.status?.rawValue)
+        set(&object, "startedAt", event.startedAt.map { isoFormatter.string(from: $0) })
+        set(&object, "completedAt", event.completedAt.map { isoFormatter.string(from: $0) })
         set(&object, "durationMs", event.durationMs)
 
-        promoteList("selectedCandidateIDs", from: event.payload, into: &object)
-        promoteString("selectedCapability", from: event.payload, into: &object)
-        promoteString("selectedCommand", from: event.payload, into: &object)
-        promoteString("targetDeviceID", from: event.payload, into: &object)
-        promoteString("validationResult", from: event.payload, into: &object)
-        promoteString("finalOutcome", from: event.payload, into: &object)
-        promoteString("toolName", from: event.payload, into: &object)
-        promoteString("modelCallID", from: event.payload, into: &object)
+        let stringPayload = event.stringPayload
+        promoteList("selectedCandidateIDs", from: stringPayload, into: &object)
+        promoteString("selectedCapability", from: stringPayload, into: &object)
+        promoteString("selectedCommand", from: stringPayload, into: &object)
+        promoteString("targetDeviceID", from: stringPayload, into: &object)
+        promoteString("validationResult", from: stringPayload, into: &object)
+        promoteString("finalOutcome", from: stringPayload, into: &object)
+        promoteString("toolName", from: stringPayload, into: &object)
+        promoteString("modelCallID", from: stringPayload, into: &object)
 
         let data = try JSONSerialization.data(
             withJSONObject: object,
@@ -102,6 +125,25 @@ public actor DailyJSONLLogWriter {
     private static func set(_ object: inout [String: Any], _ key: String, _ value: Double?) {
         guard let value else { return }
         object[key] = value
+    }
+
+    private static func anyValue(_ value: TelemetryValue) -> Any {
+        switch value {
+        case .string(let value):
+            return value
+        case .int(let value):
+            return value
+        case .double(let value):
+            return value
+        case .bool(let value):
+            return value
+        case .array(let value):
+            return value.map(anyValue)
+        case .object(let value):
+            return value.mapValues(anyValue)
+        case .null:
+            return NSNull()
+        }
     }
 
     private static func promoteString(_ key: String, from payload: [String: String], into object: inout [String: Any]) {
@@ -132,4 +174,3 @@ public actor DailyJSONLLogWriter {
         return formatter
     }
 }
-

@@ -323,14 +323,21 @@ public struct HomeCandidateResolverSupport: Sendable {
             logger.debug("[aggregate] FoundationModelInput System Instructions: \(instructionText, privacy: .public)")
             logger.debug("[aggregate] FoundationModelInput Prompt: \(prompt, privacy: .public)")
 
-            let response = try await session.respond(
-                to: Prompt(prompt),
-                generating: HomeCandidateAggregationResult.self
-            )
-            
-            logger.debug("[aggregate] FoundationModelOutput: \(String(describing: response.content), privacy: .public)")
+            let response = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.candidateRanking.rawValue,
+                policyMode: "candidate-aggregation",
+                modelAvailability: "available",
+                promptCharacterCount: instructionText.count + prompt.count
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: HomeCandidateAggregationResult.self
+                ).content
+            }
+
+            logger.debug("[aggregate] FoundationModelOutput: \(String(describing: response), privacy: .public)")
             return Self.constrainAggregation(
-                response.content,
+                response,
                 allowedIDs: selectedIDs,
                 fallback: deterministic
             )
@@ -344,16 +351,23 @@ public struct HomeCandidateResolverSupport: Sendable {
         prompt: String,
         allowedIDs: [String]
     ) async throws -> HomeCandidateAggregationResult {
-        if let schema = try? Self.aggregationSchema(allowedIDs: allowedIDs) {
-            let response = try await session.respond(to: Prompt(prompt), schema: schema)
-            return try Self.aggregationResult(from: response.content)
-        }
+        try await FoundationModelCallRecorder.record(
+            agentID: AgentID.candidateRanking.rawValue,
+            policyMode: "candidate-aggregation",
+            modelAvailability: "available",
+            promptCharacterCount: prompt.count
+        ) {
+            if let schema = try? Self.aggregationSchema(allowedIDs: allowedIDs) {
+                let response = try await session.respond(to: Prompt(prompt), schema: schema)
+                return try Self.aggregationResult(from: response.content)
+            }
 
-        let response = try await session.respond(
-            to: Prompt(prompt),
-            generating: HomeCandidateAggregationResult.self
-        )
-        return response.content
+            let response = try await session.respond(
+                to: Prompt(prompt),
+                generating: HomeCandidateAggregationResult.self
+            )
+            return response.content
+        }
     }
 
     private func respondForShardSelection(
@@ -361,16 +375,23 @@ public struct HomeCandidateResolverSupport: Sendable {
         prompt: String,
         allowedIDs: [String]
     ) async throws -> HomeCandidateShardSelection {
-        if let schema = try? Self.shardSelectionSchema(allowedIDs: allowedIDs) {
-            let response = try await session.respond(to: Prompt(prompt), schema: schema)
-            return try Self.shardSelection(from: response.content)
-        }
+        try await FoundationModelCallRecorder.record(
+            agentID: AgentID.candidateRanking.rawValue,
+            policyMode: "candidate-shard-selection",
+            modelAvailability: "available",
+            promptCharacterCount: prompt.count
+        ) {
+            if let schema = try? Self.shardSelectionSchema(allowedIDs: allowedIDs) {
+                let response = try await session.respond(to: Prompt(prompt), schema: schema)
+                return try Self.shardSelection(from: response.content)
+            }
 
-        let response = try await session.respond(
-            to: Prompt(prompt),
-            generating: HomeCandidateShardSelection.self
-        )
-        return response.content
+            let response = try await session.respond(
+                to: Prompt(prompt),
+                generating: HomeCandidateShardSelection.self
+            )
+            return response.content
+        }
     }
 
     private static func aggregationSchema(allowedIDs: [String]) throws -> GenerationSchema {

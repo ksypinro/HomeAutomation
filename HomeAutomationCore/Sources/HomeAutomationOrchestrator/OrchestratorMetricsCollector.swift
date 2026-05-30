@@ -9,10 +9,14 @@ public actor OrchestratorMetricsCollector {
     public init() {}
 
     public func store(_ metrics: OrchestratorMetrics) async {
-        last = metrics
-        logger.info("Outcome: \(metrics.outcome)")
+        var enrichedMetrics = metrics
+        if enrichedMetrics.metricsV2 == nil {
+            enrichedMetrics.metricsV2 = RunMetricsV2.derive(from: enrichedMetrics)
+        }
+        last = enrichedMetrics
+        logger.info("Outcome: \(enrichedMetrics.outcome)")
         let metricsJSON: String
-        if let data = try? JSONEncoder().encode(metrics),
+        if let data = try? JSONEncoder().encode(enrichedMetrics),
            let json = String(data: data, encoding: .utf8) {
             metricsJSON = json
         } else {
@@ -22,7 +26,7 @@ public actor OrchestratorMetricsCollector {
             "run.metrics",
             status: "completed",
             payload: [
-                "outcome": metrics.outcome,
+                "outcome": enrichedMetrics.outcome,
                 "metrics": metricsJSON
             ]
         )

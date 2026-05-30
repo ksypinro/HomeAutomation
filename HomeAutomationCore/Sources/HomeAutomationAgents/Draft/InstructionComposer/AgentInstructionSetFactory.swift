@@ -149,7 +149,8 @@ public struct AgentInstructionSetFactory: Sendable {
                 tools: tools,
                 useAdapter: false,
                 generationMode: .greedy,
-                contextBudgetReport: report
+                contextBudgetReport: report,
+                deterministicFallbackInput: input
             )
             fallback = package
             if budgeter.isWithinBudget(report) {
@@ -173,7 +174,8 @@ public struct AgentInstructionSetFactory: Sendable {
                 ragExampleSectionCount: 0,
                 ragBixbySectionCount: 0,
                 selectedCompactionLevel: "minimal"
-            )
+            ),
+            deterministicFallbackInput: input
         )
     }
 

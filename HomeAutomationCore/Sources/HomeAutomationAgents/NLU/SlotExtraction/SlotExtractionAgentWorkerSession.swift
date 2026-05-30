@@ -77,12 +77,18 @@ public struct SlotExtractionAgentWorkerSession: Sendable {
                 result = try await modelExtract(modelPrompt + hintText)
             } else {
                 let session = LanguageModelSession(instructions: Instructions(instructionsText))
-                result = try await session
-                    .respond(
+                result = try await FoundationModelCallRecorder.record(
+                    agentID: AgentID.slotExtraction.rawValue,
+                    policyMode: modelCallPolicy.mode.rawValue,
+                    modelAvailability: "available",
+                    promptCharacterCount: instructionsText.count + modelPrompt.count + hintText.count
+                ) {
+                    try await session.respond(
                         to: Prompt(modelPrompt + hintText),
                         generating: HomeSlotExtractionResult.self
                     )
                     .content
+                }
             }
             logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
 

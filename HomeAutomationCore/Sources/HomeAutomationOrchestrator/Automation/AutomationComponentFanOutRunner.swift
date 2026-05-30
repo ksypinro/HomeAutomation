@@ -77,6 +77,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
             return outcomes
         }
 
+        let aggregationStartedAt = Date()
         let trigger = outcomes.compactMap(\.trigger).first?.trigger
         let actionResults = outcomes.compactMap(\.action)
             .sorted { $0.component.order < $1.component.order }
@@ -96,7 +97,12 @@ public struct AutomationComponentFanOutRunner: Sendable {
                 "triggerCount": plan.trigger == nil ? "0" : "1",
                 "actionCount": String(plan.actions.count),
                 "conditionCount": String(plan.conditions.count),
-                "maxConcurrentComponentsStarted": String((plan.trigger == nil ? 0 : 1) + plan.actions.count + plan.conditions.count)
+                "maxConcurrentComponents": String(Self.maxConcurrentComponents(outcomes.map(\.timing))),
+                "maxConcurrentComponentsStarted": String(Self.maxConcurrentComponents(outcomes.map(\.timing))),
+                "componentStartSpreadMs": String(Self.startSpreadMs(outcomes.map(\.timing))),
+                "componentFanOutDurationMs": String(Date().timeIntervalSince(startedAt) * 1_000),
+                "componentAggregationDurationMs": String(Date().timeIntervalSince(aggregationStartedAt) * 1_000),
+                "failedComponentIDs": outcomes.filter { $0.timing.status != .completed }.map(\.timing.id).joined(separator: ",")
             ]
         )
 
@@ -116,6 +122,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> AutomationComponentOutcome {
+        let startedAt = Date()
         await publishComponentEvent(componentID: component.id, kind: "trigger", status: .running, eventBus: eventBus, runID: runID)
         let telemetryContext = componentTelemetryContext(
             componentID: component.id,
@@ -144,8 +151,21 @@ public struct AutomationComponentFanOutRunner: Sendable {
                 )
             }
         }
-        await publishComponentEvent(componentID: component.id, kind: "trigger", status: .completed, eventBus: eventBus, runID: runID)
-        return .trigger(component: component, result: output)
+        let status: OrchestratorPipelineEvent.EventStatus = output.trigger == nil ? .failed : .completed
+        await publishComponentEvent(componentID: component.id, kind: "trigger", status: status, eventBus: eventBus, runID: runID)
+        let completedAt = Date()
+        await logComponentCompletion(
+            telemetryContext: telemetryContext,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            status: status,
+            payload: ["resolved": .bool(output.trigger != nil)]
+        )
+        return .trigger(
+            component: component,
+            result: output,
+            timing: AutomationComponentTiming(id: component.id, kind: "trigger", startedAt: startedAt, completedAt: completedAt, status: status)
+        )
     }
 
     private func resolveAction(
@@ -154,6 +174,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> AutomationComponentOutcome {
+        let startedAt = Date()
         await publishComponentEvent(componentID: component.id, kind: "action", status: .running, eventBus: eventBus, runID: runID)
         let telemetryContext = componentTelemetryContext(
             componentID: component.id,
@@ -181,7 +202,23 @@ public struct AutomationComponentFanOutRunner: Sendable {
             eventBus: eventBus,
             runID: runID
         )
-        return .action(component: component, result: result)
+        let completedAt = Date()
+        let status: OrchestratorPipelineEvent.EventStatus = result.isResolved ? .completed : .failed
+        await logComponentCompletion(
+            telemetryContext: telemetryContext,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            status: status,
+            payload: [
+                "resolved": .bool(result.isResolved),
+                "selectedCandidateIDs": .string(result.selectedCandidateIDs.joined(separator: ","))
+            ]
+        )
+        return .action(
+            component: component,
+            result: result,
+            timing: AutomationComponentTiming(id: component.id, kind: "action", startedAt: startedAt, completedAt: completedAt, status: status)
+        )
     }
 
     private func resolveCondition(
@@ -192,6 +229,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
         eventBus: AgentEventBus,
         runID: UUID
     ) async -> AutomationComponentOutcome {
+        let startedAt = Date()
         await publishComponentEvent(componentID: component.id, kind: "condition", status: .running, eventBus: eventBus, runID: runID)
         let telemetryContext = componentTelemetryContext(
             componentID: component.id,
@@ -231,7 +269,23 @@ public struct AutomationComponentFanOutRunner: Sendable {
             eventBus: eventBus,
             runID: runID
         )
-        return .condition(component: component, result: result)
+        let completedAt = Date()
+        let status: OrchestratorPipelineEvent.EventStatus = result.condition == nil ? .failed : .completed
+        await logComponentCompletion(
+            telemetryContext: telemetryContext,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            status: status,
+            payload: [
+                "resolved": .bool(result.condition != nil),
+                "confidence": .double(result.confidence)
+            ]
+        )
+        return .condition(
+            component: component,
+            result: result,
+            timing: AutomationComponentTiming(id: component.id, kind: "condition", startedAt: startedAt, completedAt: completedAt, status: status)
+        )
     }
 
     private func componentTelemetryContext(
@@ -244,6 +298,9 @@ public struct AutomationComponentFanOutRunner: Sendable {
     ) -> HomeAutomationTelemetryContext {
         (HomeAutomationTelemetryScope.current ?? HomeAutomationTelemetryContext())
             .merging(
+                spanID: TelemetryTraceContext.makeSpanID(),
+                parentSpanID: HomeAutomationTelemetryScope.current?.spanID,
+                spanKind: .automationComponent,
                 runID: runID.uuidString,
                 operation: HomeAutomationOperationKind.automationCreation.rawValue,
                 graphID: "automation-component-fan-out",
@@ -251,10 +308,31 @@ public struct AutomationComponentFanOutRunner: Sendable {
                 graphNodeID: AgentID.automationComponentFanOut.rawValue,
                 agentID: agentID.rawValue,
                 agentInvocationID: "\(String(runID.uuidString.prefix(8)))-\(kind)-\(componentID)-\(agentID.rawValue)",
+                componentKind: kind,
+                componentID: componentID,
                 actionID: actionID,
                 conditionID: conditionID,
                 runtimeMode: "graph"
             )
+    }
+
+    private func logComponentCompletion(
+        telemetryContext: HomeAutomationTelemetryContext,
+        startedAt: Date,
+        completedAt: Date,
+        status: OrchestratorPipelineEvent.EventStatus,
+        payload: [String: TelemetryValue]
+    ) async {
+        await HomeAutomationTelemetry.shared.log(
+            "automation.component.completed",
+            context: telemetryContext,
+            status: status == .completed ? .completed : .failed,
+            spanKind: .automationComponent,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            durationMs: completedAt.timeIntervalSince(startedAt) * 1_000,
+            payload: TelemetryPayload(values: payload)
+        )
     }
 
     private func publishComponentEvent(
@@ -285,38 +363,81 @@ public struct AutomationComponentFanOutRunner: Sendable {
         }
         return result
     }
+
+    private static func maxConcurrentComponents(_ timings: [AutomationComponentTiming]) -> Int {
+        let events = timings.flatMap { timing in
+            [
+                (date: timing.startedAt, delta: 1),
+                (date: timing.completedAt, delta: -1)
+            ]
+        }
+        .sorted {
+            if $0.date == $1.date { return $0.delta > $1.delta }
+            return $0.date < $1.date
+        }
+        var current = 0
+        var maximum = 0
+        for event in events {
+            current += event.delta
+            maximum = max(maximum, current)
+        }
+        return maximum
+    }
+
+    private static func startSpreadMs(_ timings: [AutomationComponentTiming]) -> Double {
+        guard let first = timings.map(\.startedAt).min(),
+              let last = timings.map(\.startedAt).max() else {
+            return 0
+        }
+        return last.timeIntervalSince(first) * 1_000
+    }
 }
 
 private enum AutomationComponentOutcome: Sendable {
-    case trigger(component: AutomationTriggerComponent, result: AutomationTriggerResolutionOutput)
-    case action(component: AutomationActionComponent, result: AutomationActionResolutionResult)
-    case condition(component: AutomationConditionComponent, result: AutomationConditionClauseResolutionResult)
+    case trigger(component: AutomationTriggerComponent, result: AutomationTriggerResolutionOutput, timing: AutomationComponentTiming)
+    case action(component: AutomationActionComponent, result: AutomationActionResolutionResult, timing: AutomationComponentTiming)
+    case condition(component: AutomationConditionComponent, result: AutomationConditionClauseResolutionResult, timing: AutomationComponentTiming)
 
     var trigger: (component: AutomationTriggerComponent, trigger: HomeAutomationTrigger?)? {
-        if case .trigger(let component, let result) = self { return (component, result.trigger) }
+        if case .trigger(let component, let result, _) = self { return (component, result.trigger) }
         return nil
     }
 
     var action: (component: AutomationActionComponent, result: AutomationActionResolutionResult)? {
-        if case .action(let component, let result) = self { return (component, result) }
+        if case .action(let component, let result, _) = self { return (component, result) }
         return nil
     }
 
     var condition: (component: AutomationConditionComponent, result: AutomationConditionClauseResolutionResult)? {
-        if case .condition(let component, let result) = self { return (component, result) }
+        if case .condition(let component, let result, _) = self { return (component, result) }
         return nil
+    }
+
+    var timing: AutomationComponentTiming {
+        switch self {
+        case .trigger(_, _, let timing), .action(_, _, let timing), .condition(_, _, let timing):
+            return timing
+        }
     }
 
     var unsupportedFragments: [String] {
         switch self {
-        case .trigger(_, let result):
+        case .trigger(_, let result, _):
             return result.unsupportedFragments
-        case .condition(_, let result) where result.condition == nil:
+        case .condition(_, let result, _) where result.condition == nil:
             return ["unresolved condition: \(result.rawText)"]
-        case .action(_, let result) where !result.isResolved:
+        case .action(_, let result, _) where !result.isResolved:
             return [result.resolution.displaySummary]
         case .action, .condition:
             return []
         }
     }
+}
+
+private struct AutomationComponentTiming: Sendable {
+    let id: String
+    let kind: String
+    let startedAt: Date
+    let completedAt: Date
+    let status: OrchestratorPipelineEvent.EventStatus
 }

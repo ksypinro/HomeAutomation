@@ -24,6 +24,14 @@ let package = Package(
         .library(
             name: "HomeAutomationOrchestrator",
             targets: ["HomeAutomationOrchestrator"]
+        ),
+        .library(
+            name: "HomeAutomationEvaluation",
+            targets: ["HomeAutomationEvaluation"]
+        ),
+        .executable(
+            name: "home-automation-eval",
+            targets: ["HomeAutomationEvalCLI"]
         )
     ],
     targets: [
@@ -50,6 +58,21 @@ let package = Package(
                 "HomeAutomationCore",
                 "HomeAutomationRAG",
                 "HomeAutomationAgents"
+            ]
+        ),
+        .target(
+            name: "HomeAutomationEvaluation",
+            dependencies: [
+                "HomeAutomationCore",
+                "HomeAutomationRAG",
+                "HomeAutomationAgents",
+                "HomeAutomationOrchestrator"
+            ]
+        ),
+        .executableTarget(
+            name: "HomeAutomationEvalCLI",
+            dependencies: [
+                "HomeAutomationEvaluation"
             ]
         ),
         .testTarget(
@@ -79,6 +102,13 @@ let package = Package(
                 "HomeAutomationAgents",
                 "HomeAutomationCore",
                 "HomeAutomationOrchestrator"
+            ]
+        ),
+        .testTarget(
+            name: "HomeAutomationEvaluationTests",
+            dependencies: [
+                "HomeAutomationCore",
+                "HomeAutomationEvaluation"
             ]
         )
     ]

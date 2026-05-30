@@ -17,17 +17,18 @@ extension GraphScheduler {
         await HomeAutomationTelemetry.shared.log(
             "context.snapshot",
             context: HomeAutomationTelemetryScope.current?.merging(
+                spanKind: .event,
                 runID: runID.uuidString,
                 operation: graph.goal.rawValue,
                 graphID: graph.id,
                 stage: stage,
                 runtimeMode: "graph"
             ),
-            status: "completed",
+            status: .completed,
             durationMs: duration * 1_000,
-            payload: [
-                "contextKeyCount": String(context.contextKeyCount)
-            ]
+            payload: TelemetryPayload(values: [
+                "contextKeyCount": .int(context.contextKeyCount)
+            ])
         )
         return context
     }

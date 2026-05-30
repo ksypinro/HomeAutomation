@@ -10,8 +10,14 @@ struct Catalog: Decodable {
 
 final class CatalogTests: XCTestCase {
     func testCatalogDecoding() throws {
-        // Adjust path according to how swift test runs (from the root of the package)
-        let fileURL = URL(fileURLWithPath: "Sources/HomeAutomationCore/Resources/home_automation_capability_catalog.json")
+        // Resolve path relative to the test source file so it works in both swift test and xcodebuild
+        let thisFileURL = URL(fileURLWithPath: #filePath)
+        let packageRootURL = thisFileURL
+            .deletingLastPathComponent() // HomeAutomationAgentTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // HomeAutomationCore (Package Root)
+        let fileURL = packageRootURL
+            .appendingPathComponent("Sources/HomeAutomationCore/Resources/home_automation_capability_catalog.json")
         guard let data = try? Data(contentsOf: fileURL) else {
             XCTFail("Catalog file not found")
             return

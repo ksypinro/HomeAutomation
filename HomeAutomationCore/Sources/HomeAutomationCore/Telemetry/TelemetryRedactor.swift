@@ -37,6 +37,44 @@ public struct TelemetryRedactor: Sendable {
         }
     }
 
+    public func redact(_ payload: TelemetryPayload) -> TelemetryPayload {
+        var redactedValues: [String: TelemetryValue] = [:]
+        var redactedPrivacy = payload.privacy
+        for key in payload.values.keys {
+            let value = payload.values[key] ?? .null
+            let privacy = payload.privacy[key]
+            let stringValue = value.stringValue
+            let redactedString = redactSecrets(stringValue)
+            let characterCount = redactedString.count
+            let hash = stableHash(redactedString)
+
+            switch mode {
+            case .metadataOnly:
+                redactedValues[key] = .string("<metadata-only>")
+                redactedValues["\(key)CharacterCount"] = .int(characterCount)
+                redactedValues["\(key)Truncated"] = .bool(true)
+                redactedValues["\(key)Hash"] = .string(hash)
+            case .cappedPayload:
+                let capped = cap(redactedString)
+                redactedValues[key] = valueFromOriginal(value, replacingStringWith: capped.value)
+                redactedValues["\(key)CharacterCount"] = .int(characterCount)
+                redactedValues["\(key)Truncated"] = .bool(capped.truncated)
+                redactedValues["\(key)Hash"] = .string(hash)
+            case .fullPayload:
+                redactedValues[key] = valueFromOriginal(value, replacingStringWith: redactedString)
+                redactedValues["\(key)CharacterCount"] = .int(characterCount)
+                redactedValues["\(key)Truncated"] = .bool(false)
+                redactedValues["\(key)Hash"] = .string(hash)
+            }
+            if let privacy {
+                redactedPrivacy["\(key)CharacterCount"] = privacy
+                redactedPrivacy["\(key)Truncated"] = privacy
+                redactedPrivacy["\(key)Hash"] = .internalID
+            }
+        }
+        return TelemetryPayload(values: redactedValues, privacy: redactedPrivacy)
+    }
+
     private func cap(_ value: String) -> (value: String, truncated: Bool) {
         guard maxPayloadCharacters > 0, value.count > maxPayloadCharacters else {
             return (value, false)
@@ -68,5 +106,13 @@ public struct TelemetryRedactor: Sendable {
         }
         return String(hash, radix: 16)
     }
-}
 
+    private func valueFromOriginal(_ original: TelemetryValue, replacingStringWith string: String) -> TelemetryValue {
+        switch original {
+        case .string:
+            return .string(string)
+        case .int, .double, .bool, .array, .object, .null:
+            return original
+        }
+    }
+}

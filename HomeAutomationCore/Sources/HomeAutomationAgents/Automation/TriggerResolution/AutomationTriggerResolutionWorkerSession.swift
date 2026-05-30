@@ -40,10 +40,17 @@ public struct AutomationTriggerResolutionWorkerSession: Sendable {
             let session = LanguageModelSession(
                 instructions: Instructions(AutomationTriggerResolutionPromptBuilder.instructions)
             )
-            let fmOutput = try await session.respond(
-                to: Prompt(prompt),
-                generating: AutomationTriggerResolutionFMOutput.self
-            ).content
+            let fmOutput = try await FoundationModelCallRecorder.record(
+                agentID: AgentID.automationTriggerResolution.rawValue,
+                policyMode: "model-first-with-fallback",
+                modelAvailability: "available",
+                promptCharacterCount: AutomationTriggerResolutionPromptBuilder.instructions.count + prompt.count
+            ) {
+                try await session.respond(
+                    to: Prompt(prompt),
+                    generating: AutomationTriggerResolutionFMOutput.self
+                ).content
+            }
             let result = try output(from: fmOutput, id: input.component.id, fallback: fallback)
             logger.debug("[FoundationModelOutput] \(String(describing: result), privacy: .public)")
             return result
