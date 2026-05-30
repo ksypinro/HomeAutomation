@@ -26,8 +26,8 @@ jobs:
           xcodebuild -version
       - name: Swift build
         run: swift build
-      - name: Swift test on iOS Simulator (iPhone 17 Pro Max, iOS 26, Apple Intelligence enabled)
-        run: xcodebuild test -scheme HomeAutomationCore-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max,OS=26.1'
+      - name: Swift test on iOS Simulator (iPad Pro 13-inch (M5), iOS 26.5)
+        run: xcodebuild test -scheme HomeAutomationCore-Package -destination 'platform=iOS Simulator,id=3CD16B37-4FCA-4F70-8009-7482209378D8'
       - name: Deterministic evaluation
         run: swift run home-automation-eval --mode deterministic --suite all --output .build/evaluation
       - name: Upload deterministic evaluation artifacts
