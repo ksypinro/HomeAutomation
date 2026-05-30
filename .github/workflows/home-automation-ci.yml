@@ -14,12 +14,16 @@ on:
 
 jobs:
   build-test-eval:
-    runs-on: macos-15
+    runs-on: macos-26
     defaults:
       run:
         working-directory: HomeAutomationCore
     steps:
       - uses: actions/checkout@v4
+      - name: Toolchain diagnostics
+        run: |
+          swift --version
+          xcodebuild -version
       - name: Swift build
         run: swift build
       - name: Swift test
@@ -34,13 +38,17 @@ jobs:
           path: HomeAutomationCore/.build/evaluation
 
   live-eval:
-    runs-on: macos-15
+    runs-on: macos-26
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live_eval == 'true' }}
     defaults:
       run:
         working-directory: HomeAutomationCore
     steps:
       - uses: actions/checkout@v4
+      - name: Toolchain diagnostics
+        run: |
+          swift --version
+          xcodebuild -version
       - name: Live FoundationModel evaluation
         env:
           HOME_AUTOMATION_EVAL_LIVE: "1"
