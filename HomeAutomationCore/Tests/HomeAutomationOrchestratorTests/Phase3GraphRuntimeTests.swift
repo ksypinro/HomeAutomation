@@ -326,6 +326,27 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
+    func graphRuntimeResolvesTelevisionChannelCommand() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        let result = try await orchestrator.resolve("move to next channel in living room TV", executeLowRiskCommands: false)
+
+        #expect(result.draft?.targetDeviceID == "living_room_tv")
+        #expect(result.draft?.capability == "channel")
+        #expect(result.draft?.command == "channelUp")
+        guard case .readyToExecute(let plan) = result.resolution else {
+            Issue.record("Expected TV channel command to resolve to a ready execution plan.")
+            return
+        }
+        #expect(plan.steps.first?.deviceID == "living_room_tv")
+        #expect(plan.steps.first?.capability == "channel")
+        #expect(plan.steps.first?.command == "channelUp")
+    }
+
+    @Test
     func directCommandMatrixResolvesThroughGraphRuntime() async throws {
         let commands = [
             "Turn on the TV",

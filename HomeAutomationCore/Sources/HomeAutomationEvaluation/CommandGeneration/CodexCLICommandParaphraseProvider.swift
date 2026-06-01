@@ -174,6 +174,7 @@ public struct CodexCLICommandParaphraseRunner: CodexCLICommandParaphraseRunning 
         prompt: String,
         requestedCount: Int
     ) throws -> [String] {
+        #if os(macOS)
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory
             .appendingPathComponent("home-automation-codex-\(UUID().uuidString)", isDirectory: true)
@@ -256,6 +257,9 @@ public struct CodexCLICommandParaphraseRunner: CodexCLICommandParaphraseRunning 
         let output = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
         let parseSource = output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stdout : output
         return try parseCommands(from: parseSource)
+        #else
+        throw CommandParaphraseProviderError.codexCLIUnavailable("Codex CLI is only supported on macOS.")
+        #endif
     }
 
     private static func writeOutputSchema(to url: URL, requestedCount: Int) throws {

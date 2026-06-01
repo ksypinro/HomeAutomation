@@ -148,6 +148,10 @@ struct AgentRuleIntent {
             )
             return
         }
+        if let mediaIntent = mediaIntent(for: normalized, firstNumber: firstNumber) {
+            self = mediaIntent
+            return
+        }
         if AgentTextParser.containsAny(normalized, ["turn on", "switch on", "power on"]) {
             self.init(
                 family: .power,
@@ -172,7 +176,7 @@ struct AgentRuleIntent {
         return nil
     }
 
-    private init(
+    init(
         family: HomeAutomationIntentFamily,
         intent: HomeAutomationIntent,
         capabilityPreferences: [AgentCapabilityCommand],
@@ -197,6 +201,167 @@ struct AgentRuleIntent {
             parameters: parameters
         )
     }
+}
+
+private func mediaIntent(for normalized: String, firstNumber: Int?) -> AgentRuleIntent? {
+    let deviceTypeHints = Set(AgentTextParser.deviceTypes(for: normalized).map(\.agentNormalizedHomeTokenString))
+        .union(["tv", "television", "speaker", "receiver", "set top box", "audio system"])
+
+    if normalized.contains("channel") {
+        if AgentTextParser.containsAny(normalized, ["next channel", "channel up", "increase channel", "raise channel", "move to next channel"]) {
+            return AgentRuleIntent(
+                family: .media,
+                intent: .increaseValue,
+                capabilityPreferences: [AgentCapabilityCommand(capability: "channel", command: "channelUp")],
+                parameters: [],
+                deviceTypeHints: deviceTypeHints
+            )
+        }
+        if AgentTextParser.containsAny(normalized, ["previous channel", "prev channel", "last channel", "channel down", "decrease channel", "lower channel", "move to previous channel"]) {
+            return AgentRuleIntent(
+                family: .media,
+                intent: .decreaseValue,
+                capabilityPreferences: [AgentCapabilityCommand(capability: "channel", command: "channelDown")],
+                parameters: [],
+                deviceTypeHints: deviceTypeHints
+            )
+        }
+        if let firstNumber {
+            return AgentRuleIntent(
+                family: .media,
+                intent: .setValue,
+                capabilityPreferences: [AgentCapabilityCommand(capability: "channel", command: "setChannel")],
+                parameters: [HomeResolvedParameter(name: "channel", numericValue: Double(firstNumber), confidence: 0.9)],
+                deviceTypeHints: deviceTypeHints
+            )
+        }
+    }
+
+    if let inputSource = mediaInputSource(from: normalized) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .setValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "mediaInputSource", command: "setInputSource")],
+            parameters: [HomeResolvedParameter(name: "inputSource", value: inputSource, confidence: 0.9)],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+
+    if normalized.contains("unmute") {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .setValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "audioVolume", command: "unmute")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if normalized.contains("mute") {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .setValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "audioVolume", command: "mute")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if AgentTextParser.containsAny(normalized, ["volume up", "turn up", "increase volume", "raise volume", "louder"]) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .increaseValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "audioVolume", command: "volumeUp")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if AgentTextParser.containsAny(normalized, ["volume down", "turn down", "decrease volume", "lower volume", "quieter"]) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .decreaseValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "audioVolume", command: "volumeDown")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if normalized.contains("volume"), let firstNumber {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .setValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "audioVolume", command: "setVolume")],
+            parameters: [HomeResolvedParameter(name: "volume", numericValue: Double(firstNumber), confidence: 0.9)],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+
+    if AgentTextParser.containsAny(normalized, ["fast forward", "skip ahead"]) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .setValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "mediaPlayback", command: "fastForward")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if AgentTextParser.containsAny(normalized, ["rewind", "go back"]) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .setValue,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "mediaPlayback", command: "rewind")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if normalized.contains("pause") {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .pause,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "mediaPlayback", command: "pause")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if AgentTextParser.containsAny(normalized, ["play", "resume", "continue"]) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .start,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "mediaPlayback", command: "play")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+    if normalized.contains("stop") && AgentTextParser.containsAny(normalized, ["tv", "television", "speaker", "media", "playback"]) {
+        return AgentRuleIntent(
+            family: .media,
+            intent: .stop,
+            capabilityPreferences: [AgentCapabilityCommand(capability: "mediaPlayback", command: "stop")],
+            parameters: [],
+            deviceTypeHints: deviceTypeHints
+        )
+    }
+
+    return nil
+}
+
+private func mediaInputSource(from normalized: String) -> String? {
+    guard AgentTextParser.containsAny(normalized, ["input", "source", "hdmi", "usb", " av "]) else {
+        return nil
+    }
+    if normalized.contains("hdmi 1") || normalized.contains("hdmi1") {
+        return "HDMI1"
+    }
+    if normalized.contains("hdmi 2") || normalized.contains("hdmi2") {
+        return "HDMI2"
+    }
+    if normalized.contains("usb") {
+        return "USB"
+    }
+    if normalized.contains(" av ") || normalized.hasSuffix(" av") || normalized.hasPrefix("av ") {
+        return "AV"
+    }
+    if normalized.contains("input tv") || normalized.contains("input to tv") || normalized.contains("source tv") || normalized.contains("source to tv") {
+        return "TV"
+    }
+    return nil
 }
 
 private func statusCapabilityPreferences(for normalized: String) -> [AgentCapabilityCommand] {

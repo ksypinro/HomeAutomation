@@ -21,7 +21,10 @@ public struct ExecutionPlanningInput: Sendable {
 /// - **Routines**: Multi-step plans that expand routine definitions into individual device commands
 public enum AgentExecutionPlanner {
     public static func isRelativeChange(_ draft: HomeCommandDraft) -> Bool {
-        draft.intent == .increaseValue ||
+        if ["channelUp", "channelDown", "volumeUp", "volumeDown"].contains(draft.command) {
+            return false
+        }
+        return draft.intent == .increaseValue ||
             draft.intent == .decreaseValue ||
             draft.command == "increaseValue" ||
             draft.command == "decreaseValue"

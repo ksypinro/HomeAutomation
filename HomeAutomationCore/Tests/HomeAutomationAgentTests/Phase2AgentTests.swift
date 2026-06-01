@@ -559,6 +559,46 @@ struct Phase2AgentTests {
     }
 
     @Test
+    func draftResolverBuildsInputSourceParameterForTelevisionFallback() async throws {
+        let device = try await Self.device(id: "living_room_tv")
+        let package = Self.package(
+            fallbackInput: HomeFinalResolutionInput(
+                rawText: "Set living room TV input to HDMI 1",
+                resolutionState: Self.state("Set living room TV input to HDMI 1"),
+                hydratedCandidates: [device],
+                aggregation: HomeCandidateAggregationResult(
+                    finalCandidateIDs: [device.id],
+                    needsClarification: false,
+                    confidence: 0.95
+                ),
+                capabilityDecision: HomeCapabilityDecision(
+                    selectedCapability: "mediaInputSource",
+                    selectedCommand: "setInputSource",
+                    targetDeviceID: device.id,
+                    alternatives: [],
+                    evidence: ["Deterministic test media input decision"],
+                    confidence: 0.95
+                )
+            )
+        )
+        let resolver = AgentDraftResolver(
+            adapterProvider: HomeAdapterModelProvider(
+                adapterSource: HomeStaticAdapterModelSource(configuration: nil)
+            ),
+            resolver: ThrowingDraftResolver()
+        )
+
+        let draft = try await resolver.resolveDraft(from: package)
+
+        #expect(draft.targetDeviceID == "living_room_tv")
+        #expect(draft.capability == "mediaInputSource")
+        #expect(draft.command == "setInputSource")
+        #expect(draft.intent == .setValue)
+        #expect(draft.parameters.first?.name == "inputSource")
+        #expect(draft.parameters.first?.value == "HDMI1")
+    }
+
+    @Test
     func draftResolverSkipsRemainingAdapterAttemptsAfterAdapterFailure() async throws {
         let metrics = AgentDraftResolverMetrics()
         let resolver = AgentDraftResolver(
@@ -796,6 +836,43 @@ struct Phase2AgentTests {
         #expect(decision.confidence >= 0.9)
         #expect(!decision.evidence.isEmpty)
         #expect(decision.alternatives.contains { $0.capability == "switch" && $0.command == "on" })
+    }
+
+    @Test
+    func capabilityResolutionAgentSelectsTelevisionMediaCapabilities() async throws {
+        let agent = CapabilityResolutionAgent()
+        let tv = try await Self.device(id: "living_room_tv")
+        let cases: [(text: String, capability: String, command: String)] = [
+            ("move to next channel in living room TV", "channel", "channelUp"),
+            ("go to channel 101 on living room TV", "channel", "setChannel"),
+            ("turn up the volume on living room TV", "audioVolume", "volumeUp"),
+            ("mute living room TV", "audioVolume", "mute"),
+            ("play living room TV", "mediaPlayback", "play"),
+            ("pause living room TV", "mediaPlayback", "pause"),
+            ("set living room TV input to HDMI 1", "mediaInputSource", "setInputSource")
+        ]
+
+        for testCase in cases {
+            let decision = try await agent.run(
+                CapabilityResolutionInput(
+                    rawText: testCase.text,
+                    resolutionState: Self.state(testCase.text),
+                    hydratedCandidates: [tv],
+                    aggregation: HomeCandidateAggregationResult(
+                        finalCandidateIDs: [tv.id],
+                        needsClarification: false,
+                        confidence: 0.95
+                    ),
+                    knowledgeSnippets: []
+                ),
+                context: Self.context(text: testCase.text)
+            )
+
+            #expect(decision.targetDeviceID == "living_room_tv")
+            #expect(decision.selectedCapability == testCase.capability)
+            #expect(decision.selectedCommand == testCase.command)
+            #expect(decision.confidence >= 0.8)
+        }
     }
 
     private static func context(text: String = "turn on the light") -> ResolutionContext {

@@ -208,7 +208,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
 
         let supportedCommands = device.supportedCommands[capability, default: HomeCapabilityRegistry.supportedCommands(for: capability)]
         guard device.capabilities.contains(capability),
-              supportedCommands.contains(command) else {
+              command == "getStatus" || supportedCommands.contains(command) else {
             return nil
         }
 
@@ -345,7 +345,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             return .unlock
         case "run":
             return .runRoutine
-        case "start", "startStream":
+        case "start", "startStream", "play":
             return .start
         case "stop", "stopStream":
             return .stop
@@ -358,6 +358,9 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         case "decreaseValue", "volumeDown", "channelDown":
             return .decreaseValue
         default:
+            if ["mute", "unmute", "fastForward", "rewind", "setInputSource", "setChannel", "launchApp"].contains(command) {
+                return .setValue
+            }
             if state.intent.topFamilies.contains(.statusQuery) {
                 return .getStatus
             }
@@ -370,6 +373,16 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
 
     private static func parameters(for command: String, state: HomeResolutionState) -> [HomeResolvedParameter] {
         guard commandRequiresParameters(command) else { return [] }
+
+        if command == "setInputSource", let inputSource = mediaInputSource(from: state.rawText) {
+            return [
+                HomeResolvedParameter(
+                    name: "inputSource",
+                    value: inputSource,
+                    confidence: state.slots.confidence
+                )
+            ]
+        }
 
         let valueParameters = state.slots.values.map {
             HomeResolvedParameter(
@@ -403,6 +416,26 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         default:
             return false
         }
+    }
+
+    private static func mediaInputSource(from text: String) -> String? {
+        let normalized = text.agentNormalizedHomeTokenString
+        if normalized.contains("hdmi 1") || normalized.contains("hdmi1") {
+            return "HDMI1"
+        }
+        if normalized.contains("hdmi 2") || normalized.contains("hdmi2") {
+            return "HDMI2"
+        }
+        if normalized.contains("usb") {
+            return "USB"
+        }
+        if normalized.contains(" av ") || normalized.hasSuffix(" av") || normalized.hasPrefix("av ") {
+            return "AV"
+        }
+        if normalized.contains("input tv") || normalized.contains("input to tv") || normalized.contains("source tv") || normalized.contains("source to tv") {
+            return "TV"
+        }
+        return nil
     }
 }
 
