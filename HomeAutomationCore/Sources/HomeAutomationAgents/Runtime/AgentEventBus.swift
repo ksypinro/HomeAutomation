@@ -15,8 +15,16 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
     public let traceID: String?
     public let spanID: String?
     public let parentSpanID: String?
+    public let graphID: String?
+    public let graphNodeID: String?
+    public let agentInvocationID: String?
+    public let agentSessionID: String?
+    public let agentRunID: Int?
     public let componentKind: String?
     public let componentID: String?
+    public let actionID: String?
+    public let conditionID: String?
+    public let runtimeMode: String?
     public let status: EventStatus
     public let detail: String
     public let timestamp: Date
@@ -37,8 +45,16 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
         traceID: String? = HomeAutomationTelemetryScope.current?.traceID,
         spanID: String? = HomeAutomationTelemetryScope.current?.spanID,
         parentSpanID: String? = HomeAutomationTelemetryScope.current?.parentSpanID,
+        graphID: String? = HomeAutomationTelemetryScope.current?.graphID,
+        graphNodeID: String? = HomeAutomationTelemetryScope.current?.graphNodeID,
+        agentInvocationID: String? = HomeAutomationTelemetryScope.current?.agentInvocationID,
+        agentSessionID: String? = HomeAutomationTelemetryScope.current?.agentSessionID,
+        agentRunID: Int? = HomeAutomationTelemetryScope.current?.agentRunID,
         componentKind: String? = HomeAutomationTelemetryScope.current?.componentKind,
         componentID: String? = HomeAutomationTelemetryScope.current?.componentID,
+        actionID: String? = HomeAutomationTelemetryScope.current?.actionID,
+        conditionID: String? = HomeAutomationTelemetryScope.current?.conditionID,
+        runtimeMode: String? = HomeAutomationTelemetryScope.current?.runtimeMode,
         status: EventStatus,
         detail: String = ""
     ) {
@@ -50,8 +66,16 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
         self.traceID = traceID
         self.spanID = spanID
         self.parentSpanID = parentSpanID
+        self.graphID = graphID
+        self.graphNodeID = graphNodeID
+        self.agentInvocationID = agentInvocationID
+        self.agentSessionID = agentSessionID
+        self.agentRunID = agentRunID
         self.componentKind = componentKind
         self.componentID = componentID
+        self.actionID = actionID
+        self.conditionID = conditionID
+        self.runtimeMode = runtimeMode
         self.status = status
         self.detail = detail
         self.timestamp = Date()
@@ -66,8 +90,16 @@ public struct OrchestratorPipelineEvent: Sendable, Identifiable {
             traceID: traceID,
             spanID: spanID,
             parentSpanID: parentSpanID,
+            graphID: graphID,
+            graphNodeID: graphNodeID,
+            agentInvocationID: agentInvocationID,
+            agentSessionID: agentSessionID,
+            agentRunID: agentRunID,
             componentKind: componentKind,
             componentID: componentID,
+            actionID: actionID,
+            conditionID: conditionID,
+            runtimeMode: runtimeMode,
             status: status,
             detail: detail
         )
@@ -97,7 +129,7 @@ public actor AgentEventBus {
         guard !isFinished else { return }
         let sequenced = event.sequence == nil ? event.assigningSequence(nextSequence) : event
         nextSequence = max(nextSequence + 1, (sequenced.sequence ?? nextSequence) + 1)
-        logger.debug("Publishing event for runID: \(sequenced.runID, privacy: .public), stage: \(sequenced.stage, privacy: .public), status: \(sequenced.status.rawValue, privacy: .public)")
+        logger.debug("Publishing event for runID: \(sequenced.runID, privacy: .public), stage: \(sequenced.stage, privacy: .public), actionID: \(sequenced.actionID ?? "-", privacy: .public), conditionID: \(sequenced.conditionID ?? "-", privacy: .public), invocation: \(sequenced.agentInvocationID ?? "-", privacy: .public), status: \(sequenced.status.rawValue, privacy: .public)")
         await HomeAutomationTelemetry.shared.log(
             "pipeline.event",
             context: HomeAutomationTelemetryContext(
@@ -106,10 +138,18 @@ public actor AgentEventBus {
                 parentSpanID: sequenced.parentSpanID,
                 spanKind: .event,
                 runID: sequenced.runID.uuidString,
+                graphID: sequenced.graphID,
                 stage: sequenced.stage,
+                graphNodeID: sequenced.graphNodeID,
                 agentID: sequenced.agentID,
+                agentInvocationID: sequenced.agentInvocationID,
+                agentSessionID: sequenced.agentSessionID,
+                agentRunID: sequenced.agentRunID,
                 componentKind: sequenced.componentKind,
-                componentID: sequenced.componentID
+                componentID: sequenced.componentID,
+                actionID: sequenced.actionID,
+                conditionID: sequenced.conditionID,
+                runtimeMode: sequenced.runtimeMode
             ),
             status: sequenced.status.rawValue,
             payload: [

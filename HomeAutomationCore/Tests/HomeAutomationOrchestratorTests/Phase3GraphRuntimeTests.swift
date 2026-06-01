@@ -190,6 +190,45 @@ struct Phase3GraphRuntimeTests {
     }
 
     @Test
+    func graphSchedulerAcceptsCancellationResistantNearBoundaryAgentResult() async {
+        let graph = OrchestrationGraph(
+            id: "cancellation-resistant-near-timeout-result",
+            goal: .rootRouting,
+            nodes: [
+                GraphNode(id: AgentID.operationDetection.rawValue, requirement: .byID(.operationDetection))
+            ],
+            edges: [],
+            entryNodeIDs: [AgentID.operationDetection.rawValue]
+        )
+        let contextStore = ResolutionContextStore(
+            request: CommandRequest(text: "turn on lamp", executeLowRiskCommands: false)
+        )
+
+        let result = await GraphScheduler().execute(
+            graph,
+            registry: AgentRegistry(
+                agents: [
+                    CancellationResistantSlowSuccessGraphAgent(
+                        id: .operationDetection,
+                        timeoutNanoseconds: 50_000_000,
+                        delayNanoseconds: 75_000_000
+                    )
+                ]
+            ),
+            contextStore: contextStore,
+            eventBus: AgentEventBus(),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            circuitBreakers: CircuitBreakerRegistry(),
+            runID: UUID()
+        )
+
+        let context = await contextStore.snapshot()
+        #expect(result.exit == nil)
+        #expect(context.trace.map(\.agentID) == [.operationDetection])
+        #expect(result.metrics.nodeStatuses[AgentID.operationDetection.rawValue] == .completed)
+    }
+
+    @Test
     func graphSchedulerFailsClosedWhenMandatoryCircuitIsOpen() async {
         let circuitBreakers = CircuitBreakerRegistry(threshold: 1, recoveryInterval: 60)
         let breaker = await circuitBreakers.breaker(for: .confirmationPolicy)
@@ -436,6 +475,21 @@ private struct SlowSuccessGraphAgent: AnyHomeAgent {
 
     func run(context: ResolutionContext) async -> AgentRunResult {
         try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return .success(ResolutionContextPatch(agentID: id))
+    }
+}
+
+private struct CancellationResistantSlowSuccessGraphAgent: AnyHomeAgent {
+    let id: AgentID
+    let timeoutNanoseconds: UInt64
+    let delayNanoseconds: UInt64
+    let capabilities: Set<AgentCapability> = []
+
+    func run(context: ResolutionContext) async -> AgentRunResult {
+        let deadline = Date().addingTimeInterval(Double(delayNanoseconds) / 1_000_000_000)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
         return .success(ResolutionContextPatch(agentID: id))
     }
 }

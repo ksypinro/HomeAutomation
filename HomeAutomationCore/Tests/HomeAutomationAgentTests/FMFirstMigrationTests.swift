@@ -127,6 +127,29 @@ struct FMFirstMigrationTests {
         #expect(result.rooms.contains("bedroom") || result.deviceNicknames.contains("lamp") || result.rooms.isEmpty)
     }
 
+    @Test("SlotWorkerSession falls back before graph timeout when model stalls")
+    func slotWorkerFallsBackWhenModelSoftTimeoutExpires() async throws {
+        let worker = SlotExtractionAgentWorkerSession(
+            modelExtract: { _ in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                return HomeSlotExtractionResult(
+                    rooms: ["garage"],
+                    deviceNicknames: ["wrong model output"],
+                    values: [],
+                    modes: [],
+                    confidence: 0.99
+                )
+            },
+            foundationModelAvailability: { true },
+            modelSoftTimeoutNanoseconds: 5_000_000
+        )
+
+        let result = try await worker.extractSlots("Turn on bedroom AC")
+
+        #expect(result.rooms == ["bedroom"])
+        #expect(result.values.isEmpty)
+    }
+
     // MARK: - RiskClassificationAgentWorkerSession
 
     @Test("RiskWorkerSession invokes model even for high-risk deterministic result")
@@ -150,6 +173,29 @@ struct FMFirstMigrationTests {
 
         #expect(await modelWasInvoked.value())
         #expect(result.requiresConfirmation)
+    }
+
+    @Test("RiskWorkerSession falls back before graph timeout when model stalls")
+    func riskWorkerFallsBackWhenModelSoftTimeoutExpires() async throws {
+        let worker = RiskClassificationAgentWorkerSession(
+            modelClassify: { _ in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                return HomeRiskClassificationResult(
+                    riskLevel: .critical,
+                    requiresConfirmation: true,
+                    reason: "late model output",
+                    confidence: 0.99
+                )
+            },
+            foundationModelAvailability: { true },
+            modelSoftTimeoutNanoseconds: 5_000_000
+        )
+
+        let result = try await worker.classifyRisk("Turn on bedroom AC")
+
+        #expect(result.riskLevel == .medium)
+        #expect(!result.requiresConfirmation)
+        #expect(result.reason == "Agent deterministic fallback")
     }
 
     @Test("RiskClassification safety floor: rule high cannot be downgraded by model low")

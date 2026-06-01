@@ -76,6 +76,80 @@ struct AutomationActionResolverTests {
     }
 
     @Test
+    func parallelDirectGraphActionResolutionScopesRepeatedSubAgentPipelineEvents() async throws {
+        let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let scheduler = GraphScheduler()
+        let resolver = AutomationActionResolver(
+            registry: registry,
+            graphPlanner: GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { true })),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            scheduler: scheduler,
+            subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
+            circuitBreakers: CircuitBreakerRegistry()
+        )
+        let eventBus = AgentEventBus()
+        let runID = UUID()
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await HomeAutomationTelemetryScope.$current.withValue(
+                    HomeAutomationTelemetryContext(
+                        runID: runID.uuidString,
+                        graphID: "automation-component-fan-out",
+                        actionID: "a1",
+                        runtimeMode: "graph"
+                    )
+                ) {
+                    _ = await resolver.resolve(
+                        "Turn on bedroom AC",
+                        eventBus: eventBus,
+                        runID: runID
+                    )
+                }
+            }
+            group.addTask {
+                await HomeAutomationTelemetryScope.$current.withValue(
+                    HomeAutomationTelemetryContext(
+                        runID: runID.uuidString,
+                        graphID: "automation-component-fan-out",
+                        actionID: "a2",
+                        runtimeMode: "graph"
+                    )
+                ) {
+                    _ = await resolver.resolve(
+                        "Turn off the bedroom lamp",
+                        eventBus: eventBus,
+                        runID: runID
+                    )
+                }
+            }
+        }
+        await eventBus.finish()
+
+        var events: [OrchestratorPipelineEvent] = []
+        for await event in await eventBus.stream() {
+            events.append(event)
+        }
+
+        #expect(events.contains {
+            $0.stage == "automationActionResolution:a1/slotExtraction" &&
+                $0.actionID == "a1"
+        })
+        #expect(events.contains {
+            $0.stage == "automationActionResolution:a2/slotExtraction" &&
+                $0.actionID == "a2"
+        })
+        #expect(events.contains {
+            $0.stage == "automationActionResolution:a1/riskClassification" &&
+                $0.actionID == "a1"
+        })
+        #expect(events.contains {
+            $0.stage == "automationActionResolution:a2/riskClassification" &&
+                $0.actionID == "a2"
+        })
+    }
+
+    @Test
     func allActionsStartConcurrentlyByDefault() async throws {
         let graph = OrchestrationGraph(
             id: "slow-test-direct-command-graph",

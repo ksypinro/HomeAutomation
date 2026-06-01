@@ -7,8 +7,10 @@ import os
 
 /// A Foundation Model Tool that returns all supported smart-home device types
 /// with rich descriptions so the model can reason about which types match a user command.
-public struct AvailableDeviceTypesTool: Tool {
+public struct AvailableDeviceTypesTool: Tool, ToolRuntimeIdentifiable {
     public let name = "getAvailableDeviceTypes"
+    public var toolID: String { name }
+    public let toolSessionID = UUID().uuidString
     public let description = """
         Returns every supported smart-home device type with its identifier, human-readable name, \
         common aliases, and a description of what the device is. \
@@ -22,16 +24,31 @@ public struct AvailableDeviceTypesTool: Tool {
     }
 
     @Generable
-    public struct Arguments {
+    public struct Arguments: AgentToolTraceArguments {
         @Guide(description: "Optional keyword to filter device types. Pass empty string to get all types.")
         public let filterKeyword: String?
+        @Guide(description: "Tracing only: caller agent ID. Pass the value provided in tool trace instructions.")
+        public let agentID: String?
+        @Guide(description: "Tracing only: caller agent session ID. Pass the value provided in tool trace instructions.")
+        public let agentSessionID: String?
+        @Guide(description: "Tracing only: caller agent run ID. Pass the value provided in tool trace instructions.")
+        public let agentRunID: Int?
 
-        public init(filterKeyword: String? = nil) {
+        public init(
+            filterKeyword: String? = nil,
+            agentID: String? = nil,
+            agentSessionID: String? = nil,
+            agentRunID: Int? = nil
+        ) {
             self.filterKeyword = filterKeyword
+            self.agentID = agentID
+            self.agentSessionID = agentSessionID
+            self.agentRunID = agentRunID
         }
     }
 
     public func call(arguments: Arguments) async throws -> String {
+        let callContext = await agentStartToolTelemetry(toolID: toolID, toolSessionID: toolSessionID, arguments: arguments)
         let keyword = arguments.filterKeyword?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         let filtered: [DeviceTypeCatalogEntry]
         if keyword.isEmpty {
@@ -44,10 +61,15 @@ public struct AvailableDeviceTypesTool: Tool {
                 entry.aliases.contains { $0.lowercased().contains(keyword) }
             }
         }
-        return filtered.map { entry in
+        let output = filtered.map { entry in
             let aliasText = entry.aliases.isEmpty ? "" : " aliases=[\(entry.aliases.joined(separator: ", "))]"
             return "• \(entry.id) (\(entry.displayName))\(aliasText): \(entry.description)"
         }.joined(separator: "\n")
+        return await agentFinishToolTelemetry(
+            output: output,
+            outputSizeStore: .shared,
+            callContext: callContext
+        )
     }
 
     // MARK: - Default Catalog

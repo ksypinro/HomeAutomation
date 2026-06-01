@@ -1,0 +1,12 @@
+{
+  "caseCount" : 1000,
+  "commandsPerFixture" : 100,
+  "fixtureCount" : 10,
+  "generatedAt" : "2026-06-01T00:00:00Z",
+  "generationMode" : "template",
+  "generatorVersion" : "golden-eval-generator-v1",
+  "name" : "seed-v1",
+  "randomSeed" : 20260601,
+  "validationStatus" : "passed",
+  "version" : "1.0.0"
+}

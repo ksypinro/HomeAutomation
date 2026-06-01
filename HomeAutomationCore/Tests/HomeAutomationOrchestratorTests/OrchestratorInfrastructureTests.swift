@@ -35,6 +35,24 @@ struct OrchestratorInfrastructureTests {
     }
 
     @Test
+    func contextualAgentExposesStableSessionAndIncrementingRunID() async {
+        let wrapper = ContextualHomeAgent(
+            agent: TraceIdentityTestAgent(),
+            makeInput: { _ in "input" },
+            makePatch: { _, _ in ResolutionContextPatch(agentID: .semanticNLU) }
+        )
+
+        let sessionID = wrapper.agentSessionID
+        let firstRun = await wrapper.nextAgentRunID()
+        let secondRun = await wrapper.nextAgentRunID()
+
+        #expect(!sessionID.isEmpty)
+        #expect(wrapper.agentSessionID == sessionID)
+        #expect(firstRun == 1)
+        #expect(secondRun == 2)
+    }
+
+    @Test
     func graphPlannerChoosesFallbackGraphWhenModelsUnavailable() {
         let policy = OrchestratorPolicyEngine(isModelAvailable: { false })
         let planner = GraphPlanner(policy: policy)
@@ -540,6 +558,19 @@ private struct EmptyAgentRegistryFactory: HomeAutomationAgentRegistryFactory {
     ) -> AgentRegistry {
         _ = dependencies
         return AgentRegistry(agents: [])
+    }
+}
+
+private struct TraceIdentityTestAgent: HomeAgent {
+    typealias Input = String
+    typealias Output = String
+
+    let id = AgentID.semanticNLU
+    let capabilities: Set<AgentCapability> = []
+    let timeoutNanoseconds: UInt64 = 1_000_000_000
+
+    func run(_ input: String, context: ResolutionContext) async throws -> String {
+        input
     }
 }
 

@@ -2,8 +2,10 @@ import Foundation
 import FoundationModels
 import HomeAutomationCore
 
-public struct AgentFindDevicesTool: Tool {
+public struct AgentFindDevicesTool: Tool, ToolRuntimeIdentifiable {
     public let name = "findDeviceCandidates"
+    public var toolID: String { name }
+    public let toolSessionID = UUID().uuidString
     public let description = "Finds smart-home device candidates by query, room, or device type."
     private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
@@ -17,7 +19,7 @@ public struct AgentFindDevicesTool: Tool {
     }
 
     @Generable
-    public struct Arguments {
+    public struct Arguments: AgentToolTraceArguments {
         @Guide(description: "Search terms from the user command.")
         public let query: String
         @Guide(description: "Room or location name when known.")
@@ -26,17 +28,34 @@ public struct AgentFindDevicesTool: Tool {
         public let deviceType: String?
         @Guide(description: "Maximum records to return, from 1 to 25.", .range(1...25))
         public let limit: Int?
+        @Guide(description: "Tracing only: caller agent ID. Pass the value provided in tool trace instructions.")
+        public let agentID: String?
+        @Guide(description: "Tracing only: caller agent session ID. Pass the value provided in tool trace instructions.")
+        public let agentSessionID: String?
+        @Guide(description: "Tracing only: caller agent run ID. Pass the value provided in tool trace instructions.")
+        public let agentRunID: Int?
 
-        public init(query: String, room: String? = nil, deviceType: String? = nil, limit: Int? = nil) {
+        public init(
+            query: String,
+            room: String? = nil,
+            deviceType: String? = nil,
+            limit: Int? = nil,
+            agentID: String? = nil,
+            agentSessionID: String? = nil,
+            agentRunID: Int? = nil
+        ) {
             self.query = query
             self.room = room
             self.deviceType = deviceType
             self.limit = limit
+            self.agentID = agentID
+            self.agentSessionID = agentSessionID
+            self.agentRunID = agentRunID
         }
     }
 
     public func call(arguments: Arguments) async throws -> String {
-        let startedAt = await agentStartToolTelemetry(toolName: name, arguments: arguments)
+        let callContext = await agentStartToolTelemetry(toolID: toolID, toolSessionID: toolSessionID, arguments: arguments)
         let devices = await registry.allDevices()
         let query = arguments.query.agentNormalizedHomeTokenString
         let room = arguments.room?.agentNormalizedHomeTokenString
@@ -62,15 +81,14 @@ public struct AgentFindDevicesTool: Tool {
         }
         .prefix(limit)
 
-        return await recordOutput(AgentToolFormatting.records(Array(matches)), startedAt: startedAt)
+        return await recordOutput(AgentToolFormatting.records(Array(matches)), callContext: callContext)
     }
 
-    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+    private func recordOutput(_ output: String, callContext: ToolTelemetryCallContext) async -> String {
         await agentFinishToolTelemetry(
-            toolName: name,
             output: output,
             outputSizeStore: outputSizeStore,
-            startedAt: startedAt
+            callContext: callContext
         )
     }
 }

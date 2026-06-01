@@ -92,16 +92,17 @@ public struct SemanticNLUWorkerSession: Sendable {
         logger.debug("[FoundationModelInput] System Instructions: \(instructionsText, privacy: .public)")
         logger.debug("[FoundationModelInput] Prompt: \(prompt, privacy: .public)")
 
+        let tracedInstructions = HomeAutomationToolTraceInstructions.append(to: instructionsText)
         let session = LanguageModelSession(
             tools: [tool],
-            instructions: Instructions(instructionsText)
+            instructions: Instructions(tracedInstructions)
         )
         do {
             let result = try await FoundationModelCallRecorder.record(
                 agentID: AgentID.semanticNLU.rawValue,
                 policyMode: modelCallPolicy.mode.rawValue,
                 modelAvailability: "available",
-                promptCharacterCount: instructionsText.count + prompt.count,
+                promptCharacterCount: tracedInstructions.count + prompt.count,
                 selectedToolNames: ["getAvailableDeviceTypes"]
             ) {
                 try await session.respond(

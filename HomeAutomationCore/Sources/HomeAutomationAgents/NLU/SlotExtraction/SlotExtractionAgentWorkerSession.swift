@@ -8,6 +8,7 @@ public struct SlotExtractionAgentWorkerSession: Sendable {
     private let modelExtract: (@Sendable (String) async throws -> HomeSlotExtractionResult)?
     private let foundationModelAvailability: @Sendable () -> Bool
     private let modelCallPolicy: NLUModelCallPolicy
+    private let modelSoftTimeoutNanoseconds: UInt64
     private let logger = Logger(subsystem: "HomeAutomation", category: "NLU.SlotExtractionAgent")
 
     public init(
@@ -16,12 +17,14 @@ public struct SlotExtractionAgentWorkerSession: Sendable {
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
-        modelCallPolicy: NLUModelCallPolicy = .default
+        modelCallPolicy: NLUModelCallPolicy = .default,
+        modelSoftTimeoutNanoseconds: UInt64 = 12_000_000_000
     ) {
         self.extract = extract
         self.modelExtract = modelExtract
         self.foundationModelAvailability = foundationModelAvailability
         self.modelCallPolicy = modelCallPolicy
+        self.modelSoftTimeoutNanoseconds = modelSoftTimeoutNanoseconds
     }
 
     public func extractSlots(_ text: String) async throws -> HomeSlotExtractionResult {
@@ -72,12 +75,15 @@ public struct SlotExtractionAgentWorkerSession: Sendable {
         logger.debug("[FoundationModelInput] Prompt: \(modelPrompt, privacy: .public)")
 
         do {
-            let result: HomeSlotExtractionResult
-            if let modelExtract {
-                result = try await modelExtract(modelPrompt + hintText)
-            } else {
+            let result = try await withNLUModelSoftTimeout(
+                agentID: .slotExtraction,
+                timeoutNanoseconds: modelSoftTimeoutNanoseconds
+            ) {
+                if let modelExtract {
+                    return try await modelExtract(modelPrompt + hintText)
+                }
                 let session = LanguageModelSession(instructions: Instructions(instructionsText))
-                result = try await FoundationModelCallRecorder.record(
+                return try await FoundationModelCallRecorder.record(
                     agentID: AgentID.slotExtraction.rawValue,
                     policyMode: modelCallPolicy.mode.rawValue,
                     modelAvailability: "available",

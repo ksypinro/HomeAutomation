@@ -1,26 +1,29 @@
 import Foundation
 import HomeAutomationCore
 
-func agentStartToolTelemetry<T>(toolName: String, arguments: T) async -> Date {
-    let startedAt = Date()
-    await HomeAutomationTelemetry.shared.logToolInput(
-        toolName: toolName,
-        arguments: String(describing: arguments)
+func agentStartToolTelemetry<T>(
+    toolID: String,
+    toolSessionID: String,
+    arguments: T
+) async -> ToolTelemetryCallContext {
+    await HomeAutomationTelemetry.shared.startToolCall(
+        toolID: toolID,
+        toolSessionID: toolSessionID,
+        arguments: String(describing: arguments),
+        agentTrace: arguments as? any AgentToolTraceArguments
     )
-    return startedAt
 }
 
 func agentFinishToolTelemetry(
-    toolName: String,
     output: String,
     outputSizeStore: AgentToolOutputSizeStore,
-    startedAt: Date
+    callContext: ToolTelemetryCallContext
 ) async -> String {
-    outputSizeStore.record(toolName: toolName, characterCount: output.count)
-    await HomeAutomationTelemetry.shared.logToolOutput(
-        toolName: toolName,
+    outputSizeStore.record(toolName: callContext.telemetryContext.toolID ?? "", characterCount: output.count)
+    await HomeAutomationTelemetry.shared.finishToolCall(
+        callContext,
         output: output,
-        durationMs: Date().timeIntervalSince(startedAt) * 1_000
+        durationMs: Date().timeIntervalSince(callContext.startedAt) * 1_000
     )
     return output
 }

@@ -149,9 +149,10 @@ public struct OperationDetectionWorkerSession: Sendable {
         logger.debug("[FoundationModelInput] System Instructions: \(instructionsText.prefix(200), privacy: .public)...")
         logger.debug("[FoundationModelInput] Prompt: \(text, privacy: .public)")
 
+        let tracedInstructions = HomeAutomationToolTraceInstructions.append(to: instructionsText)
         let session = LanguageModelSession(
             tools: [semanticAnalyzerTool],
-            instructions: Instructions(instructionsText)
+            instructions: Instructions(tracedInstructions)
         )
         do {
             let prompt = "User command:\n\(text)"
@@ -159,7 +160,7 @@ public struct OperationDetectionWorkerSession: Sendable {
                 agentID: AgentID.operationDetection.rawValue,
                 policyMode: modelCallPolicy.mode.rawValue,
                 modelAvailability: "available",
-                promptCharacterCount: instructionsText.count + prompt.count,
+                promptCharacterCount: tracedInstructions.count + prompt.count,
                 selectedToolNames: ["analyzeHomeOperation"]
             ) {
                 try await session.respond(

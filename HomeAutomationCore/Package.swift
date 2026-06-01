@@ -67,6 +67,9 @@ let package = Package(
                 "HomeAutomationRAG",
                 "HomeAutomationAgents",
                 "HomeAutomationOrchestrator"
+            ],
+            resources: [
+                .copy("Resources/EvaluationDatasets")
             ]
         ),
         .executableTarget(

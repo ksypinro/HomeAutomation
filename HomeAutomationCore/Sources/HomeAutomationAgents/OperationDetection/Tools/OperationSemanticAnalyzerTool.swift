@@ -7,8 +7,10 @@ import os
 /// as semantic analysis. The model may call this tool when it wants a structured
 /// rule-based reading of the command, but the model remains responsible for the
 /// final operation classification.
-public struct OperationSemanticAnalyzerTool: Tool {
+public struct OperationSemanticAnalyzerTool: Tool, ToolRuntimeIdentifiable {
     public let name = "analyzeOperationSemantics"
+    public var toolID: String { name }
+    public let toolSessionID = UUID().uuidString
     public let description = """
         Runs deterministic semantic analysis for a smart-home command and returns \
         the suggested operation, domain, confidence, and reason. Use this tool only \
@@ -27,21 +29,31 @@ public struct OperationSemanticAnalyzerTool: Tool {
     }
 
     @Generable
-    public struct Arguments {
+    public struct Arguments: AgentToolTraceArguments {
         @Guide(description: "Optional command text to analyze. Leave empty to analyze the current user command.")
         public let text: String?
+        @Guide(description: "Tracing only: caller agent ID. Pass the value provided in tool trace instructions.")
+        public let agentID: String?
+        @Guide(description: "Tracing only: caller agent session ID. Pass the value provided in tool trace instructions.")
+        public let agentSessionID: String?
+        @Guide(description: "Tracing only: caller agent run ID. Pass the value provided in tool trace instructions.")
+        public let agentRunID: Int?
 
-        public init(text: String? = nil) {
+        public init(
+            text: String? = nil,
+            agentID: String? = nil,
+            agentSessionID: String? = nil,
+            agentRunID: Int? = nil
+        ) {
             self.text = text
+            self.agentID = agentID
+            self.agentSessionID = agentSessionID
+            self.agentRunID = agentRunID
         }
     }
 
     public func call(arguments: Arguments) async throws -> String {
-        let startedAt = Date()
-        await HomeAutomationTelemetry.shared.logToolInput(
-            toolName: name,
-            arguments: String(describing: arguments)
-        )
+        let callContext = await agentStartToolTelemetry(toolID: toolID, toolSessionID: toolSessionID, arguments: arguments)
 
         let text = arguments.text?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -55,10 +67,10 @@ public struct OperationSemanticAnalyzerTool: Tool {
         confidence: \(result.confidence)
         reason: \(result.reason)
         """
-        await HomeAutomationTelemetry.shared.logToolOutput(
-            toolName: name,
+        await HomeAutomationTelemetry.shared.finishToolCall(
+            callContext,
             output: output,
-            durationMs: Date().timeIntervalSince(startedAt) * 1_000
+            durationMs: Date().timeIntervalSince(callContext.startedAt) * 1_000
         )
         return output
     }
