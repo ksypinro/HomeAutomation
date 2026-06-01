@@ -16,7 +16,7 @@ public struct RuleFallbackAgent: HomeAgent {
         self.resolve = resolve
     }
 
-    public init(resolver: AgentRuleBasedResolver = AgentRuleBasedResolver()) {
+    public init(resolver: AgentRuleBasedResolver) {
         self.resolve = { input in
             try await resolver.resolve(
                 input.text,

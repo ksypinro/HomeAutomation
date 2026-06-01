@@ -372,6 +372,7 @@ struct FMFirstMigrationTests {
     func candidateResolveDirectlyInvokesModelForHighConfidence() async throws {
         let modelWasInvoked = ModelInvokedSpy()
         let resolver = HomeCandidateResolverSupport(
+            promptBuilder: CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter()),
             foundationModelAvailability: { true }
         )
         let candidates = [
@@ -406,6 +407,7 @@ struct FMFirstMigrationTests {
         // by checking that resolveDirectly is called with a single high-confidence candidate.
         // With FM unavailable (simulating FM error fallback), result should still be correct.
         let resolver = HomeCandidateResolverSupport(
+            promptBuilder: CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter()),
             foundationModelAvailability: { false }  // Simulates FM unavailable — uses deterministic
         )
         let shard = [

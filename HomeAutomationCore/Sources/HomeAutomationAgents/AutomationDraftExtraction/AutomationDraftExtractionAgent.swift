@@ -10,7 +10,7 @@ public struct AutomationDraftExtractionAgent: HomeAgent {
     public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let draftAgent: AutomationDraftAgent
 
-    public init(draftAgent: AutomationDraftAgent = AutomationDraftAgent()) {
+    public init(draftAgent: AutomationDraftAgent) {
         self.draftAgent = draftAgent
     }
 

@@ -10,7 +10,7 @@ public struct AutomationTriggerResolutionAgent: HomeAgent {
     public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: AutomationTriggerResolutionWorkerSession
 
-    public init(worker: AutomationTriggerResolutionWorkerSession = AutomationTriggerResolutionWorkerSession()) {
+    public init(worker: AutomationTriggerResolutionWorkerSession) {
         self.worker = worker
     }
 

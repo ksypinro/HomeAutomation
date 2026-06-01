@@ -144,7 +144,7 @@ struct Phase2AgentTests {
 
     @Test
     func candidateRetrievalAgentReturnsRegistryCandidates() async throws {
-        let agent = CandidateRetrievalAgent()
+        let agent = CandidateRetrievalAgent(registry: MockHomeDeviceRegistry())
         let state = Self.state("Turn on the bedroom lamp")
 
         let candidates = try await agent.run(
@@ -159,7 +159,12 @@ struct Phase2AgentTests {
     func candidateRankingAgentSelectsBestCandidate() async throws {
         let devices = try await Self.devices(ids: ["living_room_ceiling_light", "bedroom_lamp"])
         let state = Self.state("Turn on the bedroom lamp")
-        let agent = CandidateRankingAgent()
+        let agent = CandidateRankingAgent(
+            resolver: HomeCandidateResolverSupport(
+                promptBuilder: CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter()),
+                foundationModelAvailability: { false }
+            )
+        )
 
         let result = try await agent.run(
             CandidateRankingInput(text: "Turn on the bedroom lamp", state: state, candidates: devices.map(\.compactView)),
@@ -182,6 +187,7 @@ struct Phase2AgentTests {
         let resolver = HomeCandidateResolverSupport(
             shardSize: 2,
             metrics: metrics,
+            promptBuilder: CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter()),
             foundationModelAvailability: { false }
         )
         let state = Self.state("Turn on the bedroom lamp")
@@ -206,6 +212,7 @@ struct Phase2AgentTests {
         let state = AgentTextParser.deterministicState(for: "Make bedroom warmer by turning off the AC")
         let resolver = HomeCandidateResolverSupport(
             shardSize: 1,
+            promptBuilder: CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter()),
             foundationModelAvailability: { false }
         )
 
@@ -223,7 +230,12 @@ struct Phase2AgentTests {
     func candidateShardAgentSelectsWithinShard() async throws {
         let devices = try await Self.devices(ids: ["living_room_ceiling_light", "bedroom_lamp"])
         let state = Self.state("Turn on the bedroom lamp")
-        let agent = CandidateShardAgent()
+        let agent = CandidateShardAgent(
+            resolver: HomeCandidateResolverSupport(
+                promptBuilder: CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter()),
+                foundationModelAvailability: { false }
+            )
+        )
 
         let result = try await agent.run(
             CandidateShardInput(text: "Turn on the bedroom lamp", state: state, shard: devices.map(\.compactView)),
@@ -235,7 +247,7 @@ struct Phase2AgentTests {
 
     @Test
     func candidateHydrationAgentReturnsSelectedRecords() async throws {
-        let agent = CandidateHydrationAgent()
+        let agent = CandidateHydrationAgent(registry: MockHomeDeviceRegistry())
 
         let devices = try await agent.run(CandidateHydrationInput(candidateIDs: ["bedroom_lamp"]), context: Self.context())
 
@@ -246,7 +258,12 @@ struct Phase2AgentTests {
     func instructionComposerAgentBuildsPackage() async throws {
         let device = try await Self.device(id: "bedroom_lamp")
         let input = Self.finalInput(text: "Set bedroom lamp to 40 percent", device: device)
-        let agent = InstructionComposerAgent()
+        let registry = MockHomeDeviceRegistry()
+        let agent = InstructionComposerAgent(
+            factory: AgentInstructionSetFactory(
+                toolProvider: AgentToolProvider(registry: registry)
+            )
+        )
 
         let package = try await agent.run(input, context: Self.context())
 
@@ -282,7 +299,12 @@ struct Phase2AgentTests {
                 confidence: 1
             )
         )
-        let agent = InstructionComposerAgent()
+        let registry = MockHomeDeviceRegistry()
+        let agent = InstructionComposerAgent(
+            factory: AgentInstructionSetFactory(
+                toolProvider: AgentToolProvider(registry: registry)
+            )
+        )
 
         let package = try await agent.run(input, context: Self.context())
         let report = try #require(package.contextBudgetReport)
@@ -335,7 +357,7 @@ struct Phase2AgentTests {
                 shortCapabilities: base.shortCapabilities
             )
         }
-        let builder = CandidateResolutionPromptBuilder()
+        let builder = CandidateResolutionPromptBuilder(budgeter: FoundationModelContextBudgeter())
         let instructionText = "Select the best candidate IDs for the user's smart-home command."
 
         let package = builder.makeDirectPrompt(
@@ -589,7 +611,7 @@ struct Phase2AgentTests {
         let device = try await Self.device(id: "bedroom_lamp")
         let input = Self.finalInput(text: "Turn on the bedroom lamp", device: device)
         let draft = Self.draft(deviceID: device.id, capability: "switch", command: "on")
-        let agent = SafetyValidationAgent()
+        let agent = SafetyValidationAgent(validator: AgentCommandValidator())
 
         let resolution = try await agent.run(SafetyValidationInput(draft: draft, finalInput: input), context: Self.context())
 
@@ -662,7 +684,9 @@ struct Phase2AgentTests {
             ],
             requiresConfirmation: false
         )
-        let agent = MockExecutionAgent(registry: MockHomeDeviceRegistry())
+        let registry = MockHomeDeviceRegistry()
+        let executor = AgentPlanExecutor(registry: registry)
+        let agent = MockExecutionAgent(execute: executor.executeLowRiskPlan)
 
         let device = try await agent.run(plan, context: Self.context())
 
@@ -671,7 +695,15 @@ struct Phase2AgentTests {
 
     @Test
     func ruleFallbackAgentResolvesPowerCommand() async throws {
-        let agent = RuleFallbackAgent()
+        let registry = MockHomeDeviceRegistry()
+        let agent = RuleFallbackAgent(
+            resolver: AgentRuleBasedResolver(
+                registry: registry,
+                validator: AgentCommandValidator(),
+                executor: AgentPlanExecutor(registry: registry),
+                bixbyFallbackMapper: AgentBixbyFallbackMapper()
+            )
+        )
 
         let result = try await agent.run(
             RuleFallbackInput(text: "Turn on the bedroom lamp", executeLowRiskCommands: false),
@@ -684,7 +716,7 @@ struct Phase2AgentTests {
     @Test
     func bixbyFallbackAgentMapsCatalogIntent() async throws {
         let devices = try await Self.devices(ids: ["front_porch_camera"])
-        let agent = BixbyFallbackAgent()
+        let agent = BixbyFallbackAgent(mapper: AgentBixbyFallbackMapper())
 
         let matches = try await agent.run(
             BixbyFallbackInput(text: "Show me the Front Porch Camera", devices: devices),

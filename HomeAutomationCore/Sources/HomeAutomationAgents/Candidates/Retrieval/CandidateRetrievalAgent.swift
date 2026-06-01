@@ -20,7 +20,7 @@ public struct CandidateRetrievalAgent: HomeAgent {
     }
 
     public init(
-        registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry(),
+        registry: any DeviceRegistryProtocol,
         contextRetriever: ContextRetriever? = nil
     ) {
         self.retrieve = { input in

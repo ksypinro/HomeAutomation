@@ -1,12 +1,12 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.1
 
 import PackageDescription
 
 let package = Package(
     name: "HomeAutomationCore",
     platforms: [
-        .iOS(.v26),
-        .macOS(.v26)
+        .iOS("26.0"),
+        .macOS("26.0")
     ],
     products: [
         .library(

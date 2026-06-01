@@ -17,7 +17,7 @@ public struct CandidateShardAgent: HomeAgent {
         self.shard = shard
     }
 
-    public init(resolver: HomeCandidateResolverSupport = HomeCandidateResolverSupport()) {
+    public init(resolver: HomeCandidateResolverSupport) {
         self.shard = { input in
             try await resolver.resolveShard(
                 userText: input.text,

@@ -10,7 +10,7 @@ public struct AutomationComponentSegmentationAgent: HomeAgent {
     public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: AutomationComponentSegmentationWorkerSession
 
-    public init(worker: AutomationComponentSegmentationWorkerSession = AutomationComponentSegmentationWorkerSession()) {
+    public init(worker: AutomationComponentSegmentationWorkerSession) {
         self.worker = worker
     }
 

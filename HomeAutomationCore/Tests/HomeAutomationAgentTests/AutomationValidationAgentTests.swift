@@ -14,7 +14,7 @@ struct AutomationValidationAgentTests {
             command: "on"
         )
 
-        let result = try await AutomationValidationAgent().run(
+        let result = try await AutomationValidationAgent(policy: AutomationValidationPolicy()).run(
             AutomationValidationInput(ruleDraft: draft, resolvedActions: [action]),
             context: context()
         )
@@ -35,7 +35,7 @@ struct AutomationValidationAgentTests {
             resolvedAction("Turn on bedroom AC", deviceID: "bedroom_ac", capability: "switch", command: "on")
         ]
 
-        let result = try await AutomationValidationAgent().run(
+        let result = try await AutomationValidationAgent(policy: AutomationValidationPolicy()).run(
             AutomationValidationInput(ruleDraft: draft, resolvedActions: actions),
             context: context()
         )
@@ -62,7 +62,7 @@ struct AutomationValidationAgentTests {
             command: "on"
         )
 
-        let result = try await AutomationValidationAgent().run(
+        let result = try await AutomationValidationAgent(policy: AutomationValidationPolicy()).run(
             AutomationValidationInput(ruleDraft: draft, resolvedActions: [action]),
             context: context()
         )
@@ -84,7 +84,7 @@ struct AutomationValidationAgentTests {
             riskLevel: .high
         )
 
-        let result = try await AutomationValidationAgent().run(
+        let result = try await AutomationValidationAgent(policy: AutomationValidationPolicy()).run(
             AutomationValidationInput(ruleDraft: draft, resolvedActions: [action]),
             context: context()
         )
@@ -119,7 +119,7 @@ struct AutomationValidationAgentTests {
             command: "on"
         )
 
-        let result = try await AutomationValidationAgent().run(
+        let result = try await AutomationValidationAgent(policy: AutomationValidationPolicy()).run(
             AutomationValidationInput(ruleDraft: draft, resolvedActions: [action]),
             context: context()
         )
@@ -172,7 +172,7 @@ struct AutomationValidationAgentTests {
             command: "on"
         )
 
-        let result = try await AutomationValidationAgent().run(
+        let result = try await AutomationValidationAgent(policy: AutomationValidationPolicy()).run(
             AutomationValidationInput(ruleDraft: draft, resolvedActions: [action]),
             context: context()
         )

@@ -10,7 +10,7 @@ public struct AutomationConditionClauseResolutionAgent: HomeAgent {
     public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: AutomationConditionClauseResolutionWorkerSession
 
-    public init(worker: AutomationConditionClauseResolutionWorkerSession = AutomationConditionClauseResolutionWorkerSession()) {
+    public init(worker: AutomationConditionClauseResolutionWorkerSession) {
         self.worker = worker
     }
 

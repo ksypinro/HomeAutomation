@@ -161,7 +161,7 @@ extension GraphScheduler {
             )
             return .unsupported(reason)
         case .routeToFallback(let reason):
-            let result = await GraphScheduler().execute(
+            let result = await execute(
                 GraphPlanner.fallbackGraph(),
                 registry: registry,
                 contextStore: contextStore,

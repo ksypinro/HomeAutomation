@@ -17,7 +17,7 @@ public struct CandidateHydrationAgent: HomeAgent {
         self.hydrate = hydrate
     }
 
-    public init(registry: any DeviceRegistryProtocol = MockHomeDeviceRegistry()) {
+    public init(registry: any DeviceRegistryProtocol) {
         self.hydrate = { input in
             let devices = await registry.allDevices()
             let idSet = Set(input.candidateIDs)

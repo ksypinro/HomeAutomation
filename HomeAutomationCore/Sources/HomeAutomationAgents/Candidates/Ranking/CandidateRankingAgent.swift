@@ -17,7 +17,7 @@ public struct CandidateRankingAgent: HomeAgent {
         self.rank = rank
     }
 
-    public init(resolver: HomeCandidateResolverSupport = HomeCandidateResolverSupport()) {
+    public init(resolver: HomeCandidateResolverSupport) {
         self.rank = { input in
             try await resolver.resolveCandidates(
                 userText: input.text,

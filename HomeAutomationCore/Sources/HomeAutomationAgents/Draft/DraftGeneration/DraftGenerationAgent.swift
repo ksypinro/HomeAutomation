@@ -17,7 +17,7 @@ public struct DraftGenerationAgent: HomeAgent {
         self.generate = generate
     }
 
-    public init(resolver: AgentDraftResolver = AgentDraftResolver()) {
+    public init(resolver: AgentDraftResolver) {
         self.generate = resolver.resolveDraft
     }
 

@@ -398,8 +398,12 @@ struct Phase5RAGIntegrationTests {
                 ]
             )
         ])
+        let registry = MockHomeDeviceRegistry()
         let resolver = AgentRuleBasedResolver(
-            registry: MockHomeDeviceRegistry(),
+            registry: registry,
+            validator: AgentCommandValidator(),
+            executor: AgentPlanExecutor(registry: registry),
+            bixbyFallbackMapper: AgentBixbyFallbackMapper(),
             contextRetriever: retriever
         )
         let agent = RuleFallbackAgent(resolver: resolver)
