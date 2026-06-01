@@ -84,6 +84,11 @@ public actor DailyJSONLLogWriter: TelemetrySink {
         set(&object, "graphNodeID", event.graphNodeID)
         set(&object, "agentID", event.agentID)
         set(&object, "agentInvocationID", event.agentInvocationID)
+        set(&object, "agentSessionID", event.agentSessionID)
+        set(&object, "agentRunID", event.agentRunID)
+        set(&object, "toolID", event.toolID)
+        set(&object, "toolSessionID", event.toolSessionID)
+        set(&object, "toolCallID", event.toolCallID)
         set(&object, "componentKind", event.componentKind)
         set(&object, "componentID", event.componentID)
         set(&object, "actionID", event.actionID)
@@ -102,7 +107,10 @@ public actor DailyJSONLLogWriter: TelemetrySink {
         promoteString("targetDeviceID", from: stringPayload, into: &object)
         promoteString("validationResult", from: stringPayload, into: &object)
         promoteString("finalOutcome", from: stringPayload, into: &object)
+        promoteString("toolID", from: stringPayload, into: &object)
         promoteString("toolName", from: stringPayload, into: &object)
+        promoteString("toolSessionID", from: stringPayload, into: &object)
+        promoteString("toolCallID", from: stringPayload, into: &object)
         promoteString("modelCallID", from: stringPayload, into: &object)
 
         let data = try JSONSerialization.data(

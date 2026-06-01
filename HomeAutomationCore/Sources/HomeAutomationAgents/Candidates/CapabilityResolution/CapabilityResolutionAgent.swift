@@ -144,6 +144,7 @@ public struct CapabilityResolutionAgent: HomeAgent {
         let hasOpenCloseIntent = families.contains(.openClose)
         let hasStatusIntent = families.contains(.statusQuery)
         let hasRoutineIntent = families.contains(.routine)
+        let hasMediaIntent = families.contains(.media)
         let hasTurnOn = containsAny(normalizedText, ["turn on", "switch on", "power on", "start"])
         let hasTurnOff = containsAny(normalizedText, ["turn off", "switch off", "power off", "stop"])
 
@@ -206,6 +207,72 @@ public struct CapabilityResolutionAgent: HomeAgent {
             }
             if capability == "airConditionerFanMode", commands.contains("setFanMode"), containsAny(normalizedText, ["fan", "speed"]) {
                 return ("setFanMode", 0.74, ["Fan mode phrase matched airConditionerFanMode.setFanMode."])
+            }
+        }
+
+        if hasMediaIntent || containsAny(normalizedText, ["tv", "television", "volume", "channel", "play", "pause", "mute", "input"]) {
+            if capability == "channel", normalizedText.contains("channel") {
+                if containsAny(normalizedText, ["next channel", "channel up", "increase channel", "raise channel", "move to next channel"]),
+                   commands.contains("channelUp") {
+                    return ("channelUp", 0.92, ["Media channel phrase matched channel.channelUp."])
+                }
+                if containsAny(normalizedText, ["previous channel", "prev channel", "last channel", "channel down", "decrease channel", "lower channel", "move to previous channel"]),
+                   commands.contains("channelDown") {
+                    return ("channelDown", 0.92, ["Media channel phrase matched channel.channelDown."])
+                }
+                if !state.slots.values.isEmpty, commands.contains("setChannel") {
+                    return ("setChannel", 0.88, ["Media channel number matched channel.setChannel."])
+                }
+            }
+
+            if capability == "audioVolume" {
+                if normalizedText.contains("unmute"), commands.contains("unmute") {
+                    return ("unmute", 0.92, ["Media audio phrase matched audioVolume.unmute."])
+                }
+                if normalizedText.contains("mute"), commands.contains("mute") {
+                    return ("mute", 0.92, ["Media audio phrase matched audioVolume.mute."])
+                }
+                if containsAny(normalizedText, ["volume up", "turn up", "increase volume", "raise volume", "louder"]),
+                   commands.contains("volumeUp") {
+                    return ("volumeUp", 0.88, ["Media audio phrase matched audioVolume.volumeUp."])
+                }
+                if containsAny(normalizedText, ["volume down", "turn down", "decrease volume", "lower volume", "quieter"]),
+                   commands.contains("volumeDown") {
+                    return ("volumeDown", 0.88, ["Media audio phrase matched audioVolume.volumeDown."])
+                }
+                if normalizedText.contains("volume"), !state.slots.values.isEmpty, commands.contains("setVolume") {
+                    return ("setVolume", 0.86, ["Media audio value matched audioVolume.setVolume."])
+                }
+            }
+
+            if capability == "mediaPlayback" {
+                if containsAny(normalizedText, ["fast forward", "skip ahead"]), commands.contains("fastForward") {
+                    return ("fastForward", 0.88, ["Media playback phrase matched mediaPlayback.fastForward."])
+                }
+                if containsAny(normalizedText, ["rewind", "go back"]), commands.contains("rewind") {
+                    return ("rewind", 0.88, ["Media playback phrase matched mediaPlayback.rewind."])
+                }
+                if normalizedText.contains("pause"), commands.contains("pause") {
+                    return ("pause", 0.88, ["Media playback phrase matched mediaPlayback.pause."])
+                }
+                if containsAny(normalizedText, ["play", "resume", "continue"]), commands.contains("play") {
+                    return ("play", 0.88, ["Media playback phrase matched mediaPlayback.play."])
+                }
+                if normalizedText.contains("stop"), commands.contains("stop") {
+                    return ("stop", 0.86, ["Media playback phrase matched mediaPlayback.stop."])
+                }
+            }
+
+            if capability == "mediaInputSource",
+               containsAny(normalizedText, ["input", "source", "hdmi", "usb", " av "]),
+               commands.contains("setInputSource") {
+                return ("setInputSource", 0.86, ["Media input phrase matched mediaInputSource.setInputSource."])
+            }
+
+            if capability == "appSelector",
+               containsAny(normalizedText, ["open", "launch", "app", "netflix", "hulu", "youtube"]),
+               commands.contains("launchApp") {
+                return ("launchApp", 0.82, ["Media app phrase matched appSelector.launchApp."])
             }
         }
 

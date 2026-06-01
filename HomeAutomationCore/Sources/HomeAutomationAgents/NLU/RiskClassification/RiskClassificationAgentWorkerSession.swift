@@ -5,20 +5,26 @@ import os
 
 public struct RiskClassificationAgentWorkerSession: Sendable {
     private let classify: (@Sendable (String) async throws -> HomeRiskClassificationResult)?
+    private let modelClassify: (@Sendable (String) async throws -> HomeRiskClassificationResult)?
     private let foundationModelAvailability: @Sendable () -> Bool
     private let modelCallPolicy: NLUModelCallPolicy
+    private let modelSoftTimeoutNanoseconds: UInt64
     private let logger = Logger(subsystem: "HomeAutomation", category: "NLU.RiskClassificationAgent")
 
     public init(
         classify: (@Sendable (String) async throws -> HomeRiskClassificationResult)? = nil,
+        modelClassify: (@Sendable (String) async throws -> HomeRiskClassificationResult)? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
-        modelCallPolicy: NLUModelCallPolicy = .default
+        modelCallPolicy: NLUModelCallPolicy = .default,
+        modelSoftTimeoutNanoseconds: UInt64 = 12_000_000_000
     ) {
         self.classify = classify
+        self.modelClassify = modelClassify
         self.foundationModelAvailability = foundationModelAvailability
         self.modelCallPolicy = modelCallPolicy
+        self.modelSoftTimeoutNanoseconds = modelSoftTimeoutNanoseconds
     }
 
     public func classifyRisk(_ text: String) async throws -> HomeRiskClassificationResult {
@@ -64,13 +70,21 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
         let session = LanguageModelSession(instructions: Instructions(instructionsText))
         do {
             let prompt = text + hintText
-            let modelResult = try await FoundationModelCallRecorder.record(
-                agentID: AgentID.riskClassification.rawValue,
-                policyMode: modelCallPolicy.mode.rawValue,
-                modelAvailability: "available",
-                promptCharacterCount: instructionsText.count + prompt.count
+            let modelResult = try await withNLUModelSoftTimeout(
+                agentID: .riskClassification,
+                timeoutNanoseconds: modelSoftTimeoutNanoseconds
             ) {
-                try await session.respond(to: Prompt(prompt), generating: HomeRiskClassificationResult.self).content
+                if let modelClassify {
+                    return try await modelClassify(prompt)
+                }
+                return try await FoundationModelCallRecorder.record(
+                    agentID: AgentID.riskClassification.rawValue,
+                    policyMode: modelCallPolicy.mode.rawValue,
+                    modelAvailability: "available",
+                    promptCharacterCount: instructionsText.count + prompt.count
+                ) {
+                    try await session.respond(to: Prompt(prompt), generating: HomeRiskClassificationResult.self).content
+                }
             }
             logger.debug("[FoundationModelOutput] result: \(String(describing: modelResult), privacy: .public)")
             // Safety floor merge: deterministic high/critical can never be downgraded by model

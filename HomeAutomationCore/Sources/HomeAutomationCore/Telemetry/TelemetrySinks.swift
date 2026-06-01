@@ -128,6 +128,11 @@ public actor OpenTelemetryJSONSink: TelemetrySink {
         if let value = event.graphNodeID { attributes.append(attribute("graph.node.id", value)) }
         if let value = event.agentID { attributes.append(attribute("agent.id", value)) }
         if let value = event.agentInvocationID { attributes.append(attribute("agent.invocation.id", value)) }
+        if let value = event.agentSessionID { attributes.append(attribute("agent.session.id", value)) }
+        if let value = event.agentRunID { attributes.append(attribute("agent.run.id", String(value))) }
+        if let value = event.toolID { attributes.append(attribute("tool.id", value)) }
+        if let value = event.toolSessionID { attributes.append(attribute("tool.session.id", value)) }
+        if let value = event.toolCallID { attributes.append(attribute("tool.call.id", value)) }
         if let value = event.componentKind { attributes.append(attribute("component.kind", value)) }
         if let value = event.componentID { attributes.append(attribute("component.id", value)) }
         if let value = event.status?.rawValue { attributes.append(attribute("status", value)) }
@@ -168,4 +173,3 @@ public actor OpenTelemetryJSONSink: TelemetrySink {
         return formatter.string(from: date)
     }
 }
-

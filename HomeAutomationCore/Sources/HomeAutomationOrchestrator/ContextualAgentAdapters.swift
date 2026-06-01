@@ -25,6 +25,8 @@ internal final class AgentRegistryBox: @unchecked Sendable {
 public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "ContextualHomeAgent")
     public let agent: Agent
+    public let agentSessionID: String
+    private let runCounter: AgentRunCounter
     private let makeInput: @Sendable (ResolutionContext) throws -> Agent.Input
     private let makePatch: @Sendable (Agent.Output, ResolutionContext) -> ResolutionContextPatch
 
@@ -39,8 +41,14 @@ public struct ContextualHomeAgent<Agent: HomeAgent>: AnyHomeAgent {
         makePatch: @escaping @Sendable (Agent.Output, ResolutionContext) -> ResolutionContextPatch
     ) {
         self.agent = agent
+        self.agentSessionID = UUID().uuidString
+        self.runCounter = AgentRunCounter()
         self.makeInput = makeInput
         self.makePatch = makePatch
+    }
+
+    public func nextAgentRunID() async -> Int {
+        await runCounter.nextRunID()
     }
 
     /// Executes the underlying agent by converting the context into its required input,

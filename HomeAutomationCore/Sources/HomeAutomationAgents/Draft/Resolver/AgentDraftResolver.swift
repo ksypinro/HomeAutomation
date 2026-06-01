@@ -55,7 +55,8 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             
             logger.debug("[resolveDraftWithReport] Attempting strategy: \(candidate.name, privacy: .public)")
             do {
-                let draft = try await resolver.resolveDraft(from: candidate.package)
+                let rawDraft = try await resolver.resolveDraft(from: candidate.package)
+                let draft = Self.canonicalizedDraft(rawDraft, using: candidate.package)
                 if draft.confidence >= confidenceThreshold {
                     logger.debug("[resolveDraftWithReport] Strategy \(candidate.name, privacy: .public) succeeded with confidence: \(draft.confidence)")
                     attempts.append(
@@ -207,7 +208,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
 
         let supportedCommands = device.supportedCommands[capability, default: HomeCapabilityRegistry.supportedCommands(for: capability)]
         guard device.capabilities.contains(capability),
-              supportedCommands.contains(command) else {
+              command == "getStatus" || supportedCommands.contains(command) else {
             return nil
         }
 
@@ -239,6 +240,93 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         )
     }
 
+    private static func canonicalizedDraft(
+        _ draft: HomeCommandDraft,
+        using package: HomeModelInstructionPackage
+    ) -> HomeCommandDraft {
+        guard let input = package.deterministicFallbackInput else {
+            return draft
+        }
+
+        var targetDeviceID = draft.targetDeviceID
+        var capability = draft.capability
+        var command = draft.command
+
+        if targetDeviceID == nil {
+            targetDeviceID = input.capabilityDecision?.targetDeviceID ?? input.aggregation.finalCandidateIDs.first
+        }
+        if capability == nil {
+            capability = input.capabilityDecision?.selectedCapability
+        }
+        if command == nil {
+            command = input.capabilityDecision?.selectedCommand
+        }
+
+        if let dottedCommand = command,
+           let normalized = normalizedDottedCommand(
+               dottedCommand,
+               capability: capability,
+               targetDeviceID: targetDeviceID,
+               input: input
+           ) {
+            capability = normalized.capability
+            command = normalized.command
+        }
+
+        guard targetDeviceID != draft.targetDeviceID ||
+            capability != draft.capability ||
+            command != draft.command else {
+            return draft
+        }
+
+        return HomeCommandDraft(
+            intent: draft.intent,
+            targetDeviceID: targetDeviceID,
+            targetGroupID: draft.targetGroupID,
+            capability: capability,
+            command: command,
+            parameters: draft.parameters,
+            needsClarification: draft.needsClarification,
+            clarificationQuestion: draft.clarificationQuestion,
+            requiresConfirmation: draft.requiresConfirmation,
+            confidence: draft.confidence
+        )
+    }
+
+    private static func normalizedDottedCommand(
+        _ command: String,
+        capability: String?,
+        targetDeviceID: String?,
+        input: HomeFinalResolutionInput
+    ) -> (capability: String, command: String)? {
+        let parts = command.split(separator: ".", omittingEmptySubsequences: true).map(String.init)
+        guard parts.count == 2 else {
+            return nil
+        }
+
+        let capabilityCandidate = parts[0]
+        let commandCandidate = parts[1]
+        if let capability, capability != capabilityCandidate {
+            return nil
+        }
+
+        guard let targetDeviceID,
+              let device = input.hydratedCandidates.first(where: { $0.id == targetDeviceID }),
+              device.capabilities.contains(capabilityCandidate) else {
+            return nil
+        }
+
+        let supportedCommands = device.supportedCommands[
+            capabilityCandidate,
+            default: HomeCapabilityRegistry.supportedCommands(for: capabilityCandidate)
+        ]
+        guard supportedCommands.contains(commandCandidate) else {
+            return nil
+        }
+
+        return (capabilityCandidate, commandCandidate)
+    }
+
     private static func intent(for command: String, state: HomeResolutionState) -> HomeAutomationIntent {
         switch command {
         case "on":
@@ -257,7 +345,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             return .unlock
         case "run":
             return .runRoutine
-        case "start", "startStream":
+        case "start", "startStream", "play":
             return .start
         case "stop", "stopStream":
             return .stop
@@ -270,6 +358,9 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         case "decreaseValue", "volumeDown", "channelDown":
             return .decreaseValue
         default:
+            if ["mute", "unmute", "fastForward", "rewind", "setInputSource", "setChannel", "launchApp"].contains(command) {
+                return .setValue
+            }
             if state.intent.topFamilies.contains(.statusQuery) {
                 return .getStatus
             }
@@ -282,6 +373,16 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
 
     private static func parameters(for command: String, state: HomeResolutionState) -> [HomeResolvedParameter] {
         guard commandRequiresParameters(command) else { return [] }
+
+        if command == "setInputSource", let inputSource = mediaInputSource(from: state.rawText) {
+            return [
+                HomeResolvedParameter(
+                    name: "inputSource",
+                    value: inputSource,
+                    confidence: state.slots.confidence
+                )
+            ]
+        }
 
         let valueParameters = state.slots.values.map {
             HomeResolvedParameter(
@@ -315,6 +416,26 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         default:
             return false
         }
+    }
+
+    private static func mediaInputSource(from text: String) -> String? {
+        let normalized = text.agentNormalizedHomeTokenString
+        if normalized.contains("hdmi 1") || normalized.contains("hdmi1") {
+            return "HDMI1"
+        }
+        if normalized.contains("hdmi 2") || normalized.contains("hdmi2") {
+            return "HDMI2"
+        }
+        if normalized.contains("usb") {
+            return "USB"
+        }
+        if normalized.contains(" av ") || normalized.hasSuffix(" av") || normalized.hasPrefix("av ") {
+            return "AV"
+        }
+        if normalized.contains("input tv") || normalized.contains("input to tv") || normalized.contains("source tv") || normalized.contains("source to tv") {
+            return "TV"
+        }
+        return nil
     }
 }
 

@@ -70,6 +70,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
     public let graphNodeID: String?
     public let agentID: String?
     public let agentInvocationID: String?
+    public let agentSessionID: String?
+    public let agentRunID: Int?
+    public let toolID: String?
+    public let toolSessionID: String?
+    public let toolCallID: String?
     public let componentKind: String?
     public let componentID: String?
     public let actionID: String?
@@ -89,6 +94,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
         graphNodeID: String? = nil,
         agentID: String? = nil,
         agentInvocationID: String? = nil,
+        agentSessionID: String? = nil,
+        agentRunID: Int? = nil,
+        toolID: String? = nil,
+        toolSessionID: String? = nil,
+        toolCallID: String? = nil,
         componentKind: String? = nil,
         componentID: String? = nil,
         actionID: String? = nil,
@@ -107,6 +117,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
         self.graphNodeID = graphNodeID
         self.agentID = agentID
         self.agentInvocationID = agentInvocationID
+        self.agentSessionID = agentSessionID
+        self.agentRunID = agentRunID
+        self.toolID = toolID
+        self.toolSessionID = toolSessionID
+        self.toolCallID = toolCallID
         self.componentKind = componentKind
         self.componentID = componentID
         self.actionID = actionID
@@ -127,6 +142,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
         graphNodeID: String? = nil,
         agentID: String? = nil,
         agentInvocationID: String? = nil,
+        agentSessionID: String? = nil,
+        agentRunID: Int? = nil,
+        toolID: String? = nil,
+        toolSessionID: String? = nil,
+        toolCallID: String? = nil,
         componentKind: String? = nil,
         componentID: String? = nil,
         actionID: String? = nil,
@@ -146,6 +166,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
             graphNodeID: graphNodeID ?? self.graphNodeID,
             agentID: agentID ?? self.agentID,
             agentInvocationID: agentInvocationID ?? self.agentInvocationID,
+            agentSessionID: agentSessionID ?? self.agentSessionID,
+            agentRunID: agentRunID ?? self.agentRunID,
+            toolID: toolID ?? self.toolID,
+            toolSessionID: toolSessionID ?? self.toolSessionID,
+            toolCallID: toolCallID ?? self.toolCallID,
             componentKind: componentKind ?? self.componentKind,
             componentID: componentID ?? self.componentID,
             actionID: actionID ?? self.actionID,
@@ -171,6 +196,11 @@ public struct HomeAutomationTelemetryEvent: Sendable, Codable {
     public let graphNodeID: String?
     public let agentID: String?
     public let agentInvocationID: String?
+    public let agentSessionID: String?
+    public let agentRunID: Int?
+    public let toolID: String?
+    public let toolSessionID: String?
+    public let toolCallID: String?
     public let actionID: String?
     public let conditionID: String?
     public let attempt: Int?
@@ -196,6 +226,11 @@ public struct HomeAutomationTelemetryEvent: Sendable, Codable {
         self.graphNodeID = context?.graphNodeID
         self.agentID = context?.agentID
         self.agentInvocationID = context?.agentInvocationID
+        self.agentSessionID = context?.agentSessionID
+        self.agentRunID = context?.agentRunID
+        self.toolID = context?.toolID
+        self.toolSessionID = context?.toolSessionID
+        self.toolCallID = context?.toolCallID
         self.actionID = context?.actionID
         self.conditionID = context?.conditionID
         self.attempt = context?.attempt
@@ -219,6 +254,11 @@ public struct HomeAutomationTelemetryEvent: Sendable, Codable {
             graphNodeID: graphNodeID,
             agentID: agentID,
             agentInvocationID: agentInvocationID,
+            agentSessionID: agentSessionID,
+            agentRunID: agentRunID,
+            toolID: toolID,
+            toolSessionID: toolSessionID,
+            toolCallID: toolCallID,
             actionID: actionID,
             conditionID: conditionID,
             attempt: attempt,
@@ -236,6 +276,7 @@ public actor HomeAutomationTelemetry {
 
     private let configuration: HomeAutomationTelemetryConfiguration
     private let sinks: [any TelemetrySink]
+    private var temporarySinks: [UUID: any TelemetrySink] = [:]
     private let redactor: TelemetryRedactor
 
     public init(
@@ -284,6 +325,11 @@ public actor HomeAutomationTelemetry {
             graphNodeID: context?.graphNodeID,
             agentID: context?.agentID,
             agentInvocationID: context?.agentInvocationID,
+            agentSessionID: context?.agentSessionID,
+            agentRunID: context?.agentRunID,
+            toolID: context?.toolID,
+            toolSessionID: context?.toolSessionID,
+            toolCallID: context?.toolCallID,
             componentKind: context?.componentKind,
             componentID: context?.componentID,
             actionID: context?.actionID,
@@ -295,7 +341,7 @@ public actor HomeAutomationTelemetry {
             durationMs: durationMs,
             payload: telemetryPayload
         )
-        for sink in sinks {
+        for sink in allSinks {
             await sink.append(event)
         }
     }
@@ -325,6 +371,11 @@ public actor HomeAutomationTelemetry {
             graphNodeID: mergedContext?.graphNodeID,
             agentID: mergedContext?.agentID,
             agentInvocationID: mergedContext?.agentInvocationID,
+            agentSessionID: mergedContext?.agentSessionID,
+            agentRunID: mergedContext?.agentRunID,
+            toolID: mergedContext?.toolID,
+            toolSessionID: mergedContext?.toolSessionID,
+            toolCallID: mergedContext?.toolCallID,
             componentKind: mergedContext?.componentKind,
             componentID: mergedContext?.componentID,
             actionID: mergedContext?.actionID,
@@ -337,29 +388,66 @@ public actor HomeAutomationTelemetry {
             durationMs: durationMs,
             payload: redactor.redact(payload)
         )
-        for sink in sinks {
+        for sink in allSinks {
             await sink.append(event)
         }
     }
 
     public func flush() async {
-        for sink in sinks {
+        for sink in allSinks {
             await sink.flush()
         }
     }
 
     public func sinkStats() async -> [TelemetrySinkStats] {
         var values: [TelemetrySinkStats] = []
-        for sink in sinks {
+        for sink in allSinks {
             values.append(await sink.stats())
         }
         return values
     }
 
+    @discardableResult
+    public func installTemporarySink(_ sink: any TelemetrySink) -> UUID {
+        let id = UUID()
+        temporarySinks[id] = sink
+        return id
+    }
+
+    public func removeTemporarySink(_ id: UUID) {
+        temporarySinks[id] = nil
+    }
+
+    public func withTemporarySink<Value: Sendable>(
+        _ sink: any TelemetrySink,
+        operation: @Sendable () async throws -> Value
+    ) async rethrows -> Value {
+        let id = installTemporarySink(sink)
+        do {
+            let value = try await operation()
+            await sink.flush()
+            removeTemporarySink(id)
+            return value
+        } catch {
+            await sink.flush()
+            removeTemporarySink(id)
+            throw error
+        }
+    }
+
+    private var allSinks: [any TelemetrySink] {
+        sinks + Array(temporarySinks.values)
+    }
+
     public func logAgentInput(_ input: String, inputType: String) async {
+        let context = HomeAutomationTelemetryScope.current
         await log(
             "agent.input",
+            context: context,
             payload: [
+                "agentID": context?.agentID ?? "",
+                "agentSessionID": context?.agentSessionID ?? "",
+                "agentRunID": context?.agentRunID.map(String.init) ?? "",
                 "inputType": inputType,
                 "input": input
             ]
@@ -367,57 +455,125 @@ public actor HomeAutomationTelemetry {
     }
 
     public func logAgentOutput(_ output: String, outputType: String, durationMs: Double? = nil) async {
+        let context = HomeAutomationTelemetryScope.current
         await log(
             "agent.output",
+            context: context,
             status: "completed",
             durationMs: durationMs,
             payload: [
+                "agentID": context?.agentID ?? "",
+                "agentSessionID": context?.agentSessionID ?? "",
+                "agentRunID": context?.agentRunID.map(String.init) ?? "",
                 "outputType": outputType,
                 "output": output
             ]
         )
     }
 
-    public func logToolInput(toolName: String, arguments: String) async {
+    public func startToolCall(
+        toolID: String,
+        toolSessionID: String? = nil,
+        toolCallID: String = UUID().uuidString,
+        arguments: String,
+        agentTrace: (any AgentToolTraceArguments)? = nil
+    ) async -> ToolTelemetryCallContext {
+        let startedAt = Date()
         let parent = HomeAutomationTelemetryScope.current
-        let context = parent?.merging(
+        let effectiveAgentID = agentTrace?.agentID ?? parent?.agentID
+        let effectiveAgentSessionID = agentTrace?.agentSessionID ?? parent?.agentSessionID
+        let effectiveAgentRunID = agentTrace?.agentRunID ?? parent?.agentRunID
+        let context = (parent ?? HomeAutomationTelemetryContext()).merging(
             spanID: TelemetryTraceContext.makeSpanID(),
             parentSpanID: parent?.spanID,
             spanKind: .toolCall,
-            stage: toolName
+            stage: toolID,
+            agentID: effectiveAgentID,
+            agentSessionID: effectiveAgentSessionID,
+            agentRunID: effectiveAgentRunID,
+            toolID: toolID,
+            toolSessionID: toolSessionID,
+            toolCallID: toolCallID
         )
         await log(
             "tool.input",
             context: context,
             status: .running,
             spanKind: .toolCall,
+            startedAt: startedAt,
             completedAt: nil,
             payload: TelemetryPayload(values: [
-                "toolName": .string(toolName),
+                "toolID": .string(toolID),
+                "toolName": .string(toolID),
+                "toolSessionID": .string(toolSessionID ?? ""),
+                "toolCallID": .string(toolCallID),
+                "agentID": .string(effectiveAgentID ?? ""),
+                "agentSessionID": .string(effectiveAgentSessionID ?? ""),
+                "agentRunID": effectiveAgentRunID.map(TelemetryValue.int) ?? .null,
                 "arguments": .string(arguments)
+            ], privacy: [
+                "toolSessionID": .internalID,
+                "toolCallID": .internalID,
+                "agentSessionID": .internalID
             ])
+        )
+        return ToolTelemetryCallContext(
+            startedAt: startedAt,
+            telemetryContext: context,
+            toolCallID: toolCallID
         )
     }
 
-    public func logToolOutput(toolName: String, output: String, durationMs: Double? = nil) async {
-        let parent = HomeAutomationTelemetryScope.current
-        let context = parent?.merging(
-            spanID: TelemetryTraceContext.makeSpanID(),
-            parentSpanID: parent?.spanID,
-            spanKind: .toolCall,
-            stage: toolName
-        )
+    public func finishToolCall(
+        _ callContext: ToolTelemetryCallContext,
+        output: String,
+        durationMs: Double? = nil
+    ) async {
+        let context = callContext.telemetryContext
         await log(
             "tool.output",
             context: context,
             status: .completed,
             spanKind: .toolCall,
+            startedAt: callContext.startedAt,
+            completedAt: Date(),
             durationMs: durationMs,
             payload: TelemetryPayload(values: [
-                "toolName": .string(toolName),
+                "toolID": .string(context.toolID ?? ""),
+                "toolName": .string(context.toolID ?? ""),
+                "toolSessionID": .string(context.toolSessionID ?? ""),
+                "toolCallID": .string(callContext.toolCallID),
+                "agentID": .string(context.agentID ?? ""),
+                "agentSessionID": .string(context.agentSessionID ?? ""),
+                "agentRunID": context.agentRunID.map(TelemetryValue.int) ?? .null,
                 "output": .string(output),
                 "outputCharacterCount": .int(output.count)
+            ], privacy: [
+                "toolSessionID": .internalID,
+                "toolCallID": .internalID,
+                "agentSessionID": .internalID
             ])
         )
+    }
+
+    public func logToolInput(toolName: String, arguments: String) async {
+        _ = await startToolCall(toolID: toolName, arguments: arguments)
+    }
+
+    public func logToolOutput(toolName: String, output: String, durationMs: Double? = nil) async {
+        let toolCallID = UUID().uuidString
+        let callContext = ToolTelemetryCallContext(
+            startedAt: Date(),
+            telemetryContext: (HomeAutomationTelemetryScope.current ?? HomeAutomationTelemetryContext()).merging(
+                spanID: TelemetryTraceContext.makeSpanID(),
+                parentSpanID: HomeAutomationTelemetryScope.current?.spanID,
+                spanKind: .toolCall,
+                stage: toolName,
+                toolID: toolName,
+                toolCallID: toolCallID
+            ),
+            toolCallID: toolCallID
+        )
+        await finishToolCall(callContext, output: output, durationMs: durationMs)
     }
 }

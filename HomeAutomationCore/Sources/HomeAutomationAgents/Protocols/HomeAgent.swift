@@ -19,8 +19,24 @@ public extension HomeAgent {
     }
 }
 
+public actor AgentRunCounter {
+    private var value = 0
+
+    public init() {}
+
+    public func nextRunID() -> Int {
+        value += 1
+        return value
+    }
+}
+
+public protocol AgentRuntimeIdentifiable: Sendable {
+    var agentSessionID: String { get }
+    func nextAgentRunID() async -> Int
+}
+
 /// Type-erased agent protocol for scheduler-level orchestration.
-public protocol AnyHomeAgent: Sendable {
+public protocol AnyHomeAgent: AgentRuntimeIdentifiable {
     var id: AgentID { get }
     var capabilities: Set<AgentCapability> { get }
     var manifest: AgentManifest { get }
@@ -32,5 +48,13 @@ public protocol AnyHomeAgent: Sendable {
 public extension AnyHomeAgent {
     var manifest: AgentManifest {
         AgentManifestDefaults.manifest(id: id, capabilities: capabilities)
+    }
+
+    var agentSessionID: String {
+        "untracked-\(id.rawValue)"
+    }
+
+    func nextAgentRunID() async -> Int {
+        0
     }
 }

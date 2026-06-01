@@ -165,6 +165,11 @@ public struct ObservabilityEvent: Sendable, Codable, Hashable {
     public let graphNodeID: String?
     public let agentID: String?
     public let agentInvocationID: String?
+    public let agentSessionID: String?
+    public let agentRunID: Int?
+    public let toolID: String?
+    public let toolSessionID: String?
+    public let toolCallID: String?
     public let componentKind: String?
     public let componentID: String?
     public let actionID: String?
@@ -191,6 +196,11 @@ public struct ObservabilityEvent: Sendable, Codable, Hashable {
         graphNodeID: String? = nil,
         agentID: String? = nil,
         agentInvocationID: String? = nil,
+        agentSessionID: String? = nil,
+        agentRunID: Int? = nil,
+        toolID: String? = nil,
+        toolSessionID: String? = nil,
+        toolCallID: String? = nil,
         componentKind: String? = nil,
         componentID: String? = nil,
         actionID: String? = nil,
@@ -217,6 +227,11 @@ public struct ObservabilityEvent: Sendable, Codable, Hashable {
         self.graphNodeID = graphNodeID
         self.agentID = agentID
         self.agentInvocationID = agentInvocationID
+        self.agentSessionID = agentSessionID
+        self.agentRunID = agentRunID
+        self.toolID = toolID
+        self.toolSessionID = toolSessionID
+        self.toolCallID = toolCallID
         self.componentKind = componentKind
         self.componentID = componentID
         self.actionID = actionID
@@ -253,4 +268,3 @@ public protocol TelemetrySink: Sendable {
     func flush() async
     func stats() async -> TelemetrySinkStats
 }
-

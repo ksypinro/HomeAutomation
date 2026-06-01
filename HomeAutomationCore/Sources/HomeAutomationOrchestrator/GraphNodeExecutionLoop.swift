@@ -273,6 +273,8 @@ extension GraphScheduler {
             start = Date()
             await metrics.markQueuedStart(nodeID: node.id, at: start)
             await metrics.markRunning(nodeID: node.id, agentID: agentID, startedAt: start)
+            let agentSessionID = selection.agent.agentSessionID
+            let agentRunID = await selection.agent.nextAgentRunID()
             let telemetryContext = baseTelemetryContext.merging(
                 spanID: TelemetryTraceContext.makeSpanID(),
                 parentSpanID: nodeSpanID,
@@ -284,6 +286,8 @@ extension GraphScheduler {
                     agentID: agentID.rawValue,
                     attempt: attemptCount
                 ),
+                agentSessionID: agentSessionID,
+                agentRunID: agentRunID,
                 attempt: attemptCount
             )
             await HomeAutomationTelemetry.shared.log(
@@ -291,6 +295,9 @@ extension GraphScheduler {
                 context: telemetryContext,
                 status: "running",
                 payload: [
+                    "agentID": agentID.rawValue,
+                    "agentSessionID": agentSessionID,
+                    "agentRunID": String(agentRunID),
                     "timeoutMs": String(selection.agent.timeoutNanoseconds / 1_000_000),
                     "manifestCapabilities": selection.manifest.capabilities.map(\.rawValue).sorted().joined(separator: ",")
                 ]

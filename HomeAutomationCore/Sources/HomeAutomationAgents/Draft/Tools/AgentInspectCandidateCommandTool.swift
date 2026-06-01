@@ -2,8 +2,10 @@ import Foundation
 import FoundationModels
 import HomeAutomationCore
 
-public struct AgentInspectCandidateCommandTool: Tool {
+public struct AgentInspectCandidateCommandTool: Tool, ToolRuntimeIdentifiable {
     public let name = "inspectCandidateCommand"
+    public var toolID: String { name }
+    public let toolSessionID = UUID().uuidString
     public let description = "Inspects a device capability, supported commands, modes, ranges, validation, and risk in one compact lookup."
     private let registry: any DeviceRegistryProtocol
     private let outputSizeStore: AgentToolOutputSizeStore
@@ -17,7 +19,7 @@ public struct AgentInspectCandidateCommandTool: Tool {
     }
 
     @Generable
-    public struct Arguments {
+    public struct Arguments: AgentToolTraceArguments {
         @Guide(description: "Device ID from hydrated candidates or tool output.")
         public let deviceID: String
 
@@ -26,18 +28,34 @@ public struct AgentInspectCandidateCommandTool: Tool {
 
         @Guide(description: "Optional command to validate for the capability.")
         public let command: String?
+        @Guide(description: "Tracing only: caller agent ID. Pass the value provided in tool trace instructions.")
+        public let agentID: String?
+        @Guide(description: "Tracing only: caller agent session ID. Pass the value provided in tool trace instructions.")
+        public let agentSessionID: String?
+        @Guide(description: "Tracing only: caller agent run ID. Pass the value provided in tool trace instructions.")
+        public let agentRunID: Int?
 
-        public init(deviceID: String, capability: String? = nil, command: String? = nil) {
+        public init(
+            deviceID: String,
+            capability: String? = nil,
+            command: String? = nil,
+            agentID: String? = nil,
+            agentSessionID: String? = nil,
+            agentRunID: Int? = nil
+        ) {
             self.deviceID = deviceID
             self.capability = capability
             self.command = command
+            self.agentID = agentID
+            self.agentSessionID = agentSessionID
+            self.agentRunID = agentRunID
         }
     }
 
     public func call(arguments: Arguments) async throws -> String {
-        let startedAt = await agentStartToolTelemetry(toolName: name, arguments: arguments)
+        let callContext = await agentStartToolTelemetry(toolID: toolID, toolSessionID: toolSessionID, arguments: arguments)
         guard let device = await agentToolDevice(arguments.deviceID, in: registry) else {
-            return await recordOutput(#"{"valid":false,"reason":"device unavailable"}"#, startedAt: startedAt)
+            return await recordOutput(#"{"valid":false,"reason":"device unavailable"}"#, callContext: callContext)
         }
 
         let inspectedCapabilities = arguments.capability.map { [$0] } ?? device.capabilities
@@ -64,7 +82,7 @@ public struct AgentInspectCandidateCommandTool: Tool {
             ]
         }
 
-        return await recordOutput(AgentToolFormatting.jsonLines(payload), startedAt: startedAt)
+        return await recordOutput(AgentToolFormatting.jsonLines(payload), callContext: callContext)
     }
 
     private func validationReason(capabilityValid: Bool, commandValid: Bool, commandProvided: Bool) -> String {
@@ -73,12 +91,11 @@ public struct AgentInspectCandidateCommandTool: Tool {
         return commandValid ? "supported" : "command unavailable"
     }
 
-    private func recordOutput(_ output: String, startedAt: Date) async -> String {
+    private func recordOutput(_ output: String, callContext: ToolTelemetryCallContext) async -> String {
         await agentFinishToolTelemetry(
-            toolName: name,
             output: output,
             outputSizeStore: outputSizeStore,
-            startedAt: startedAt
+            callContext: callContext
         )
     }
 }

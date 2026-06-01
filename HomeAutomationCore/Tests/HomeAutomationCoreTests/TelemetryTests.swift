@@ -24,6 +24,11 @@ struct TelemetryTests {
             graphNodeID: "draftGeneration",
             agentID: "draftGeneration",
             agentInvocationID: "12345678-a1-draftGeneration-01",
+            agentSessionID: "agent-session-12345678",
+            agentRunID: 9,
+            toolID: "findDeviceCandidates",
+            toolSessionID: "tool-session-12345678",
+            toolCallID: "tool-call-12345678",
             actionID: "a1",
             attempt: 1,
             runtimeMode: "graph"
@@ -53,6 +58,11 @@ struct TelemetryTests {
         #expect(jsonlFile.lastPathComponent.hasSuffix(".jsonl"))
         #expect(text.contains("[RUN:12345678]"))
         #expect(text.contains("[INV:12345678-a1-draftGeneration-01]"))
+        #expect(text.contains("[AGENT_SESSION:agent-se]"))
+        #expect(text.contains("[AGENT_RUN:9]"))
+        #expect(text.contains("[TOOL:findDeviceCandidates]"))
+        #expect(text.contains("[TOOL_SESSION:tool-ses]"))
+        #expect(text.contains("[TOOL_CALL:tool-cal]"))
         #expect(text.contains("[OP:automationCreation]"))
         #expect(text.contains("[ACTION:a1]"))
         #expect(text.contains("[AGENT:draftGeneration]"))
@@ -60,6 +70,11 @@ struct TelemetryTests {
         #expect(text.contains(#""outputTruncated":true"#))
         #expect(text.contains(#""outputCharacterCount":32"#))
         #expect(jsonl.contains(#""agentInvocationID":"12345678-a1-draftGeneration-01""#))
+        #expect(jsonl.contains(#""agentSessionID":"agent-session-12345678""#))
+        #expect(jsonl.contains(#""agentRunID":9"#))
+        #expect(jsonl.contains(#""toolID":"findDeviceCandidates""#))
+        #expect(jsonl.contains(#""toolSessionID":"tool-session-12345678""#))
+        #expect(jsonl.contains(#""toolCallID":"tool-call-12345678""#))
         #expect(jsonl.contains(#""eventType":"agent.output""#))
         #expect(jsonl.contains(#""runtimeMode":"graph""#))
     }

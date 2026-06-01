@@ -117,12 +117,12 @@ public struct AgentInstructionSetFactory: Sendable {
 
         var fallback: HomeModelInstructionPackage?
         for variant in variants {
-            let instructionText = Self.instructionText(
+            let instructionText = HomeAutomationToolTraceInstructions.append(to: Self.instructionText(
                 focus: focus,
                 input: input,
                 extraRules: extraRules,
                 knowledgeBlock: variant.knowledgeBlock
-            )
+            ))
             let prompt = Self.promptText(
                 input: input,
                 candidateDescription: variant.candidateDescription,
@@ -158,15 +158,16 @@ public struct AgentInstructionSetFactory: Sendable {
             }
         }
 
+        let fallbackInstructionText = HomeAutomationToolTraceInstructions.append(to: focus)
         return fallback ?? HomeModelInstructionPackage(
-            instructions: Instructions(focus),
-            instructionText: focus,
+            instructions: Instructions(fallbackInstructionText),
+            instructionText: fallbackInstructionText,
             prompt: input.rawText,
             tools: tools,
             useAdapter: false,
             generationMode: .greedy,
             contextBudgetReport: budgeter.report(
-                instructionText: focus,
+                instructionText: fallbackInstructionText,
                 prompt: input.rawText,
                 tools: tools,
                 candidateCount: input.hydratedCandidates.count,

@@ -66,13 +66,26 @@ public struct AutomationActionResolver: Sendable {
         await seedDirectCommandRoutingContext(for: actionText, in: contextStore)
 
         let actionID = HomeAutomationTelemetryScope.current?.actionID ?? "a1"
+        let subgraphEventBus = AgentEventBus()
+        let eventForwarder = Task {
+            for await event in await subgraphEventBus.stream() {
+                await eventBus.publish(
+                    Self.namespacedPipelineEvent(
+                        event,
+                        actionID: actionID
+                    )
+                )
+            }
+        }
         let execution = await executeDirectCommandPipeline(
             text: actionText,
             actionID: actionID,
             contextStore: contextStore,
-            eventBus: eventBus,
+            eventBus: subgraphEventBus,
             runID: runID
         )
+        await subgraphEventBus.finish()
+        await eventForwarder.value
 
         let ctx = await contextStore.snapshot()
         let resolution = ctx.resolution ?? Self.resolution(from: execution.exit)
@@ -292,11 +305,27 @@ public struct AutomationActionResolver: Sendable {
         _ event: OrchestratorPipelineEvent,
         actionID: String
     ) -> OrchestratorPipelineEvent {
-        let agentID = event.agentID ?? event.stage
+        let prefix = "\(AgentID.automationActionResolution.rawValue):\(actionID)"
+        let stage = event.stage == prefix || event.stage.hasPrefix("\(prefix)/")
+            ? event.stage
+            : "\(prefix)/\(event.stage)"
         return OrchestratorPipelineEvent(
             runID: event.runID,
-            stage: "\(AgentID.automationActionResolution.rawValue):\(actionID)/\(event.stage)",
-            agentID: "\(agentID):\(actionID)",
+            stage: stage,
+            agentID: event.agentID,
+            traceID: event.traceID,
+            spanID: event.spanID,
+            parentSpanID: event.parentSpanID,
+            graphID: event.graphID,
+            graphNodeID: event.graphNodeID,
+            agentInvocationID: event.agentInvocationID,
+            agentSessionID: event.agentSessionID,
+            agentRunID: event.agentRunID,
+            componentKind: event.componentKind,
+            componentID: event.componentID,
+            actionID: event.actionID ?? actionID,
+            conditionID: event.conditionID,
+            runtimeMode: event.runtimeMode,
             status: event.status,
             detail: event.detail
         )
