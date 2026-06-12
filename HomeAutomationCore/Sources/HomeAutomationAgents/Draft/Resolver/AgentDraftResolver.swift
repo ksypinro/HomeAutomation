@@ -273,9 +273,16 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             command = normalized.command
         }
 
+        let parameters = canonicalizedParameters(
+            draft.parameters,
+            command: command,
+            state: input.resolutionState
+        )
+
         guard targetDeviceID != draft.targetDeviceID ||
             capability != draft.capability ||
-            command != draft.command else {
+            command != draft.command ||
+            parameters != draft.parameters else {
             return draft
         }
 
@@ -285,7 +292,7 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             targetGroupID: draft.targetGroupID,
             capability: capability,
             command: command,
-            parameters: draft.parameters,
+            parameters: parameters,
             needsClarification: draft.needsClarification,
             clarificationQuestion: draft.clarificationQuestion,
             requiresConfirmation: draft.requiresConfirmation,
@@ -325,6 +332,88 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
         }
 
         return (capabilityCandidate, commandCandidate)
+    }
+
+    private static func canonicalizedParameters(
+        _ parameters: [HomeResolvedParameter],
+        command: String?,
+        state: HomeResolutionState
+    ) -> [HomeResolvedParameter] {
+        guard let command, commandRequiresParameters(command) else {
+            return parameters
+        }
+
+        let fallbackParameters = Self.parameters(for: command, state: state)
+        guard !fallbackParameters.isEmpty else {
+            return parameters
+        }
+        guard !parameters.isEmpty else {
+            return fallbackParameters
+        }
+        guard numericParameterCommands.contains(command),
+              !parameters.contains(where: { $0.numericValue != nil }) else {
+            return parameters
+        }
+
+        guard let fallbackNumber = fallbackParameters.first(where: { $0.numericValue != nil }) else {
+            return parameters.map(Self.parameterWithParsedNumericValue)
+        }
+
+        var repairedNumeric = false
+        let repaired = parameters.map { parameter in
+            guard !repairedNumeric,
+                  parameter.numericValue == nil,
+                  normalizedParameterName(parameter.name) == normalizedParameterName(fallbackNumber.name) ||
+                    parameter.name == "value" ||
+                    fallbackNumber.name == "value" else {
+                return parameter
+            }
+            repairedNumeric = true
+            return HomeResolvedParameter(
+                name: parameter.name,
+                value: nil,
+                numericValue: fallbackNumber.numericValue,
+                unit: parameter.unit ?? fallbackNumber.unit,
+                confidence: max(parameter.confidence, fallbackNumber.confidence)
+            )
+        }
+
+        if repairedNumeric {
+            return repaired
+        }
+        return [fallbackNumber] + parameters
+    }
+
+    private static func normalizedParameterName(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
+    }
+
+    private static func parameterWithParsedNumericValue(_ parameter: HomeResolvedParameter) -> HomeResolvedParameter {
+        guard parameter.numericValue == nil,
+              let value = parameter.value,
+              let parsed = firstNumber(in: value) else {
+            return parameter
+        }
+        return HomeResolvedParameter(
+            name: parameter.name,
+            value: nil,
+            numericValue: parsed,
+            unit: parameter.unit,
+            confidence: parameter.confidence
+        )
+    }
+
+    private static func firstNumber(in text: String) -> Double? {
+        let pattern = #"[-+]?\d*\.?\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range, in: text) else {
+            return nil
+        }
+        return Double(text[range])
     }
 
     private static func intent(for command: String, state: HomeResolutionState) -> HomeAutomationIntent {
@@ -417,6 +506,22 @@ public struct AgentDraftResolver: HomeCommandDraftResolving {
             return false
         }
     }
+
+    private static let numericParameterCommands: Set<String> = [
+        "setLevel",
+        "setColorTemperature",
+        "setHue",
+        "setSaturation",
+        "setCoolingSetpoint",
+        "setHeatingSetpoint",
+        "setShadeLevel",
+        "setVolume",
+        "setChannel",
+        "setOvenSetpoint",
+        "increaseValue",
+        "decreaseValue",
+        "setRotation"
+    ]
 
     private static func mediaInputSource(from text: String) -> String? {
         let normalized = text.agentNormalizedHomeTokenString

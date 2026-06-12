@@ -49,6 +49,12 @@ public struct CapabilityResolutionAgent: HomeAgent {
         self.resolve = Self.resolveDeterministically
     }
 
+    public init(worker: CapabilityResolutionWorker) {
+        self.resolve = { input in
+            try await worker.resolve(input)
+        }
+    }
+
     public func run(
         _ input: CapabilityResolutionInput,
         context: ResolutionContext
@@ -57,7 +63,7 @@ public struct CapabilityResolutionAgent: HomeAgent {
         return try await resolve(input)
     }
 
-    private static func resolveDeterministically(_ input: CapabilityResolutionInput) -> HomeCapabilityDecision {
+    public static func resolveDeterministically(_ input: CapabilityResolutionInput) -> HomeCapabilityDecision {
         let target = selectedDevice(from: input)
         let alternatives = rankedAlternatives(input: input, target: target)
         let selected = alternatives.first

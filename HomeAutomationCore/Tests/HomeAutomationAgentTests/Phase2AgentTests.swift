@@ -599,6 +599,59 @@ struct Phase2AgentTests {
     }
 
     @Test
+    func draftResolverPreservesNumericSlotWhenModelReturnsStringValue() async throws {
+        let device = try await Self.device(id: "living_room_tv")
+        let package = Self.package(
+            fallbackInput: HomeFinalResolutionInput(
+                rawText: "set the volume of living room TV to 88",
+                resolutionState: Self.state("set the volume of living room TV to 88"),
+                hydratedCandidates: [device],
+                aggregation: HomeCandidateAggregationResult(
+                    finalCandidateIDs: [device.id],
+                    needsClarification: false,
+                    confidence: 0.95
+                ),
+                capabilityDecision: HomeCapabilityDecision(
+                    selectedCapability: "audioVolume",
+                    selectedCommand: "setVolume",
+                    targetDeviceID: device.id,
+                    alternatives: [],
+                    evidence: ["Deterministic test volume decision"],
+                    confidence: 0.95
+                )
+            )
+        )
+        let modelDraft = HomeCommandDraft(
+            intent: .setValue,
+            targetDeviceID: device.id,
+            capability: "audioVolume",
+            command: "setVolume",
+            parameters: [
+                HomeResolvedParameter(name: "value", value: "88", confidence: 1)
+            ],
+            needsClarification: false,
+            requiresConfirmation: false,
+            confidence: 0.9
+        )
+        let resolver = AgentDraftResolver(
+            adapterProvider: HomeAdapterModelProvider(
+                adapterSource: HomeStaticAdapterModelSource(configuration: nil)
+            ),
+            resolver: FixedDraftResolver(draft: modelDraft)
+        )
+
+        let draft = try await resolver.resolveDraft(from: package)
+
+        #expect(draft.targetDeviceID == "living_room_tv")
+        #expect(draft.capability == "audioVolume")
+        #expect(draft.command == "setVolume")
+        #expect(draft.parameters.first?.name == "value")
+        #expect(draft.parameters.first?.value == nil)
+        #expect(draft.parameters.first?.numericValue == 88)
+        #expect(HomeParameterValidator.validate(draft.parameters, capability: "audioVolume", command: "setVolume", device: device))
+    }
+
+    @Test
     func draftResolverSkipsRemainingAdapterAttemptsAfterAdapterFailure() async throws {
         let metrics = AgentDraftResolverMetrics()
         let resolver = AgentDraftResolver(
@@ -959,6 +1012,14 @@ private struct AdapterFailingDraftResolver: HomeCommandDraftResolving {
             )
         }
         throw ContextWindowTestError()
+    }
+}
+
+private struct FixedDraftResolver: HomeCommandDraftResolving {
+    let draft: HomeCommandDraft
+
+    func resolveDraft(from package: HomeModelInstructionPackage) async throws -> HomeCommandDraft {
+        draft
     }
 }
 
