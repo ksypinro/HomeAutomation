@@ -327,7 +327,11 @@ public enum DefaultAgentRegistryFactory {
                 makePatch: { output, _ in patch(.candidateHydration, [ResolutionContextPatchKey.hydratedCandidates.rawValue: output]) }
             ),
             ContextualHomeAgent(
-                agent: CapabilityResolutionAgent(),
+                agent: CapabilityResolutionAgent(
+                    worker: CapabilityResolutionWorker(
+                        foundationModelAvailability: foundationModelAvailability
+                    )
+                ),
                 makeInput: { context in
                     try capabilityResolutionInput(from: context)
                 },
