@@ -485,6 +485,16 @@ Generated from `HomeAutomationCore/Sources/**/*.swift`. This inventory is intent
 | `RiskSection` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/DraftEnvelope.swift` | local | pure model | Local construction | Verifier-loop envelope risk section with raise-only floor. |
 | `RuleCandidateScorer` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Fallback/Rule/RuleCandidateScorer.swift` | local | pure model | Local construction | Extracted candidate scoring logic shared by AgentRuleBasedResolver and DeterministicDraftPipeline. |
 | `TriggerDraft` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/DraftEnvelope.swift` | local | pure model | Local construction | Verifier-loop envelope trigger section. |
+| `DraftDispute` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/Verifier/DraftVerdict.swift` | local | pure model | Local construction | Single field dispute raised by the verifier. |
+| `DraftVerdict` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/Verifier/DraftVerdict.swift` | local | pure model | Local construction | Verifier output: accepted/disputed with field-level evidence. |
+| `DraftVerifierWorkerSession` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/Verifier/DraftVerifierWorkerSession.swift` | local | dependency | VerifierLoopCoordinator | FM-backed worker session for draft verification. |
+| `FieldConfusion` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/VerifierShadowRunner.swift` | local | pure model | Local construction | Per-field confusion metrics for shadow evaluation. |
+| `VerifierPrompt` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/Verifier/VerifierPromptBuilder.swift` | local | pure model | Local construction | Budget-aware prompt for the draft verifier. |
+| `VerifierPromptBuilder` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/Verifier/VerifierPromptBuilder.swift` | local | dependency | VerifierLoopCoordinator | Builds human-readable prompts from draft envelopes. |
+| `VerifierShadowCaseResult` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/VerifierShadowRunner.swift` | local | pure model | Local construction | Per-case result from verifier shadow evaluation. |
+| `VerifierShadowReport` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/VerifierShadowRunner.swift` | local | pure model | Local construction | Aggregate report from verifier shadow evaluation. |
+| `VerifierShadowRunner` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/VerifierShadowRunner.swift` | evaluation setup | dependency | EvaluationCoordinator | Shadow-mode evaluation runner for the verifier loop. |
+| `VerifierUnavailable` | struct | HomeAutomationAgents | `HomeAutomationCore/Sources/HomeAutomationAgents/Loop/Verifier/DraftVerdict.swift` | local | pure model | Local construction | Error thrown when FM is unavailable for verification. |
 
 ## Classification Rules
 

@@ -75,6 +75,8 @@ let package = Package(
         .executableTarget(
             name: "HomeAutomationEvalCLI",
             dependencies: [
+                "HomeAutomationCore",
+                "HomeAutomationOrchestrator",
                 "HomeAutomationEvaluation"
             ]
         ),

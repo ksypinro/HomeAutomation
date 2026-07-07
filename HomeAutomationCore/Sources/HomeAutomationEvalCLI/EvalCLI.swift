@@ -1,10 +1,18 @@
 import Foundation
+import HomeAutomationCore
 import HomeAutomationEvaluation
+import HomeAutomationOrchestrator
 
 @main
 struct HomeAutomationEvalCLI {
     static func main() async throws {
         let options = try EvaluationCLIOptions.parse(CommandLine.arguments.dropFirst())
+
+        if options.shadowVerify {
+            try await runShadowVerify(options: options)
+            return
+        }
+
         if options.generateDataset {
             let fixtureLimit = options.fixtureLimit ?? 10
             let commandsPerFixture = options.caseLimit.map { max(1, $0 / max(fixtureLimit, 1)) } ?? 100
@@ -63,6 +71,23 @@ struct HomeAutomationEvalCLI {
         fixtureLimit > 10 || commandsPerFixture > 100 ? "full-v1" : "seed-v1"
     }
 
+    private static func runShadowVerify(options: EvaluationCLIOptions) async throws {
+        let registry = DeviceCoordinator.makeMockDeviceRegistry()
+        let runner = VerifierShadowRunner(registry: registry)
+        let cases = EvaluationCorpus.defaultCases
+        let report = await runner.run(
+            cases: cases,
+            caseLimit: options.caseLimit
+        )
+        try VerifierShadowRunner.writeReport(report, to: options.outputURL)
+
+        print("Verifier shadow evaluation: \(report.verifiedCases)/\(report.totalCases) verified, \(report.skippedCases) skipped")
+        print("Accept rate: \(String(format: "%.1f%%", report.acceptRate * 100))")
+        print("False-accept rate: \(String(format: "%.1f%%", report.falseAcceptRate * 100))")
+        print("False-reject rate: \(String(format: "%.1f%%", report.falseRejectRate * 100))")
+        print("Report: \(options.outputURL.appendingPathComponent("verifier-shadow-report.json").path)")
+    }
+
     private static func makeParaphraseProvider(
         for mode: EvaluationCommandGenerationMode
     ) -> any CommandParaphraseProvider {
@@ -90,6 +115,7 @@ private struct EvaluationCLIOptions {
     let fixtureLimit: Int?
     let generateDataset: Bool
     let generationMode: EvaluationCommandGenerationMode
+    let shadowVerify: Bool
 
     static func parse(_ arguments: ArraySlice<String>) throws -> EvaluationCLIOptions {
         var mode: EvaluationMode = .deterministic
@@ -104,6 +130,7 @@ private struct EvaluationCLIOptions {
         var fixtureLimit: Int?
         var generateDataset = false
         var generationMode: EvaluationCommandGenerationMode = .codex
+        var shadowVerify = false
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -168,6 +195,8 @@ private struct EvaluationCLIOptions {
                     throw EvaluationCLIError.invalidArgument("--generation-mode")
                 }
                 generationMode = parsed
+            case "--shadow-verify":
+                shadowVerify = true
             case "--help", "-h":
                 print(Self.help)
                 Foundation.exit(0)
@@ -188,7 +217,8 @@ private struct EvaluationCLIOptions {
             caseLimit: caseLimit,
             fixtureLimit: fixtureLimit,
             generateDataset: generateDataset,
-            generationMode: generationMode
+            generationMode: generationMode,
+            shadowVerify: shadowVerify
         )
     }
 
@@ -228,6 +258,7 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --generate-dataset true --generation-mode codex --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1
       swift run home-automation-eval --generate-dataset true --generation-mode template --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-template
       swift run home-automation-eval --generate-dataset true --generation-mode foundation-model --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-live
+      swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
     """
 }
 
