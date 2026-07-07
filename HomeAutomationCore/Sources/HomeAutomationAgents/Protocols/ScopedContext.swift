@@ -300,4 +300,14 @@ public enum ContextArtifactKeys {
             debugDescription: "SmartThings rule creation receipt."
         )
     }
+
+    public static func draftEnvelope(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<DraftEnvelope> {
+        ContextArtifactKey(
+            "draftEnvelope",
+            scope: scope,
+            debugDescription: "Verifier-loop draft envelope containing the deterministic or repaired draft."
+        )
+    }
 }
