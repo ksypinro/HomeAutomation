@@ -1,5 +1,20 @@
 import Foundation
 
+/// Shared soft-timeout budget for NLU-class Foundation Model calls.
+///
+/// A soft timeout races the model call against a deadline; on expiry the
+/// worker session returns its deterministic fallback instead of waiting for
+/// a contended or hung model response.
+public struct NLUSoftTimeoutBudget: Sendable {
+    public var nluClassNanoseconds: UInt64
+
+    public init(nluClassNanoseconds: UInt64) {
+        self.nluClassNanoseconds = nluClassNanoseconds
+    }
+
+    public static let `default` = NLUSoftTimeoutBudget(nluClassNanoseconds: 4_000_000_000)
+}
+
 enum NLUModelSoftTimeoutError: LocalizedError {
     case timedOut(agentID: AgentID, timeoutNanoseconds: UInt64)
 

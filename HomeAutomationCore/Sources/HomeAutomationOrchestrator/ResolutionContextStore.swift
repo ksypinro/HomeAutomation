@@ -155,6 +155,14 @@ public actor ResolutionContextStore {
         context.scopedValue(for: key)
     }
 
+    public func setArtifact<Value: Sendable>(
+        _ value: Value,
+        for key: ContextArtifactKey<Value>
+    ) {
+        logger.debug("Setting context artifact \(key.name, privacy: .public) in \(key.scope.description, privacy: .public).")
+        context.setArtifact(value, for: key)
+    }
+
     /// Sets the command resolution outcome.
     public func setResolution(_ value: HomeCommandResolution) {
         logger.debug("Setting final resolution.")

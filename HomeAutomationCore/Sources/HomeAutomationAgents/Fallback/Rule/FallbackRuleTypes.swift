@@ -157,7 +157,10 @@ struct AgentRuleIntent {
             self.init(
                 family: .power,
                 intent: .turnOff,
-                capabilityPreferences: [.init(capability: "switch", command: "off")],
+                capabilityPreferences: [
+                    .init(capability: "switch", command: "off"),
+                    .init(capability: "windowShade", command: "close")
+                ],
                 parameters: [],
                 deviceTypeHints: Set(AgentTextParser.deviceTypes(for: normalized).map(\.agentNormalizedHomeTokenString))
             )
@@ -167,7 +170,10 @@ struct AgentRuleIntent {
             self.init(
                 family: .power,
                 intent: .turnOn,
-                capabilityPreferences: [.init(capability: "switch", command: "on")],
+                capabilityPreferences: [
+                    .init(capability: "switch", command: "on"),
+                    .init(capability: "windowShade", command: "open")
+                ],
                 parameters: [],
                 deviceTypeHints: Set(AgentTextParser.deviceTypes(for: normalized).map(\.agentNormalizedHomeTokenString))
             )

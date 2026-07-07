@@ -304,7 +304,10 @@ struct Phase5RAGIntegrationTests {
             )
         }
 
-        _ = try await agent.run("turn on the lamp", context: Self.context(text: "turn on the lamp"))
+        // Long enough (>= 8 tokens) and deterministically uncertain enough that
+        // few-shot enrichment applies; short confident fragments skip it (A4).
+        let text = "could you kindly turn on the lamp for me please"
+        _ = try await agent.run(text, context: Self.context(text: text))
         let seen = await capture.value()
 
         #expect(seen.contains("Relevant prior smart-home examples for semantic NLU intent and device type classification"))

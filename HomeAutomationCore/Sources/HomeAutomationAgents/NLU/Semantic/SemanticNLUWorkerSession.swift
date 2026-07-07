@@ -5,26 +5,35 @@ import os
 
 public struct SemanticNLUWorkerSession: Sendable {
     private let classify: (@Sendable (String) async throws -> HomeSemanticNLUResult)?
+    private let modelClassify: (@Sendable (String) async throws -> HomeSemanticNLUResult)?
     private let foundationModelAvailability: @Sendable () -> Bool
     private let modelCallPolicy: NLUModelCallPolicy
+    private let modelSoftTimeoutNanoseconds: UInt64
     private let deviceTypeCatalog: [DeviceTypeCatalogEntry]
     private let logger = Logger(subsystem: "HomeAutomation", category: "NLU.SemanticNLUAgent")
 
     public init(
         classify: (@Sendable (String) async throws -> HomeSemanticNLUResult)? = nil,
+        modelClassify: (@Sendable (String) async throws -> HomeSemanticNLUResult)? = nil,
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
         modelCallPolicy: NLUModelCallPolicy = .default,
+        modelSoftTimeoutNanoseconds: UInt64 = NLUSoftTimeoutBudget.default.nluClassNanoseconds,
         deviceTypeCatalog: [DeviceTypeCatalogEntry]? = nil
     ) {
         self.classify = classify
+        self.modelClassify = modelClassify
         self.foundationModelAvailability = foundationModelAvailability
         self.modelCallPolicy = modelCallPolicy
+        self.modelSoftTimeoutNanoseconds = modelSoftTimeoutNanoseconds
         self.deviceTypeCatalog = deviceTypeCatalog ?? AvailableDeviceTypesTool.defaultCatalog()
     }
 
-    public func classifySemanticNLU(_ text: String) async throws -> HomeSemanticNLUResult {
+    public func classifySemanticNLU(
+        _ text: String,
+        modeOverride: NLUModelCallMode? = nil
+    ) async throws -> HomeSemanticNLUResult {
         logger.debug("[Input] text: \(text, privacy: .public)")
         if let classify {
             let result = try await classify(text)
@@ -32,6 +41,7 @@ public struct SemanticNLUWorkerSession: Sendable {
             return result
         }
 
+        let effectivePolicy = modelCallPolicy.overridingMode(modeOverride)
         let deterministicState = AgentTextParser.deterministicState(for: text)
         let fallback = HomeSemanticNLUResult(
             intent: deterministicState.intent,
@@ -44,7 +54,14 @@ public struct SemanticNLUWorkerSession: Sendable {
             return fallback
         }
 
-        let tool = AvailableDeviceTypesTool(catalog: deviceTypeCatalog)
+        guard effectivePolicy.shouldUseModel(task: .semanticNLU, deterministicState: deterministicState) else {
+            logger.info("[Policy] Deterministic semantic NLU confidence meets threshold (mode: \(effectivePolicy.mode.rawValue, privacy: .public)); skipping model call.")
+            return fallback
+        }
+
+        let catalogLines = deviceTypeCatalog
+            .map { "- \($0.id) (\($0.displayName))" }
+            .joined(separator: "\n")
         let instructionsText = """
         You are a smart-home semantic NLU classifier.
 
@@ -52,15 +69,17 @@ public struct SemanticNLUWorkerSession: Sendable {
         - intent: broad smart-home intent families, ordered by likelihood.
         - deviceType: likely canonical device type identifiers.
 
+        Valid device type identifiers:
+        \(catalogLines)
+
         Rules:
-        1. FIRST call the getAvailableDeviceTypes tool before producing deviceType.
-        2. Return device type identifiers only from the tool results. Never invent identifiers.
-        3. Do not extract rooms, nicknames, numeric values, modes, or risk here.
-        4. If no device type is mentioned or inferable, return an empty deviceTypes list.
-        5. Keep internal values in English even when the input is multilingual.
-        6. Treat Bixby placeholders such as device, location, mode, duration, temperature,
+        1. Return device type identifiers only from the valid list above. Never invent identifiers.
+        2. Do not extract rooms, nicknames, numeric values, modes, or risk here.
+        3. If no device type is mentioned or inferable, return an empty deviceTypes list.
+        4. Keep internal values in English even when the input is multilingual.
+        5. Treat Bixby placeholders such as device, location, mode, duration, temperature,
            deviceType, and numeric values as slots, not literal device names.
-        7. Confidence values must be between 0.0 and 1.0.
+        6. Confidence values must be between 0.0 and 1.0.
 
         \(NLUInstructionContextProvider.intentFamilyContext(for: text))
 
@@ -75,7 +94,7 @@ public struct SemanticNLUWorkerSession: Sendable {
         """
 
         let prompt: String
-        if modelCallPolicy.shouldProvideHint(task: .semanticNLU, deterministicState: deterministicState) {
+        if effectivePolicy.shouldProvideHint(task: .semanticNLU, deterministicState: deterministicState) {
             prompt = """
             \(text)
 
@@ -92,23 +111,29 @@ public struct SemanticNLUWorkerSession: Sendable {
         logger.debug("[FoundationModelInput] System Instructions: \(instructionsText, privacy: .public)")
         logger.debug("[FoundationModelInput] Prompt: \(prompt, privacy: .public)")
 
-        let tracedInstructions = HomeAutomationToolTraceInstructions.append(to: instructionsText)
         let session = LanguageModelSession(
-            tools: [tool],
-            instructions: Instructions(tracedInstructions)
+            instructions: Instructions(instructionsText)
         )
         do {
-            let result = try await FoundationModelCallRecorder.record(
-                agentID: AgentID.semanticNLU.rawValue,
-                policyMode: modelCallPolicy.mode.rawValue,
-                modelAvailability: "available",
-                promptCharacterCount: tracedInstructions.count + prompt.count,
-                selectedToolNames: ["getAvailableDeviceTypes"]
+            let modelClassify = self.modelClassify
+            let result = try await withNLUModelSoftTimeout(
+                agentID: .semanticNLU,
+                timeoutNanoseconds: modelSoftTimeoutNanoseconds
             ) {
-                try await session.respond(
-                    to: Prompt(prompt),
-                    generating: HomeSemanticNLUResult.self
-                ).content
+                if let modelClassify {
+                    return try await modelClassify(prompt)
+                }
+                return try await FoundationModelCallRecorder.record(
+                    agentID: AgentID.semanticNLU.rawValue,
+                    policyMode: effectivePolicy.mode.rawValue,
+                    modelAvailability: "available",
+                    promptCharacterCount: instructionsText.count + prompt.count
+                ) {
+                    try await session.respond(
+                        to: Prompt(prompt),
+                        generating: HomeSemanticNLUResult.self
+                    ).content
+                }
             }
             logger.debug("[FoundationModelOutput] result: \(String(describing: result), privacy: .public)")
             return result

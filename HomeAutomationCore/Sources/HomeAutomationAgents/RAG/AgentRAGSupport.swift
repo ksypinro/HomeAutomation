@@ -394,12 +394,24 @@ public enum AutomationRAGPolicy {
 }
 
 enum AgentRAGSupport {
+    /// Deterministic confidence at or above which few-shot enrichment is
+    /// skipped: the rule-based result already grounds the model prompt via the
+    /// worker-session hint, so retrieval adds latency without signal.
+    static let fewShotSkipConfidence = 0.78
+
     static func nluInput(
         _ input: String,
         task: String,
-        contextRetriever: ContextRetriever?
+        contextRetriever: ContextRetriever?,
+        deterministicConfidence: Double? = nil,
+        minTokenCount: Int = 8
     ) async -> String {
         guard let contextRetriever else { return input }
+        let tokenCount = input.split(whereSeparator: \.isWhitespace).count
+        guard tokenCount >= minTokenCount else { return input }
+        if let deterministicConfidence, deterministicConfidence >= fewShotSkipConfidence {
+            return input
+        }
         let examples = await contextRetriever.retrieve(
             query: input,
             topK: 3,

@@ -45,7 +45,13 @@ public struct RiskClassificationAgent: HomeAgent {
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeRiskClassificationResult {
-        let enrichedInput = await AgentRAGSupport.nluInput(input, task: "risk classification", contextRetriever: contextRetriever)
-        return try await worker.classifyRisk(enrichedInput)
+        let enrichedInput = await AgentRAGSupport.nluInput(
+            input,
+            task: "risk classification",
+            contextRetriever: contextRetriever,
+            deterministicConfidence: AgentTextParser.deterministicState(for: input).risk.confidence
+        )
+        let modeOverride = context.artifact(for: ContextArtifactKeys.nluPolicyOverride())
+        return try await worker.classifyRisk(enrichedInput, modeOverride: modeOverride)
     }
 }

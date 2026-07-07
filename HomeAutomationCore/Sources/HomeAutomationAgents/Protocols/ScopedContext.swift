@@ -261,6 +261,16 @@ public enum ContextArtifactKeys {
         )
     }
 
+    public static func nluPolicyOverride(
+        in scope: ContextScope = .root
+    ) -> ContextArtifactKey<NLUModelCallMode> {
+        ContextArtifactKey(
+            "nluPolicyOverride",
+            scope: scope,
+            debugDescription: "Per-run override of the NLU model-call mode (e.g. threshold gating inside automation action subgraphs)."
+        )
+    }
+
     public static func validation(
         in scope: ContextScope = .root
     ) -> ContextArtifactKey<AutomationValidationResult> {

@@ -9,7 +9,7 @@ public struct SemanticNLUAgent: HomeAgent {
 
     public let id = AgentID.semanticNLU
     public let capabilities: Set<AgentCapability> = [.intentClassification, .deviceTypeExtraction]
-    public let timeoutNanoseconds: UInt64 = 560_000_000_000
+    public let timeoutNanoseconds: UInt64 = 60_000_000_000
     private let worker: SemanticNLUWorkerSession
     private let contextRetriever: ContextRetriever?
 
@@ -32,11 +32,17 @@ public struct SemanticNLUAgent: HomeAgent {
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeSemanticNLUResult {
+        let deterministicState = AgentTextParser.deterministicState(for: input)
         let enrichedInput = await AgentRAGSupport.nluInput(
             input,
             task: "semantic NLU intent and device type classification",
-            contextRetriever: contextRetriever
+            contextRetriever: contextRetriever,
+            deterministicConfidence: min(
+                deterministicState.intent.confidence,
+                deterministicState.deviceType.confidence
+            )
         )
-        return try await worker.classifySemanticNLU(enrichedInput)
+        let modeOverride = context.artifact(for: ContextArtifactKeys.nluPolicyOverride())
+        return try await worker.classifySemanticNLU(enrichedInput, modeOverride: modeOverride)
     }
 }

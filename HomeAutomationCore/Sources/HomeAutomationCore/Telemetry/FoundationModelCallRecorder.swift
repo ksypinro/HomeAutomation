@@ -14,6 +14,9 @@ public struct FoundationModelCallRecorder: Sendable {
         estimatedToolOutputCharacterCount: Int = 0,
         operation: @Sendable () async throws -> Value
     ) async throws -> Value {
+        let queueWait = await FoundationModelGate.shared.admit()
+        defer { Task { await FoundationModelGate.shared.release() } }
+
         let startedAt = Date()
         let parent = HomeAutomationTelemetryScope.current
         let context = (parent ?? HomeAutomationTelemetryContext())
@@ -36,7 +39,8 @@ public struct FoundationModelCallRecorder: Sendable {
                 "modelAvailability": .string(modelAvailability),
                 "promptCharacterCount": .int(promptCharacterCount),
                 "selectedToolNames": .string(selectedToolNames.joined(separator: ",")),
-                "estimatedToolOutputCharacterCount": .int(estimatedToolOutputCharacterCount)
+                "estimatedToolOutputCharacterCount": .int(estimatedToolOutputCharacterCount),
+                "fmQueueWaitMs": .double(queueWait * 1_000)
             ], privacy: [
                 "modelCallID": .internalID
             ])

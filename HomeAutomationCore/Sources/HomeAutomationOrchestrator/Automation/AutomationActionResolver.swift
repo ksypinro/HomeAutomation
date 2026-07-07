@@ -18,7 +18,10 @@ import OSLog
 /// let results = await resolver.resolveAll(["Turn on AC", "Turn off lamp"], ...)
 /// ```
 public struct AutomationActionResolver: Sendable {
-    public static let defaultMaxConcurrentActions = Int.max
+    /// Actions fan out per-action subgraphs whose FM calls serialize on the
+    /// shared on-device model; bounding concurrency keeps queue wait (and
+    /// soft-timeout races) predictable.
+    public static let defaultMaxConcurrentActions = 2
 
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AutomationActionResolver")
     private let registry: AgentRegistry
@@ -299,6 +302,13 @@ public struct AutomationActionResolver: Sendable {
         await contextStore.setOperation(operation)
         await contextStore.setLanguage(deterministicState.language)
         await contextStore.setDomain(deterministicState.domain)
+        // Action fragments are short imperatives the deterministic parser handles
+        // well; threshold-gate the subgraph NLU so the model is only consulted
+        // when deterministic confidence is below the per-task thresholds.
+        await contextStore.setArtifact(
+            NLUModelCallMode.thresholdGated,
+            for: ContextArtifactKeys.nluPolicyOverride()
+        )
     }
 
     private static func namespacedPipelineEvent(
