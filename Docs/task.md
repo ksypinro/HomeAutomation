@@ -75,10 +75,11 @@ Reference: [LoopOrchestrationImplementationPlan.md](LoopOrchestrationImplementat
 ## Phase F — Automation Tier 1 (parallel to C–E)
 > Graph-runtime automation pipeline, no loop dependency.
 
-- [ ] F1: Automation action mini-pipeline
-- [ ] F2: τ-gate segmentation / trigger / condition workers
-- [ ] F3: Rule-level risk & confirmation
-- [ ] F4: Provider flag
+- [x] F1: Automation action mini-pipeline (`AutomationActionMiniPipeline`, `AutomationActionResolver` dispatch)
+- [x] F2: τ-gate segmentation / trigger / condition workers (deterministic accept thresholds)
+- [x] F3: Rule-level risk assessment (`assessFromActions` on `AutomationRiskAssessor`)
+- [x] F4: Provider flag (`useMiniPipeline` on `AutomationCoordinator`, threaded to `makeActionResolver`)
+- [x] F5: Tests (13 tests: mini-pipeline resolve, zero-FM, gibberish, resolver dispatch, segmentation τ-gate, segmentation FM-fallback, trigger τ-gate, condition τ-gate, risk safe/security/empty, coordinator flag on/off) + inventory update
 
 ---
 

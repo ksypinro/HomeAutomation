@@ -6,20 +6,29 @@ import os
 public struct AutomationComponentSegmentationWorkerSession: Sendable {
     private let foundationModelAvailability: @Sendable () -> Bool
     private let segment: (@Sendable (String) async throws -> AutomationComponentPlanFMOutput)?
+    private let deterministicAcceptThreshold: Double
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ComponentSegmentation")
 
     public init(
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
-        segment: (@Sendable (String) async throws -> AutomationComponentPlanFMOutput)? = nil
+        segment: (@Sendable (String) async throws -> AutomationComponentPlanFMOutput)? = nil,
+        deterministicAcceptThreshold: Double = AutomationRAGPolicy.deterministicConfidenceThreshold
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.segment = segment
+        self.deterministicAcceptThreshold = deterministicAcceptThreshold
     }
 
     public func segment(_ text: String) async throws -> AutomationComponentPlan {
         let fallback = AutomationPatternParserHintTool.fallbackPlan(for: text)
+
+        if let fallback, fallback.confidence >= deterministicAcceptThreshold, segment == nil {
+            logger.debug("[τ-gate] Deterministic confidence \(fallback.confidence) ≥ \(self.deterministicAcceptThreshold); skipping FM.")
+            return fallback
+        }
+
         if let segment {
             return plan(from: try await segment(text), fallback: fallback)
         }

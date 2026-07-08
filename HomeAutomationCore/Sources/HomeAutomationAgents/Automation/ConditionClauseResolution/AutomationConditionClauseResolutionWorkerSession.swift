@@ -6,22 +6,34 @@ import os
 public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
     private let foundationModelAvailability: @Sendable () -> Bool
     private let resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)?
+    private let deterministicAcceptThreshold: Double
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ConditionClauseResolution")
 
     public init(
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
-        resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)? = nil
+        resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)? = nil,
+        deterministicAcceptThreshold: Double = 0.8
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.resolve = resolve
+        self.deterministicAcceptThreshold = deterministicAcceptThreshold
     }
 
     public func resolve(
         _ input: AutomationConditionClauseResolutionInput
     ) async throws -> AutomationConditionClauseResolutionResult {
         let fallback = deterministicCondition(for: input)
+
+        if let fallback, resolve == nil {
+            let detResult = try result(from: nil, input: input, fallback: fallback, confidence: 0.72)
+            if detResult.confidence >= deterministicAcceptThreshold {
+                logger.debug("[τ-gate] Deterministic condition confidence \(detResult.confidence) ≥ \(self.deterministicAcceptThreshold); skipping FM.")
+                return detResult
+            }
+        }
+
         if let resolve {
             return try result(from: try await resolve(input), input: input, fallback: fallback)
         }

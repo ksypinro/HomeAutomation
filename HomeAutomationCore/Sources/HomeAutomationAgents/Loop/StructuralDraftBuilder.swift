@@ -4,11 +4,14 @@ import HomeAutomationCore
 public enum StructuralDraftBuilder {
 
     public static func commandDraft(
-        from section: CommandDraftSection,
-        risk: RiskSection
+        from section: CommandDraftSection?,
+        risk: RiskSection,
+        capabilityOverride: HomeCapabilityDecision? = nil
     ) -> HomeCommandDraft? {
-        guard let capability = section.capability,
-              let commandName = section.commandName else {
+        guard let section else { return nil }
+        let capability = capabilityOverride?.selectedCapability ?? section.capability
+        let commandName = capabilityOverride?.selectedCommand ?? section.commandName
+        guard let capability, let commandName else {
             return nil
         }
 

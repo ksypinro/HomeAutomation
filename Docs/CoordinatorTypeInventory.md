@@ -509,6 +509,7 @@ Generated from `HomeAutomationCore/Sources/**/*.swift`. This inventory is intent
 | `RepairSpecialistRegistry` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/RepairSpecialistRegistry.swift` | coordinator | dependency | VerifierLoopCoordinator | Closure-based dispatch table routing repair steps to specialist agents. |
 | `VerifierLoopOrchestrator` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/VerifierLoopOrchestrator.swift` | coordinator | dependency | ResolutionCoordinator | Core loop orchestrator: envelope → verify → repair → accept/escalate. |
 | `LoopOutput` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/VerifierLoopOrchestrator.swift` | local | pure model | Local construction | Verifier loop result pairing LoopExit with LoopRunMetrics. |
+| `AutomationActionMiniPipeline` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Automation/AutomationActionMiniPipeline.swift` | AutomationCoordinator | dependency | AutomationCoordinator | Deterministic-first action pipeline; τ-gates FM calls when confidence exceeds threshold. |
 
 ## Classification Rules
 

@@ -30,6 +30,7 @@ public struct AutomationActionResolver: Sendable {
     private let subgraphRunner: GraphSubgraphRunner
     private let circuitBreakers: CircuitBreakerRegistry
     private let maxConcurrentActions: Int
+    private let miniPipeline: AutomationActionMiniPipeline?
 
     public init(
         registry: AgentRegistry,
@@ -38,7 +39,8 @@ public struct AutomationActionResolver: Sendable {
         scheduler: GraphScheduler,
         subgraphRunner: GraphSubgraphRunner,
         circuitBreakers: CircuitBreakerRegistry,
-        maxConcurrentActions: Int = Self.defaultMaxConcurrentActions
+        maxConcurrentActions: Int = Self.defaultMaxConcurrentActions,
+        miniPipeline: AutomationActionMiniPipeline? = nil
     ) {
         self.registry = registry
         self.graphPlanner = graphPlanner
@@ -46,6 +48,7 @@ public struct AutomationActionResolver: Sendable {
         self.subgraphRunner = subgraphRunner
         self.circuitBreakers = circuitBreakers
         self.maxConcurrentActions = max(1, maxConcurrentActions)
+        self.miniPipeline = miniPipeline
     }
 
     /// Resolves a single action description through the direct-command pipeline.
@@ -61,6 +64,10 @@ public struct AutomationActionResolver: Sendable {
         runID: UUID
     ) async -> AutomationActionResolutionResult {
         logger.info("Resolving automation action: '\(actionText, privacy: .private)'")
+
+        if let miniPipeline {
+            return await miniPipeline.resolve(actionText, eventBus: eventBus, runID: runID)
+        }
 
         // Create a fresh context store for this action.
         // executeLowRiskCommands is false to prevent any mock execution.

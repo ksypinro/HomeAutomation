@@ -6,20 +6,29 @@ import os
 public struct AutomationTriggerResolutionWorkerSession: Sendable {
     private let foundationModelAvailability: @Sendable () -> Bool
     private let resolve: (@Sendable (AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionFMOutput)?
+    private let deterministicAcceptThreshold: Double
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.TriggerResolution")
 
     public init(
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
-        resolve: (@Sendable (AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionFMOutput)? = nil
+        resolve: (@Sendable (AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionFMOutput)? = nil,
+        deterministicAcceptThreshold: Double = 0.8
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.resolve = resolve
+        self.deterministicAcceptThreshold = deterministicAcceptThreshold
     }
 
     public func resolve(_ input: AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionOutput {
         let fallback = deterministicOutput(for: input)
+
+        if let fallback, fallback.confidence >= deterministicAcceptThreshold, resolve == nil {
+            logger.debug("[τ-gate] Deterministic trigger confidence \(fallback.confidence) ≥ \(self.deterministicAcceptThreshold); skipping FM.")
+            return fallback
+        }
+
         if let resolve {
             return try output(from: try await resolve(input), id: input.component.id, fallback: fallback)
         }

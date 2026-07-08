@@ -182,7 +182,8 @@ public enum DefaultAgentRegistryFactory {
                         }
                         let resolver = automationCoordinator.makeActionResolver(
                             agentRegistry: agentRegistry,
-                            graphCoordinator: graphCoordinator
+                            graphCoordinator: graphCoordinator,
+                            deviceRegistry: registry
                         )
                         return await resolver.resolveAll(
                             actionDescriptions,

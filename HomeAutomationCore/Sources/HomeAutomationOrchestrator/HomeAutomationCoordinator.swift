@@ -42,7 +42,8 @@ public protocol AutomationCoordinating: Sendable {
 
     func makeActionResolver(
         agentRegistry: AgentRegistry,
-        graphCoordinator: GraphCoordinator
+        graphCoordinator: GraphCoordinator,
+        deviceRegistry: (any DeviceRegistryProtocol)?
     ) -> AutomationActionResolver
 
     func makeComponentFanOutRunner(
@@ -292,14 +293,17 @@ public struct AutomationCoordinator: AutomationCoordinating {
     public let validationPolicy: AutomationValidationPolicy
     private let foundationModelAvailability: @Sendable () -> Bool
     private let contextRetriever: ContextRetriever?
+    private let useMiniPipeline: Bool
 
     public init(
         foundationModelAvailability: @escaping @Sendable () -> Bool,
         contextRetriever: ContextRetriever? = nil,
-        validationPolicy: AutomationValidationPolicy = AutomationValidationPolicy()
+        validationPolicy: AutomationValidationPolicy = AutomationValidationPolicy(),
+        useMiniPipeline: Bool = false
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.contextRetriever = contextRetriever
+        self.useMiniPipeline = useMiniPipeline
         self.componentSegmentationAgent = AutomationComponentSegmentationAgent(
             worker: AutomationComponentSegmentationWorkerSession(
                 foundationModelAvailability: foundationModelAvailability
@@ -343,15 +347,33 @@ public struct AutomationCoordinator: AutomationCoordinating {
 
     public func makeActionResolver(
         agentRegistry: AgentRegistry,
-        graphCoordinator: GraphCoordinator
+        graphCoordinator: GraphCoordinator,
+        deviceRegistry: (any DeviceRegistryProtocol)? = nil
     ) -> AutomationActionResolver {
-        AutomationActionResolver(
+        let mini: AutomationActionMiniPipeline?
+        if useMiniPipeline, let deviceRegistry {
+            mini = AutomationActionMiniPipeline(
+                registry: deviceRegistry,
+                validator: AgentCommandValidator(),
+                fragmentNLU: FragmentNLUWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                capabilityWorker: CapabilityResolutionWorker(
+                    foundationModelAvailability: foundationModelAvailability
+                )
+            )
+        } else {
+            mini = nil
+        }
+
+        return AutomationActionResolver(
             registry: agentRegistry,
             graphPlanner: graphCoordinator.graphPlanner,
             policy: graphCoordinator.policy,
             scheduler: graphCoordinator.scheduler,
             subgraphRunner: graphCoordinator.subgraphRunner,
-            circuitBreakers: graphCoordinator.circuitBreakers
+            circuitBreakers: graphCoordinator.circuitBreakers,
+            miniPipeline: mini
         )
     }
 
@@ -365,7 +387,8 @@ public struct AutomationCoordinator: AutomationCoordinating {
             conditionAgent: conditionClauseResolutionAgent,
             actionResolver: makeActionResolver(
                 agentRegistry: agentRegistry,
-                graphCoordinator: graphCoordinator
+                graphCoordinator: graphCoordinator,
+                deviceRegistry: deviceRegistry
             ),
             registry: deviceRegistry
         )
