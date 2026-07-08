@@ -92,6 +92,21 @@ Reference: [LoopOrchestrationImplementationPlan.md](LoopOrchestrationImplementat
 
 ---
 
+## Phase H — Review fixes & hardening
+> Findings from the post-Phase-G architecture review ([AgenticArchitecture.md](AgenticArchitecture.md) §12).
+> Wiring gaps (findings 1–2: loop orchestrator + Tier 1 flag never activated, loop metrics never
+> recorded) were fixed in `19a017d` with `RuntimeDependencyWiringTests`.
+
+- [x] H1: Live-model comparison mode (finding 3) — `OrchestrationComparisonRunner(caseLimit:requireLiveModel:)`; `--compare-orchestration --require-live-model true` runs arms against the live FM (deterministic remains the default).
+- [ ] H2: Automation envelope bridging (finding 4) — `LoopResultBridge.makeAutomationResult` bridges *accepted* automation envelopes to `.unsupported(...)` placeholders. Build a `HomeAutomationCreationPlan` from the accepted envelope (actions → resolved actions, trigger/conditions → rule draft) and route through SmartThings compilation so the loop path serves automations end-to-end.
+- [x] H3: Per-category exit gates (finding 5) — `OrchestrationSuiteCategory` (directCommand | automation), per-category arm summaries on the report (`armCategorySummaries`), FM-call gates read their own category with aggregate fallback, per-category table in the markdown report.
+- [x] H4: Non-applicable room confidence (finding 6) — `command.room` omitted from `fieldConfidence` when the device has no room; τ-gates and zero-confidence pre-repair no longer treat "no room" as unresolved (action envelopes inherit the fix via field remapping).
+- [x] H5: Capability repair specialist (finding 7, direct-command part) — `RepairSpecialistRegistry` now takes a `CapabilityResolutionWorker` and resolves `.capability` disputes for both `command.*` and `automation.actions[i].*` fields; wired in `makeVerifierLoopOrchestrator`.
+- [ ] H6: Automation repair specialists (finding 7, automation part) — wire `.trigger`, `.conditionClause`, and `.segmentation` repair steps to the existing automation worker sessions. Note: `TriggerDraft` does not retain the raw trigger fragment, so trigger repair needs either envelope changes or re-parsing from `userText`. Depends on H2 for end-to-end value.
+- [x] H7: Tests for H1/H3/H4/H5 (8 new: room omission, capability specialist ×2, category classifier ×2, category gates ×2, runner integration) + doc updates (review table in AgenticArchitecture.md)
+
+---
+
 ## Notes
 
 - All code targets Swift 6.1 strict concurrency, iOS/macOS 26.0.

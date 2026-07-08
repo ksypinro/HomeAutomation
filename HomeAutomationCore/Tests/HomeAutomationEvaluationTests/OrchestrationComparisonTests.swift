@@ -171,6 +171,94 @@ struct OrchestrationComparisonTests {
         #expect(clarCriterion?.passed == false)
     }
 
+    // MARK: - H3: Suite categories
+
+    @Test
+    func suiteCategoryClassifiesDirectCommandSuites() {
+        #expect(OrchestrationSuiteCategory(suite: "semantic-nlu") == .directCommand)
+        #expect(OrchestrationSuiteCategory(suite: "capability-command") == .directCommand)
+        #expect(OrchestrationSuiteCategory(suite: "end-to-end-direct-command") == .directCommand)
+        #expect(OrchestrationSuiteCategory(suite: "rag-retrieval") == .directCommand)
+    }
+
+    @Test
+    func suiteCategoryClassifiesAutomationSuites() {
+        #expect(OrchestrationSuiteCategory(suite: "automation-segmentation") == .automation)
+        #expect(OrchestrationSuiteCategory(suite: "trigger-resolution") == .automation)
+        #expect(OrchestrationSuiteCategory(suite: "condition-resolution") == .automation)
+        #expect(OrchestrationSuiteCategory(suite: "end-to-end-automation") == .automation)
+    }
+
+    @Test
+    func exitCriteriaUseCategorySummariesForFMCallGates() {
+        // Aggregate loop mean is 5 (would fail the ≤ 4 direct-command gate),
+        // but the direct-command category mean is 2 — the gate must use the
+        // category number. The automation category mean is 8 and must fail.
+        let directResults = (0..<2).map { _ in
+            makeArmResult(arm: .verifierLoop, passed: true, durationMs: 100, modelCallCount: 2, suite: "end-to-end-direct-command")
+        }
+        let automationResults = (0..<2).map { _ in
+            makeArmResult(arm: .verifierLoop, passed: true, durationMs: 100, modelCallCount: 8, suite: "end-to-end-automation")
+        }
+        let aggregate = OrchestrationArmSummary.make(arm: .verifierLoop, results: directResults + automationResults)
+        #expect(abs(aggregate.meanFMCalls - 5.0) < 0.01)
+
+        let categorySummaries: [String: [OrchestrationArmSummary]] = [
+            OrchestrationSuiteCategory.directCommand.rawValue: [
+                OrchestrationArmSummary.make(arm: .verifierLoop, results: directResults),
+            ],
+            OrchestrationSuiteCategory.automation.rawValue: [
+                OrchestrationArmSummary.make(arm: .verifierLoop, results: automationResults),
+            ],
+        ]
+
+        let criteria = OrchestrationExitCriteria.evaluate(
+            summaries: [aggregate],
+            categorySummaries: categorySummaries
+        )
+
+        let directGate = criteria.first { $0.name.contains("direct command") }
+        let automationLoopGate = criteria.first { $0.name.contains("automation (loop)") }
+        #expect(directGate?.passed == true)
+        #expect(automationLoopGate?.passed == false)
+    }
+
+    @Test
+    func exitCriteriaFallBackToAggregateWithoutCategorySummaries() {
+        let results = (0..<2).map { _ in
+            makeArmResult(arm: .verifierLoop, passed: true, durationMs: 100, modelCallCount: 5)
+        }
+        let aggregate = OrchestrationArmSummary.make(arm: .verifierLoop, results: results)
+
+        let criteria = OrchestrationExitCriteria.evaluate(summaries: [aggregate])
+
+        let directGate = criteria.first { $0.name.contains("direct command") }
+        #expect(directGate?.passed == false)
+    }
+
+    // MARK: - H1/H3: Comparison runner integration
+
+    @Test(.timeLimit(.minutes(3)))
+    func comparisonRunnerProducesCategorySummaries() async {
+        let runner = OrchestrationComparisonRunner(caseLimit: 4, requireLiveModel: false)
+        let report = await runner.run()
+
+        #expect(report.caseCount == 4)
+        #expect(report.armSummaries.count == 3)
+        #expect(report.armCategorySummaries[OrchestrationSuiteCategory.directCommand.rawValue] != nil)
+        #expect(report.armCategorySummaries[OrchestrationSuiteCategory.automation.rawValue] != nil)
+        #expect(!report.exitCriteriaResults.isEmpty)
+
+        // Deterministic mode: every arm must resolve without FM calls.
+        for summary in report.armSummaries {
+            #expect(summary.meanFMCalls == 0)
+        }
+        // The verifier-loop arm must have actually run the loop for the
+        // direct-command cases (loop iteration histogram non-empty).
+        let loopSummary = report.armSummaries.first { $0.arm == .verifierLoop }
+        #expect(loopSummary?.loopIterationHistogram.isEmpty == false)
+    }
+
     // MARK: - G1: Report generation
 
     @Test
@@ -226,12 +314,13 @@ struct OrchestrationComparisonTests {
         clarification: Bool = false,
         confirmation: Bool = false,
         loopIterations: Int? = nil,
-        escalated: Bool = false
+        escalated: Bool = false,
+        suite: String = "test"
     ) -> OrchestrationArmResult {
         OrchestrationArmResult(
             arm: arm,
             caseID: UUID().uuidString,
-            suite: "test",
+            suite: suite,
             tags: [],
             passed: passed,
             durationMs: durationMs,

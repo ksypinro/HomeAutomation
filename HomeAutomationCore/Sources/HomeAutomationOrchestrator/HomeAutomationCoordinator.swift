@@ -684,6 +684,9 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
                 ),
                 targetResolver: ActionTargetResolver(registry: deviceRegistry),
                 riskAssessor: AutomationRiskAssessor(),
+                capabilityWorker: CapabilityResolutionWorker(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
                 operationDetection: { text in
                     HomeOperationDetectionService().analyzeSemantics(text)
                 }

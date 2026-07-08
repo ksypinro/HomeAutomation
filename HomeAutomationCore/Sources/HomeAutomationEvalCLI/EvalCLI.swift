@@ -77,11 +77,14 @@ struct HomeAutomationEvalCLI {
     }
 
     private static func runCompareOrchestration(options: EvaluationCLIOptions) async throws {
-        let runner = OrchestrationComparisonRunner(caseLimit: options.caseLimit)
+        let runner = OrchestrationComparisonRunner(
+            caseLimit: options.caseLimit,
+            requireLiveModel: options.requireLiveModel
+        )
         let report = await runner.run()
         try OrchestrationComparisonRunner.writeReport(report, to: options.outputURL)
 
-        print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s)")
+        print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s) [\(options.requireLiveModel ? "live model" : "deterministic")]")
         for summary in report.armSummaries {
             print("  \(summary.arm.rawValue): accuracy=\(String(format: "%.1f%%", summary.accuracy * 100)), meanFM=\(String(format: "%.2f", summary.meanFMCalls)), p95=\(String(format: "%.1fms", summary.p95DurationMs))")
         }
@@ -289,6 +292,7 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --generate-dataset true --generation-mode foundation-model --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-live
       swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
       swift run home-automation-eval --compare-orchestration --output .build/evaluation-comparison --case-limit 50
+      HOME_AUTOMATION_EVAL_LIVE=1 swift run home-automation-eval --compare-orchestration --require-live-model true --output .build/evaluation-comparison-live
     """
 }
 

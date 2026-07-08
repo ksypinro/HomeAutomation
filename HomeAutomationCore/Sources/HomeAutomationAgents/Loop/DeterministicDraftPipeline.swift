@@ -73,10 +73,15 @@ public struct DeterministicDraftPipeline: Sendable {
             .command(.targetDeviceID): ranking.confidence,
             .command(.capability): capDecision.confidence,
             .command(.commandName): capDecision.confidence,
-            .command(.room): selected.device.room != nil ? ranking.confidence : 0.0,
             .command(.parameters): parametersConfidence(selected.draftIntent.parameters),
             .riskLevel: state.risk.confidence,
         ]
+        // A device without a room has nothing to repair there; omitting the
+        // field keeps τ-gates and zero-confidence pre-repair from treating
+        // "no room" as an unresolved field.
+        if selected.device.room != nil {
+            fieldConfidence[.command(.room)] = ranking.confidence
+        }
 
         var clarification: ClarificationSection? = nil
         if ranking.isAmbiguous {

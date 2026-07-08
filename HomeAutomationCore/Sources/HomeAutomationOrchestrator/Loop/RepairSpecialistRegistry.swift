@@ -15,6 +15,7 @@ public struct RepairSpecialistRegistry: Sendable {
         fragmentNLU: FragmentNLUWorkerSession,
         targetResolver: ActionTargetResolver,
         riskAssessor: AutomationRiskAssessor,
+        capabilityWorker: CapabilityResolutionWorker? = nil,
         operationDetection: @escaping @Sendable (String) async -> HomeOperationDetectionResult?
     ) {
         self.execute = { @Sendable step, envelope in
@@ -63,7 +64,49 @@ public struct RepairSpecialistRegistry: Sendable {
                 return .target(fieldID: fieldID, result)
 
             case .capability:
-                return nil
+                guard let capabilityWorker, let fieldID = step.fieldIDs.first else { return nil }
+
+                let fragmentText: String
+                let candidates: [CompactCandidate]
+                let targetDeviceID: String?
+
+                if fieldID.rawValue.hasPrefix("command.") {
+                    fragmentText = envelope.userText
+                    candidates = envelope.command?.candidateTable ?? []
+                    targetDeviceID = envelope.command?.targetDeviceID
+                } else if let match = fieldID.rawValue.firstMatch(of: /automation\.actions\[(\d+)\]/),
+                          let idx = Int(match.output.1),
+                          let auto = envelope.automation, idx < auto.actions.count {
+                    fragmentText = auto.actions[idx].rawText
+                    candidates = auto.actions[idx].command.candidateTable
+                    targetDeviceID = auto.actions[idx].command.targetDeviceID
+                } else {
+                    return nil
+                }
+
+                let records = candidates.map { compact in
+                    HomeCandidateRecord(
+                        id: compact.id,
+                        displayName: compact.name,
+                        deviceType: compact.deviceType,
+                        room: compact.room,
+                        capabilities: [],
+                        supportedCommands: [:]
+                    )
+                }
+                let input = CapabilityResolutionInput(
+                    rawText: fragmentText,
+                    resolutionState: AgentTextParser.deterministicState(for: fragmentText),
+                    hydratedCandidates: records,
+                    aggregation: HomeCandidateAggregationResult(
+                        finalCandidateIDs: targetDeviceID.map { [$0] } ?? [],
+                        needsClarification: false,
+                        confidence: targetDeviceID != nil ? 0.9 : 0.3
+                    ),
+                    knowledgeSnippets: []
+                )
+                guard let decision = try? await capabilityWorker.resolve(input) else { return nil }
+                return .capability(fieldID: fieldID, decision)
 
             case .riskRaise:
                 let risk = riskAssessor.assess(envelope: envelope)

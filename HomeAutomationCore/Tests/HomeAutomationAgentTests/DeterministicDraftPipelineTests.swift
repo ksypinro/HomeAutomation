@@ -84,6 +84,30 @@ struct DeterministicDraftPipelineTests {
         #expect(envelope.command?.commandName == "lock")
     }
 
+    @Test("Device without a room omits room from field confidence")
+    func roomlessDeviceOmitsRoomConfidence() async {
+        let roomlessLamp = HomeCandidateRecord(
+            id: "desk_lamp",
+            displayName: "Desk Lamp",
+            deviceType: "light",
+            room: nil,
+            capabilities: ["switch"],
+            supportedCommands: ["switch": ["on", "off"]]
+        )
+        let pipeline = DeterministicDraftPipeline(
+            registry: MockHomeDeviceRegistry(devices: [roomlessLamp])
+        )
+        let envelope = await pipeline.makeCommandEnvelope(text: "turn on the desk lamp")
+
+        #expect(envelope.command?.targetDeviceID == "desk_lamp")
+        #expect(envelope.command?.room == nil)
+        // No room ⇒ no room confidence entry, so τ-gates and zero-confidence
+        // pre-repair don't treat the missing room as an unresolved field.
+        #expect(envelope.fieldConfidence[.command(.room)] == nil)
+        let zeroConfidenceFields = envelope.fieldConfidence.filter { $0.value == 0.0 }
+        #expect(zeroConfidenceFields.isEmpty)
+    }
+
     // MARK: - B4: Automation envelopes
 
     @Test("Simple schedule automation produces trigger and action")

@@ -15,12 +15,22 @@ public enum OrchestrationExitCriteria {
     public static let maxClarificationRateDeltaPts = 0.03
 
     public static func evaluate(
-        summaries: [OrchestrationArmSummary]
+        summaries: [OrchestrationArmSummary],
+        categorySummaries: [String: [OrchestrationArmSummary]] = [:]
     ) -> [ExitCriterionResult] {
         let byArm = Dictionary(uniqueKeysWithValues: summaries.map { ($0.arm, $0) })
         let graph = byArm[.graph]
         let tier1 = byArm[.graphWithTier1]
         let loop = byArm[.verifierLoop]
+
+        // Prefer per-category numbers when the category has cases; fall back
+        // to the aggregate so callers without category splits keep working.
+        func categoryArm(
+            _ category: OrchestrationSuiteCategory,
+            _ arm: OrchestrationArm
+        ) -> OrchestrationArmSummary? {
+            categorySummaries[category.rawValue]?.first { $0.arm == arm && $0.totalCases > 0 }
+        }
 
         var results: [ExitCriterionResult] = []
 
@@ -42,7 +52,8 @@ public enum OrchestrationExitCriteria {
             passed: loopAccuracy >= graphAccuracy
         ))
 
-        let loopMeanFM = loop?.meanFMCalls ?? 0
+        let loopMeanFM = categoryArm(.directCommand, .verifierLoop)?.meanFMCalls
+            ?? loop?.meanFMCalls ?? 0
         results.append(ExitCriterionResult(
             name: "Mean FM calls, direct command (loop)",
             threshold: "≤ \(maxMeanFMCallsDirectCommand)",
@@ -50,7 +61,8 @@ public enum OrchestrationExitCriteria {
             passed: loopMeanFM <= Double(maxMeanFMCallsDirectCommand)
         ))
 
-        let tier1MeanFM = tier1?.meanFMCalls ?? 0
+        let tier1MeanFM = categoryArm(.automation, .graphWithTier1)?.meanFMCalls
+            ?? tier1?.meanFMCalls ?? 0
         results.append(ExitCriterionResult(
             name: "Mean FM calls, automation (Tier 1)",
             threshold: "≤ \(maxMeanFMCallsAutomationTier1)",
@@ -58,7 +70,8 @@ public enum OrchestrationExitCriteria {
             passed: tier1MeanFM <= Double(maxMeanFMCallsAutomationTier1)
         ))
 
-        let loopAutoFM = loop?.meanFMCalls ?? 0
+        let loopAutoFM = categoryArm(.automation, .verifierLoop)?.meanFMCalls
+            ?? loop?.meanFMCalls ?? 0
         results.append(ExitCriterionResult(
             name: "Mean FM calls, automation (loop)",
             threshold: "≤ \(maxMeanFMCallsAutomationLoop)",

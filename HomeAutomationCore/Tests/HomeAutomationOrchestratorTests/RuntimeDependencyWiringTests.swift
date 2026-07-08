@@ -79,4 +79,60 @@ struct RuntimeDependencyWiringTests {
 
         #expect(metrics?.loop == nil)
     }
+
+    // MARK: - H5: capability repair specialist
+
+    private func makeSpecialists(
+        registry: any DeviceRegistryProtocol,
+        capabilityWorker: CapabilityResolutionWorker?
+    ) -> RepairSpecialistRegistry {
+        RepairSpecialistRegistry(
+            fragmentNLU: FragmentNLUWorkerSession(foundationModelAvailability: { false }),
+            targetResolver: ActionTargetResolver(registry: registry),
+            riskAssessor: AutomationRiskAssessor(),
+            capabilityWorker: capabilityWorker,
+            operationDetection: { _ in nil }
+        )
+    }
+
+    @Test("capability repair steps resolve through the capability worker")
+    func capabilitySpecialistResolvesDispute() async {
+        let registry = HomeAutomationCoordinator.makeMockDeviceRegistry()
+        let envelope = await DeterministicDraftPipeline(registry: registry)
+            .makeCommandEnvelope(text: "turn on the bedroom lamp")
+        let specialists = makeSpecialists(
+            registry: registry,
+            capabilityWorker: CapabilityResolutionWorker(foundationModelAvailability: { false })
+        )
+        let step = RepairPlanner.RepairStep(
+            specialist: .capability,
+            fieldIDs: [FieldID(rawValue: "command.capability")],
+            disputes: [DraftDispute(fieldID: "command.capability", kind: .wrongValue, evidence: "test")]
+        )
+
+        let result = await specialists.execute(step, envelope)
+
+        guard case .capability(let fieldID, _)? = result else {
+            Issue.record("Expected .capability repair result, got \(String(describing: result))")
+            return
+        }
+        #expect(fieldID.rawValue == "command.capability")
+    }
+
+    @Test("capability repair steps without a worker defer gracefully")
+    func capabilitySpecialistWithoutWorkerReturnsNil() async {
+        let registry = HomeAutomationCoordinator.makeMockDeviceRegistry()
+        let envelope = await DeterministicDraftPipeline(registry: registry)
+            .makeCommandEnvelope(text: "turn on the bedroom lamp")
+        let specialists = makeSpecialists(registry: registry, capabilityWorker: nil)
+        let step = RepairPlanner.RepairStep(
+            specialist: .capability,
+            fieldIDs: [FieldID(rawValue: "command.capability")],
+            disputes: [DraftDispute(fieldID: "command.capability", kind: .wrongValue, evidence: "test")]
+        )
+
+        let result = await specialists.execute(step, envelope)
+
+        #expect(result == nil)
+    }
 }

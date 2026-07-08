@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import HomeAutomationCore
 import HomeAutomationOrchestrator
 
@@ -6,6 +7,22 @@ public enum OrchestrationArm: String, Sendable, Codable, Hashable, CaseIterable 
     case graph
     case graphWithTier1
     case verifierLoop
+}
+
+/// Coarse workload category used to split arm summaries so exit gates can
+/// distinguish direct-command cost from automation cost.
+public enum OrchestrationSuiteCategory: String, Sendable, Codable, Hashable, CaseIterable {
+    case directCommand
+    case automation
+
+    public init(suite: String) {
+        let lowered = suite.lowercased()
+        if lowered.contains("automation") || lowered.contains("trigger") || lowered.contains("condition") {
+            self = .automation
+        } else {
+            self = .directCommand
+        }
+    }
 }
 
 public struct OrchestrationArmResult: Sendable, Codable, Hashable {
@@ -67,6 +84,7 @@ public struct OrchestrationComparisonReport: Sendable, Codable {
     public let generatedAt: Date
     public let caseCount: Int
     public let armSummaries: [OrchestrationArmSummary]
+    public let armCategorySummaries: [String: [OrchestrationArmSummary]]
     public let perCaseResults: [String: [OrchestrationArmResult]]
     public let exitCriteriaResults: [ExitCriterionResult]
 
@@ -74,12 +92,14 @@ public struct OrchestrationComparisonReport: Sendable, Codable {
         generatedAt: Date = Date(),
         caseCount: Int,
         armSummaries: [OrchestrationArmSummary],
+        armCategorySummaries: [String: [OrchestrationArmSummary]] = [:],
         perCaseResults: [String: [OrchestrationArmResult]],
         exitCriteriaResults: [ExitCriterionResult]
     ) {
         self.generatedAt = generatedAt
         self.caseCount = caseCount
         self.armSummaries = armSummaries
+        self.armCategorySummaries = armCategorySummaries
         self.perCaseResults = perCaseResults
         self.exitCriteriaResults = exitCriteriaResults
     }
@@ -145,9 +165,11 @@ public struct OrchestrationArmSummary: Sendable, Codable {
 
 public struct OrchestrationComparisonRunner: Sendable {
     private let caseLimit: Int?
+    private let requireLiveModel: Bool
 
-    public init(caseLimit: Int? = nil) {
+    public init(caseLimit: Int? = nil, requireLiveModel: Bool = false) {
         self.caseLimit = caseLimit
+        self.requireLiveModel = requireLiveModel
     }
 
     public func run(
@@ -173,11 +195,32 @@ public struct OrchestrationComparisonRunner: Sendable {
             )
         }
 
-        let exitResults = OrchestrationExitCriteria.evaluate(summaries: summaries)
+        var categorySummaries: [String: [OrchestrationArmSummary]] = [:]
+        for category in OrchestrationSuiteCategory.allCases {
+            let categoryResults = allResults.filter { result in
+                OrchestrationSuiteCategory(suite: result.suite) == category
+            }
+            var categoryArmSummaries: [OrchestrationArmSummary] = []
+            for arm in OrchestrationArm.allCases {
+                categoryArmSummaries.append(
+                    OrchestrationArmSummary.make(
+                        arm: arm,
+                        results: categoryResults.filter { $0.arm == arm }
+                    )
+                )
+            }
+            categorySummaries[category.rawValue] = categoryArmSummaries
+        }
+
+        let exitResults = OrchestrationExitCriteria.evaluate(
+            summaries: summaries,
+            categorySummaries: categorySummaries
+        )
 
         return OrchestrationComparisonReport(
             caseCount: selectedCases.count,
             armSummaries: summaries,
+            armCategorySummaries: categorySummaries,
             perCaseResults: perCase,
             exitCriteriaResults: exitResults
         )
@@ -190,9 +233,15 @@ public struct OrchestrationComparisonRunner: Sendable {
         let registry = DeviceCoordinator.makeMockDeviceRegistry(
             devices: testCase.fixture.devices.isEmpty ? nil : testCase.fixture.devices
         )
+        let foundationModelAvailability: @Sendable () -> Bool
+        if requireLiveModel {
+            foundationModelAvailability = { SystemLanguageModel.default.isAvailable }
+        } else {
+            foundationModelAvailability = { false }
+        }
         let coordinator = HomeAutomationCoordinator(
             deviceRegistry: registry,
-            foundationModelAvailability: { false }
+            foundationModelAvailability: foundationModelAvailability
         )
 
         let deps: HomeAutomationRuntimeDependencies
@@ -343,6 +392,23 @@ public struct OrchestrationComparisonRunner: Sendable {
         lines.append("| Clarification rate | \(arms.map { cell($0) { String(format: "%.1f%%", $0.clarificationRate * 100) } }.joined(separator: " | ")) |")
         lines.append("| Confirmation rate | \(arms.map { cell($0) { String(format: "%.1f%%", $0.confirmationRate * 100) } }.joined(separator: " | ")) |")
         lines.append("| Escalation rate | \(arms.map { cell($0) { String(format: "%.1f%%", $0.escalationRate * 100) } }.joined(separator: " | ")) |")
+
+        if !report.armCategorySummaries.isEmpty {
+            lines.append("")
+            lines.append("## Per-Category Mean FM Calls")
+            lines.append("")
+            lines.append("| Category | graph | graph+Tier1 | verifierLoop |")
+            lines.append("|---|---|---|---|")
+            for category in OrchestrationSuiteCategory.allCases {
+                guard let categoryArms = report.armCategorySummaries[category.rawValue] else { continue }
+                let byCategoryArm = Dictionary(uniqueKeysWithValues: categoryArms.map { ($0.arm, $0) })
+                let cells = arms.map { arm -> String in
+                    guard let summary = byCategoryArm[arm], summary.totalCases > 0 else { return "—" }
+                    return String(format: "%.2f (n=%d)", summary.meanFMCalls, summary.totalCases)
+                }
+                lines.append("| \(category.rawValue) | \(cells.joined(separator: " | ")) |")
+            }
+        }
 
         if let loopArm = byArm[.verifierLoop], !loopArm.loopIterationHistogram.isEmpty {
             lines.append("")
