@@ -429,6 +429,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let circuitBreakers: CircuitBreakerRegistry
     public let deviceRegistry: any DeviceRegistryProtocol
     public let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
+    public let orchestrationMode: OrchestrationMode
+    public let loopOrchestrator: VerifierLoopOrchestrator?
 
     public init(
         agentRegistry: AgentRegistry,
@@ -439,7 +441,9 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         conversationMemory: ConversationMemory,
         circuitBreakers: CircuitBreakerRegistry,
         deviceRegistry: any DeviceRegistryProtocol,
-        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
+        orchestrationMode: OrchestrationMode = .graph,
+        loopOrchestrator: VerifierLoopOrchestrator? = nil
     ) {
         self.agentRegistry = agentRegistry
         self.graphPlanner = graphPlanner
@@ -450,6 +454,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.circuitBreakers = circuitBreakers
         self.deviceRegistry = deviceRegistry
         self.smartThingsRuleCreator = smartThingsRuleCreator
+        self.orchestrationMode = orchestrationMode
+        self.loopOrchestrator = loopOrchestrator
     }
 }
 
