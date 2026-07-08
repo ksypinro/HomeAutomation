@@ -597,6 +597,24 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
         )
     }
 
+    public func makeRuntimeDependencies(
+        orchestrationMode: OrchestrationMode = .graph,
+        useMiniPipeline: Bool = false
+    ) -> HomeAutomationRuntimeDependencies {
+        HomeAutomationRuntimeDependencies(
+            agentRegistry: makeAgentRegistry(),
+            graphPlanner: graphPlanner,
+            policy: policy,
+            scheduler: scheduler,
+            metricsCollector: OrchestratorMetricsCollector(),
+            conversationMemory: ConversationMemory(),
+            circuitBreakers: circuitBreakers,
+            deviceRegistry: deviceRegistry,
+            smartThingsRuleCreator: smartThingsRuleCreator,
+            orchestrationMode: orchestrationMode
+        )
+    }
+
     public func makeOrchestrator() -> HomeCommandOrchestrator {
         HomeCommandOrchestrator(dependencies: makeRuntimeDependencies())
     }

@@ -86,8 +86,9 @@ Reference: [LoopOrchestrationImplementationPlan.md](LoopOrchestrationImplementat
 ## Phase G — Evaluation & rollout
 > A/B evaluation and production rollout gating.
 
-- [ ] G1: A/B evaluation runs (loop vs. legacy on golden dataset)
-- [ ] G2: Exit criteria & default flip
+- [x] G1: A/B comparison runner (`OrchestrationComparisonRunner`, `OrchestrationArm`, `OrchestrationArmResult`, `OrchestrationArmSummary`, `OrchestrationComparisonReport`) + CLI `--compare-orchestration` flag
+- [x] G2: Exit criteria (`OrchestrationExitCriteria`, `ExitCriterionResult`) — 7 gates: accuracy, FM calls, p95 iterations, clarification delta, safety-gate
+- [x] G3: Tests (13 tests: arm summary stats ×6, exit criteria ×5, report structure ×2) + inventory update
 
 ---
 

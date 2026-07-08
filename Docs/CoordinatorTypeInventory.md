@@ -510,6 +510,11 @@ Generated from `HomeAutomationCore/Sources/**/*.swift`. This inventory is intent
 | `VerifierLoopOrchestrator` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/VerifierLoopOrchestrator.swift` | coordinator | dependency | ResolutionCoordinator | Core loop orchestrator: envelope → verify → repair → accept/escalate. |
 | `LoopOutput` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/VerifierLoopOrchestrator.swift` | local | pure model | Local construction | Verifier loop result pairing LoopExit with LoopRunMetrics. |
 | `AutomationActionMiniPipeline` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Automation/AutomationActionMiniPipeline.swift` | AutomationCoordinator | dependency | AutomationCoordinator | Deterministic-first action pipeline; τ-gates FM calls when confidence exceeds threshold. |
+| `ExitCriterionResult` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationExitCriteria.swift` | local | pure model | Local construction | Per-gate pass/fail result for orchestration rollout exit criteria. |
+| `OrchestrationArmResult` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift` | local | pure model | Local construction | Per-case per-arm result from orchestration A/B comparison run. |
+| `OrchestrationArmSummary` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift` | local | pure model | Local construction | Aggregate statistics for one orchestration arm across all cases. |
+| `OrchestrationComparisonReport` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift` | local | pure model | Local construction | Full comparison report with arm summaries and exit criteria results. |
+| `OrchestrationComparisonRunner` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift` | evaluation setup | dependency | EvaluationCoordinator | A/B comparison runner across graph, graph+Tier1, and verifierLoop arms. |
 
 ## Classification Rules
 

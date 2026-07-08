@@ -8,6 +8,11 @@ struct HomeAutomationEvalCLI {
     static func main() async throws {
         let options = try EvaluationCLIOptions.parse(CommandLine.arguments.dropFirst())
 
+        if options.compareOrchestration {
+            try await runCompareOrchestration(options: options)
+            return
+        }
+
         if options.shadowVerify {
             try await runShadowVerify(options: options)
             return
@@ -71,6 +76,25 @@ struct HomeAutomationEvalCLI {
         fixtureLimit > 10 || commandsPerFixture > 100 ? "full-v1" : "seed-v1"
     }
 
+    private static func runCompareOrchestration(options: EvaluationCLIOptions) async throws {
+        let runner = OrchestrationComparisonRunner(caseLimit: options.caseLimit)
+        let report = await runner.run()
+        try OrchestrationComparisonRunner.writeReport(report, to: options.outputURL)
+
+        print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s)")
+        for summary in report.armSummaries {
+            print("  \(summary.arm.rawValue): accuracy=\(String(format: "%.1f%%", summary.accuracy * 100)), meanFM=\(String(format: "%.2f", summary.meanFMCalls)), p95=\(String(format: "%.1fms", summary.p95DurationMs))")
+        }
+        let passCount = report.exitCriteriaResults.filter(\.passed).count
+        let totalCount = report.exitCriteriaResults.count
+        print("Exit criteria: \(passCount)/\(totalCount) passed")
+        print("Report: \(options.outputURL.appendingPathComponent("orchestration-comparison.md").path)")
+
+        if passCount < totalCount {
+            throw EvaluationCLIError.failedCases(totalCount - passCount)
+        }
+    }
+
     private static func runShadowVerify(options: EvaluationCLIOptions) async throws {
         let registry = DeviceCoordinator.makeMockDeviceRegistry()
         let runner = VerifierShadowRunner(registry: registry)
@@ -116,6 +140,7 @@ private struct EvaluationCLIOptions {
     let generateDataset: Bool
     let generationMode: EvaluationCommandGenerationMode
     let shadowVerify: Bool
+    let compareOrchestration: Bool
 
     static func parse(_ arguments: ArraySlice<String>) throws -> EvaluationCLIOptions {
         var mode: EvaluationMode = .deterministic
@@ -131,6 +156,7 @@ private struct EvaluationCLIOptions {
         var generateDataset = false
         var generationMode: EvaluationCommandGenerationMode = .codex
         var shadowVerify = false
+        var compareOrchestration = false
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -197,6 +223,8 @@ private struct EvaluationCLIOptions {
                 generationMode = parsed
             case "--shadow-verify":
                 shadowVerify = true
+            case "--compare-orchestration":
+                compareOrchestration = true
             case "--help", "-h":
                 print(Self.help)
                 Foundation.exit(0)
@@ -218,7 +246,8 @@ private struct EvaluationCLIOptions {
             fixtureLimit: fixtureLimit,
             generateDataset: generateDataset,
             generationMode: generationMode,
-            shadowVerify: shadowVerify
+            shadowVerify: shadowVerify,
+            compareOrchestration: compareOrchestration
         )
     }
 
@@ -259,6 +288,7 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --generate-dataset true --generation-mode template --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-template
       swift run home-automation-eval --generate-dataset true --generation-mode foundation-model --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-live
       swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
+      swift run home-automation-eval --compare-orchestration --output .build/evaluation-comparison --case-limit 50
     """
 }
 
