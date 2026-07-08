@@ -222,6 +222,26 @@ public struct HomeAutomationAgentFactoryDependencies: Sendable {
         self.smartThingsCoordinator = smartThingsCoordinator
         self.smartThingsRuleCreator = smartThingsRuleCreator
     }
+
+    /// Returns a copy of these dependencies with a different automation coordinator.
+    public func replacingAutomationCoordinator(
+        _ automationCoordinator: AutomationCoordinator
+    ) -> HomeAutomationAgentFactoryDependencies {
+        HomeAutomationAgentFactoryDependencies(
+            deviceRegistry: deviceRegistry,
+            contextRetriever: contextRetriever,
+            foundationModelAvailability: foundationModelAvailability,
+            policy: policy,
+            graphPlanner: graphPlanner,
+            graphCoordinator: graphCoordinator,
+            scheduler: scheduler,
+            circuitBreakers: circuitBreakers,
+            constructionServices: constructionServices,
+            automationCoordinator: automationCoordinator,
+            smartThingsCoordinator: smartThingsCoordinator,
+            smartThingsRuleCreator: smartThingsRuleCreator
+        )
+    }
 }
 
 /// Coordinator-created collaborators used by the default agent registry factory.
@@ -322,6 +342,16 @@ public struct AutomationCoordinator: AutomationCoordinating {
         self.validationPolicy = validationPolicy
     }
 
+    /// Returns a copy of this coordinator with the Tier 1 mini-pipeline flag set.
+    public func withMiniPipeline(_ enabled: Bool) -> AutomationCoordinator {
+        AutomationCoordinator(
+            foundationModelAvailability: foundationModelAvailability,
+            contextRetriever: contextRetriever,
+            validationPolicy: validationPolicy,
+            useMiniPipeline: enabled
+        )
+    }
+
     public func makeAutomationDraftAgent() -> AutomationDraftAgent {
         AutomationDraftAgent(
             worker: AutomationDraftWorkerSession(
@@ -409,6 +439,16 @@ public struct AgentCoordinator: AgentCoordinating {
 
     public func makeAgentRegistry() -> AgentRegistry {
         registryFactory.makeAgentRegistry(dependencies: dependencies)
+    }
+
+    /// Builds a registry whose automation agents use the given coordinator
+    /// (e.g. one with the Tier 1 mini-pipeline flag enabled).
+    public func makeAgentRegistry(
+        automationCoordinator: AutomationCoordinator
+    ) -> AgentRegistry {
+        registryFactory.makeAgentRegistry(
+            dependencies: dependencies.replacingAutomationCoordinator(automationCoordinator)
+        )
     }
 }
 
@@ -601,8 +641,17 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
         orchestrationMode: OrchestrationMode = .graph,
         useMiniPipeline: Bool = false
     ) -> HomeAutomationRuntimeDependencies {
-        HomeAutomationRuntimeDependencies(
-            agentRegistry: makeAgentRegistry(),
+        let agentRegistry: AgentRegistry
+        if useMiniPipeline {
+            agentRegistry = agentCoordinator.makeAgentRegistry(
+                automationCoordinator: automationCoordinator.withMiniPipeline(true)
+            )
+        } else {
+            agentRegistry = makeAgentRegistry()
+        }
+
+        return HomeAutomationRuntimeDependencies(
+            agentRegistry: agentRegistry,
             graphPlanner: graphPlanner,
             policy: policy,
             scheduler: scheduler,
@@ -611,7 +660,35 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
             circuitBreakers: circuitBreakers,
             deviceRegistry: deviceRegistry,
             smartThingsRuleCreator: smartThingsRuleCreator,
-            orchestrationMode: orchestrationMode
+            orchestrationMode: orchestrationMode,
+            loopOrchestrator: orchestrationMode == .verifierLoop
+                ? makeVerifierLoopOrchestrator()
+                : nil
+        )
+    }
+
+    /// Builds the verifier-loop orchestrator from coordinator-owned dependencies.
+    public func makeVerifierLoopOrchestrator(
+        policy loopPolicy: VerifierLoopPolicy = VerifierLoopPolicy()
+    ) -> VerifierLoopOrchestrator {
+        VerifierLoopOrchestrator(
+            pipeline: DeterministicDraftPipeline(registry: deviceRegistry),
+            verifier: DraftVerifierWorkerSession(
+                foundationModelAvailability: foundationModelAvailability
+            ),
+            promptBuilder: VerifierPromptBuilder(),
+            planner: RepairPlanner(),
+            specialists: RepairSpecialistRegistry(
+                fragmentNLU: FragmentNLUWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                targetResolver: ActionTargetResolver(registry: deviceRegistry),
+                riskAssessor: AutomationRiskAssessor(),
+                operationDetection: { text in
+                    HomeOperationDetectionService().analyzeSemantics(text)
+                }
+            ),
+            policy: loopPolicy
         )
     }
 

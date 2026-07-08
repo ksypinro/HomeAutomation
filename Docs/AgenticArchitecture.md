@@ -659,16 +659,17 @@ it is the escalation target, which is what makes the loop safe to ship increment
 
 | # | Severity | Finding |
 |---|---|---|
-| 1 | **High** | **`.verifierLoop` mode is not wired in production.** `makeRuntimeDependencies(orchestrationMode:)` never constructs a `VerifierLoopOrchestrator` (only tests do), so `loopOrchestrator` is nil and `HomeCommandOrchestrator` silently falls back to the graph path. |
-| 2 | **High** | **`useMiniPipeline` parameter is a no-op in the runtime-deps overload.** `AutomationCoordinator.useMiniPipeline` is fixed at root-coordinator init (default false); the flag passed to `makeRuntimeDependencies(useMiniPipeline:)` is ignored. Consequence of 1+2: all three arms of `OrchestrationComparisonRunner` currently execute the identical legacy path, so Phase G A/B numbers are not yet meaningful. |
+| 1 | ~~High~~ **Fixed** | ~~`.verifierLoop` mode is not wired in production~~ — `makeRuntimeDependencies(orchestrationMode: .verifierLoop)` now constructs the loop via `makeVerifierLoopOrchestrator()`, and `HomeCommandOrchestrator` records `LoopRunMetrics` on run metrics. Covered by `RuntimeDependencyWiringTests`. |
+| 2 | ~~High~~ **Fixed** | ~~`useMiniPipeline` parameter is a no-op in the runtime-deps overload~~ — the flag now threads through `AutomationCoordinator.withMiniPipeline(_:)` and `AgentCoordinator.makeAgentRegistry(automationCoordinator:)` into the built registry; `AutomationActionResolver.usesMiniPipeline` makes it observable in tests. |
 | 3 | Medium | The comparison runner constructs coordinators with `foundationModelAvailability: { false }` — deterministic-only. FM-call gates pass trivially. A live-model comparison mode (analogous to `--require-live-model`) is needed before a default-flip decision. |
 | 4 | Medium | `LoopResultBridge.makeAutomationResult` bridges *accepted automation envelopes* to `.unsupported(...)` placeholders — the loop path is production-complete for direct commands only; automation acceptance still needs compile-to-SmartThings bridging. |
 | 5 | Low | The two loop FM-call exit gates ("direct command" and "automation") read the same `meanFMCalls` aggregate; arm summaries don't yet split by suite/tag. |
 | 6 | Low | Devices without a room get `command.room` confidence 0.0, which (a) always fails the mini-pipeline τ-gate (forcing an FM call for room-less devices) and (b) triggers synthetic pre-verify repairs in the loop. Room should probably be excluded from the min-confidence gate when the device legitimately has no room. |
 | 7 | Low | Trigger/condition/segmentation repair specialists are declared but return nil (latch → escalate). Acceptable for direct-command rollout; required before the loop path serves automations end-to-end. |
 
-Findings 1–2 are pure wiring (the components themselves are tested and work); they are the
-immediate next step before Stage 3 of the rollout can produce real data.
+With 1–2 fixed, the three arms of `OrchestrationComparisonRunner` now genuinely exercise
+different paths; finding 3 (live-model comparison) is the remaining prerequisite for a
+default-flip decision.
 
 ---
 

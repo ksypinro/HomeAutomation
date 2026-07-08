@@ -51,6 +51,12 @@ public struct AutomationActionResolver: Sendable {
         self.miniPipeline = miniPipeline
     }
 
+    /// True when actions resolve through the Tier 1 mini-pipeline instead of
+    /// the per-action direct-command subgraph.
+    public var usesMiniPipeline: Bool {
+        miniPipeline != nil
+    }
+
     /// Resolves a single action description through the direct-command pipeline.
     ///
     /// - Parameters:

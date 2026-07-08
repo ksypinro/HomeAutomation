@@ -253,7 +253,7 @@ struct AutomationTier1Tests {
             graphCoordinator: graphCoordinator,
             deviceRegistry: MockHomeDeviceRegistry()
         )
-        _ = resolver
+        #expect(resolver.usesMiniPipeline)
     }
 
     @Test
@@ -271,7 +271,7 @@ struct AutomationTier1Tests {
             graphCoordinator: graphCoordinator,
             deviceRegistry: MockHomeDeviceRegistry()
         )
-        _ = resolver
+        #expect(!resolver.usesMiniPipeline)
     }
 }
 

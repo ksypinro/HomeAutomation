@@ -150,7 +150,7 @@ struct AutomationActionResolverTests {
     }
 
     @Test
-    func allActionsStartConcurrentlyByDefault() async throws {
+    func actionsRunConcurrentlyUpToDefaultCap() async throws {
         let graph = OrchestrationGraph(
             id: "slow-test-direct-command-graph",
             goal: .executeDeviceCommand,
@@ -207,10 +207,16 @@ struct AutomationActionResolverTests {
             $0.stage == "automationActionResolution:a1" &&
                 ($0.status == .completed || $0.status == .failed)
         })
+        let a2Finished = try #require(events.firstIndex {
+            $0.stage == "automationActionResolution:a2" &&
+                ($0.status == .completed || $0.status == .failed)
+        })
 
+        // Default cap is 2 (Phase A8): the first two actions run concurrently,
+        // the third waits for a slot to free up.
         #expect(a1Running < a1Finished)
         #expect(a2Running < a1Finished)
-        #expect(a3Running < a1Finished)
+        #expect(a3Running > min(a1Finished, a2Finished))
     }
 
     @Test

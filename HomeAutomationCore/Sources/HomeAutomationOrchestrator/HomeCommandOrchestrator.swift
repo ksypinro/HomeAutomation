@@ -354,6 +354,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         eventBus: eventBus,
                         runID: runID
                     )
+                    metrics.loop = loopOutput.metrics
 
                     switch loopOutput.exit {
                     case .escalated(_, let reason) where reason == .verifierUnavailable || reason == .iterationCap || reason == .noProgress || reason == .repairLatch:
