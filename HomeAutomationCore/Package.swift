@@ -92,6 +92,7 @@ let package = Package(
             dependencies: [
                 "HomeAutomationAgents",
                 "HomeAutomationCore",
+                "HomeAutomationOrchestrator",
                 "HomeAutomationRAG"
             ]
         ),
