@@ -15,6 +15,10 @@ public struct AutomationDraftAssemblyAgent: HomeAgent {
         _ input: AutomationDraftAssemblyInput,
         context: ResolutionContext
     ) async throws -> HomeAutomationRuleDraft {
+        if let speculative = input.resolvedComponents.speculativeCompilation {
+            return speculative.ruleDraft
+        }
+
         let assembledCondition = try assembleCondition(
             tree: input.resolvedComponents.conditionTree,
             results: input.resolvedComponents.conditionResults

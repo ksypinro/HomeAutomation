@@ -4,9 +4,12 @@ import HomeAutomationCore
 import os
 
 public struct AutomationComponentSegmentationWorkerSession: Sendable {
+    public static let sessionInstructions = AutomationComponentSegmentationPromptBuilder.instructions
     private let foundationModelAvailability: @Sendable () -> Bool
     private let segment: (@Sendable (String) async throws -> AutomationComponentPlanFMOutput)?
     private let deterministicAcceptThreshold: Double
+    private let speculativeMode: Bool
+    private let sessionPool: FoundationModelSessionPool?
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ComponentSegmentation")
 
     public init(
@@ -14,15 +17,24 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
             SystemLanguageModel.default.isAvailable
         },
         segment: (@Sendable (String) async throws -> AutomationComponentPlanFMOutput)? = nil,
-        deterministicAcceptThreshold: Double = AutomationRAGPolicy.deterministicConfidenceThreshold
+        deterministicAcceptThreshold: Double = AutomationRAGPolicy.deterministicConfidenceThreshold,
+        speculativeMode: Bool = false,
+        sessionPool: FoundationModelSessionPool? = nil
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.segment = segment
         self.deterministicAcceptThreshold = deterministicAcceptThreshold
+        self.speculativeMode = speculativeMode
+        self.sessionPool = sessionPool
     }
 
     public func segment(_ text: String) async throws -> AutomationComponentPlan {
         let fallback = AutomationPatternParserHintTool.fallbackPlan(for: text)
+
+        if speculativeMode, let fallback {
+            logger.debug("[speculative] Returning deterministic plan (confidence \(fallback.confidence)); FM deferred to fan-out.")
+            return fallback
+        }
 
         if let fallback, fallback.confidence >= deterministicAcceptThreshold, segment == nil {
             logger.debug("[τ-gate] Deterministic confidence \(fallback.confidence) ≥ \(self.deterministicAcceptThreshold); skipping FM.")
@@ -44,9 +56,14 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
         )
         logger.debug("[FoundationModelInput] \(prompt, privacy: .public)")
         do {
-            let session = LanguageModelSession(
-                instructions: Instructions(AutomationComponentSegmentationPromptBuilder.instructions)
-            )
+            let session: LanguageModelSession
+            if let sessionPool {
+                session = await sessionPool.acquire(kind: .segmentation)
+            } else {
+                session = LanguageModelSession(
+                    instructions: Instructions(AutomationComponentSegmentationPromptBuilder.instructions)
+                )
+            }
             let output = try await FoundationModelCallRecorder.record(
                 agentID: AgentID.automationComponentSegmentation.rawValue,
                 policyMode: "model-first-with-fallback",
@@ -57,6 +74,9 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
                     to: Prompt(prompt),
                     generating: AutomationComponentPlanFMOutput.self
                 ).content
+            }
+            if let sessionPool {
+                await sessionPool.release(kind: .segmentation, session: session)
             }
             let plan = plan(from: output, fallback: fallback)
             guard !plan.actions.isEmpty else {

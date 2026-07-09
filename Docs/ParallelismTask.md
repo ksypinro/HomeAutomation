@@ -35,9 +35,9 @@ Reference: [AutomationParallelismStrategy.md](AutomationParallelismStrategy.md)
 ## Phase IV — Speculation
 > Medium risk — needs plan-diff + cancellation correctness.
 
-- [ ] IV1: Speculative segmentation overlap (§4.6) — start Wave 1 on deterministic plan, run FM segmentation concurrently, diff/cancel on mismatch
-- [ ] IV2: Speculative assembly & compilation (§4.8) — compile Rules JSON speculatively on Wave 1 results, recompile if Wave 2 changes anything
-- [ ] IV3: Tests for Phase IV + inventory update
+- [x] IV1: Speculative segmentation overlap (§4.6) — segmentation worker `speculativeMode` returns deterministic plan immediately; fan-out runner runs Wave 1 + FM segmentation concurrently via `withTaskGroup(of: SpeculativeSegmentationOutcome.self)`; `diffPlans(deterministic:refined:)` diffs trigger/actions/conditions/conditionTree; on mismatch, changed components are re-resolved
+- [x] IV2: Speculative assembly & compilation (§4.8) — `SpeculativeAssemblyCompiler` runs `AutomationDraftAssemblyAgent` + `SmartThingsRuleCompiler` speculatively after Wave 1; result carried in `AutomationResolvedComponentSet.speculativeCompilation`; downstream `AutomationDraftAssemblyAgent` and `SmartThingsCompilationAgent` short-circuit when speculative result is present
+- [x] IV3: Tests for Phase IV + inventory update — `PhaseIVSpeculationTests.swift` (12 tests: plan diffing identity/trigger/action/condition/removal, speculative compilation result fields, resolved component set speculative carry/default, segmentation worker speculative/non-speculative modes, assembly agent short-circuit, end-to-end flow); 3 new types added to `CoordinatorTypeInventory.md`
 
 ---
 

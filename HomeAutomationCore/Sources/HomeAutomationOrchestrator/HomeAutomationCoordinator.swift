@@ -328,7 +328,9 @@ public struct AutomationCoordinator: AutomationCoordinating {
         self.sessionPool = FoundationModelSessionPool(maxPoolSize: 2)
         self.componentSegmentationAgent = AutomationComponentSegmentationAgent(
             worker: AutomationComponentSegmentationWorkerSession(
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                speculativeMode: true,
+                sessionPool: sessionPool
             )
         )
         self.triggerResolutionAgent = AutomationTriggerResolutionAgent(
@@ -355,7 +357,11 @@ public struct AutomationCoordinator: AutomationCoordinating {
             kind: .triggerResolution,
             instructions: AutomationTriggerResolutionWorkerSession.sessionInstructions
         )
-        await sessionPool.prewarm(kinds: [.conditionClause, .triggerResolution])
+        await sessionPool.register(
+            kind: .segmentation,
+            instructions: AutomationComponentSegmentationWorkerSession.sessionInstructions
+        )
+        await sessionPool.prewarm(kinds: [.conditionClause, .triggerResolution, .segmentation])
     }
 
     /// Returns a copy of this coordinator with the Tier 1 mini-pipeline flag set.
@@ -431,6 +437,11 @@ public struct AutomationCoordinator: AutomationCoordinating {
         let conditionWorker = AutomationConditionClauseResolutionWorkerSession(
             foundationModelAvailability: foundationModelAvailability
         )
+        let fmSegmentationWorker = AutomationComponentSegmentationWorkerSession(
+            foundationModelAvailability: foundationModelAvailability,
+            speculativeMode: false,
+            sessionPool: sessionPool
+        )
         return AutomationComponentFanOutRunner(
             triggerAgent: triggerResolutionAgent,
             conditionAgent: conditionClauseResolutionAgent,
@@ -443,7 +454,9 @@ public struct AutomationCoordinator: AutomationCoordinating {
             batchedConditionResolver: BatchedConditionClauseResolver(
                 singleResolver: conditionWorker,
                 foundationModelAvailability: foundationModelAvailability
-            )
+            ),
+            segmentationWorker: fmSegmentationWorker,
+            speculativeCompiler: SpeculativeAssemblyCompiler()
         )
     }
 }

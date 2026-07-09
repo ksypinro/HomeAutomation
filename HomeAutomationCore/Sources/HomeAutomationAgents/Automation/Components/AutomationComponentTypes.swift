@@ -170,19 +170,38 @@ public struct AutomationResolvedComponentSet: Sendable {
     public let conditionResults: [AutomationConditionClauseResolutionResult]
     public let conditionTree: AutomationConditionTreeDescriptor?
     public let unsupportedFragments: [String]
+    public let speculativeCompilation: SpeculativeCompilationResult?
 
     public init(
         trigger: HomeAutomationTrigger?,
         actionResults: [AutomationActionResolutionResult],
         conditionResults: [AutomationConditionClauseResolutionResult],
         conditionTree: AutomationConditionTreeDescriptor?,
-        unsupportedFragments: [String] = []
+        unsupportedFragments: [String] = [],
+        speculativeCompilation: SpeculativeCompilationResult? = nil
     ) {
         self.trigger = trigger
         self.actionResults = actionResults
         self.conditionResults = conditionResults
         self.conditionTree = conditionTree
         self.unsupportedFragments = unsupportedFragments
+        self.speculativeCompilation = speculativeCompilation
+    }
+}
+
+public struct SpeculativeCompilationResult: Sendable {
+    public let ruleDraft: HomeAutomationRuleDraft
+    public let smartThingsRuleJSON: String?
+    public let compilationDetail: String
+
+    public init(
+        ruleDraft: HomeAutomationRuleDraft,
+        smartThingsRuleJSON: String?,
+        compilationDetail: String
+    ) {
+        self.ruleDraft = ruleDraft
+        self.smartThingsRuleJSON = smartThingsRuleJSON
+        self.compilationDetail = compilationDetail
     }
 }
 
