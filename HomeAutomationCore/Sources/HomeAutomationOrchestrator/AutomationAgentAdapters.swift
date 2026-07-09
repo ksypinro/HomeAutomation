@@ -27,13 +27,17 @@ extension DefaultAgentRegistryFactory {
             },
             results: output.actionResults
         )
+        var rootValues: [String: AnySendableValue] = [
+            ResolutionContextPatchKey.automationResolvedComponents.rawValue: AnySendableValue(output),
+            AutomationRuntimeContextKeys.actionResolutionAggregate.name: AnySendableValue(aggregate),
+            ResolutionContextPatchKey.automationResolvedActions.rawValue: AnySendableValue(aggregate.resolvedActions),
+            AutomationRuntimeContextKeys.conditionOperandResolutionRecords.name: AnySendableValue(output.conditionResults.flatMap(\.records))
+        ]
+        if let speculative = output.speculativeCompilation {
+            rootValues[AutomationRuntimeContextKeys.speculativeCompilation.name] = AnySendableValue(speculative)
+        }
         var scopedUpdates: [ContextScope: [String: AnySendableValue]] = [
-            .root: [
-                ResolutionContextPatchKey.automationResolvedComponents.rawValue: AnySendableValue(output),
-                AutomationRuntimeContextKeys.actionResolutionAggregate.name: AnySendableValue(aggregate),
-                ResolutionContextPatchKey.automationResolvedActions.rawValue: AnySendableValue(aggregate.resolvedActions),
-                AutomationRuntimeContextKeys.conditionOperandResolutionRecords.name: AnySendableValue(output.conditionResults.flatMap(\.records))
-            ]
+            .root: rootValues
         ]
 
         for (index, result) in output.actionResults.enumerated() {

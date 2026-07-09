@@ -67,6 +67,10 @@ public extension AgentID {
     static let automationResultAssembly = AgentID("automationResultAssembly")
     static let clarification = AgentID("clarification")
     static let resultSummary = AgentID("resultSummary")
+
+    // Verifier loop
+    static let draftVerifier = AgentID("draftVerifier")
+    static let deterministicDraftPipeline = AgentID("deterministicDraftPipeline")
 }
 
 /// What an agent can do, used by the registry and planner for dynamic lookup.

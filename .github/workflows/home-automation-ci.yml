@@ -26,8 +26,37 @@ jobs:
           xcodebuild -version
       - name: Swift build
         run: swift build
-      - name: Swift test on iOS Simulator (iPad Pro 13-inch (M5), iOS 26.5)
-        run: xcodebuild test -scheme HomeAutomationCore-Package -destination 'platform=iOS Simulator,id=3CD16B37-4FCA-4F70-8009-7482209378D8'
+      - name: Select iOS Simulator
+        id: simulator
+        # Hosted runners are ephemeral, so a hardcoded simulator UDID never
+        # exists. Pick the newest available iOS simulator (preferring iPad)
+        # from whatever the runner image ships.
+        run: |
+          UDID=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+
+          data = json.load(sys.stdin)["devices"]
+          ios_runtimes = sorted(
+              (r for r in data if "iOS" in r),
+              reverse=True,
+          )
+
+          def first(predicate):
+              for runtime in ios_runtimes:
+                  for device in data[runtime]:
+                      if device.get("isAvailable") and predicate(device):
+                          return device
+              return None
+
+          device = first(lambda d: "iPad" in d["name"]) or first(lambda d: True)
+          if device is None:
+              sys.exit("No available iOS simulator on this runner")
+          print(device["udid"])
+          ')
+          echo "Selected simulator UDID: $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Swift test on iOS Simulator
+        run: xcodebuild test -scheme HomeAutomationCore-Package -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}"
       - name: Deterministic evaluation
         run: swift run home-automation-eval --mode deterministic --suite all --output .build/evaluation
       - name: Upload deterministic evaluation artifacts

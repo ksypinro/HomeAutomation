@@ -44,6 +44,20 @@ public struct NLUModelCallPolicy: Sendable {
     /// Legacy default that preserves original threshold-gated behavior.
     public static let legacy = NLUModelCallPolicy(mode: .thresholdGated)
 
+    /// Returns a policy with the same thresholds but a different call mode.
+    /// Used for per-run overrides (e.g. threshold gating inside automation
+    /// action subgraphs) without rebuilding worker sessions.
+    public func overridingMode(_ mode: NLUModelCallMode?) -> NLUModelCallPolicy {
+        guard let mode, mode != self.mode else { return self }
+        return NLUModelCallPolicy(
+            mode: mode,
+            semanticNLUThreshold: semanticNLUThreshold,
+            slotExtractionThreshold: slotExtractionThreshold,
+            riskThreshold: riskThreshold,
+            operationDetectionThreshold: operationDetectionThreshold
+        )
+    }
+
     /// Whether the Foundation Model should be invoked for this task.
     /// In `modelFirstWithHint` and `alwaysModel` modes, always returns `true`.
     /// In `thresholdGated` mode, returns `true` only when deterministic confidence is below threshold.

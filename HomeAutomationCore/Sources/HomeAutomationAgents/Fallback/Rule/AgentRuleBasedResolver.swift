@@ -98,27 +98,19 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
         semanticHints: AgentSemanticHints,
         executeLowRiskCommands: Bool
     ) async throws -> HomeAutomationResolverResult? {
-        let scored = devices.compactMap { device -> AgentScoredDevice? in
-            guard let draftIntent = intent.makeDraftIntent(for: device) else { return nil }
-            let score = score(device, for: intent, normalized: normalized, semanticHints: semanticHints)
-            guard score > 0 else { return nil }
-            return AgentScoredDevice(device: device, draftIntent: draftIntent, score: score)
-        }
-        .sorted { lhs, rhs in
-            if lhs.score == rhs.score {
-                return lhs.device.displayName < rhs.device.displayName
-            }
-            return lhs.score > rhs.score
-        }
+        let ranking = RuleCandidateScorer.rank(
+            devices: devices,
+            intent: intent,
+            normalized: normalized,
+            semanticHints: semanticHints
+        )
 
-        guard let selected = scored.first else { return nil }
-        let secondScore = scored.dropFirst().first?.score ?? 0
-        let isAmbiguous = selected.score < 8 || (secondScore > 0 && selected.score - secondScore < 2)
-        if isAmbiguous {
+        guard let selected = ranking.selected else { return nil }
+        if ranking.isAmbiguous {
             return clarificationResult(
                 for: text,
                 state: state,
-                retrievedCandidates: scored.prefix(8).map(\.device),
+                retrievedCandidates: ranking.scored.prefix(8).map(\.device),
                 question: "Which \(selected.device.deviceType) do you mean?"
             )
         }
@@ -126,7 +118,7 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
         let aggregation = HomeCandidateAggregationResult(
             finalCandidateIDs: [selected.device.id],
             needsClarification: false,
-            confidence: min(0.98, Double(selected.score) / 24.0)
+            confidence: ranking.confidence
         )
         let finalInput = HomeFinalResolutionInput(
             rawText: text,
@@ -142,7 +134,7 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
             parameters: selected.draftIntent.parameters,
             needsClarification: false,
             requiresConfirmation: false,
-            confidence: min(0.98, Double(selected.score) / 24.0)
+            confidence: ranking.confidence
         )
 
         var resolution = validator.validate(draft, input: finalInput)
@@ -156,7 +148,7 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
 
         return HomeAutomationResolverResult(
             state: state,
-            retrievedCandidates: scored.prefix(12).map(\.device),
+            retrievedCandidates: ranking.scored.prefix(12).map(\.device),
             aggregation: aggregation,
             hydratedCandidates: [selected.device],
             draft: draft,
@@ -253,54 +245,6 @@ public struct AgentRuleBasedResolver: HomeCommandResolving {
             draft: nil,
             resolution: .needsClarification(question)
         )
-    }
-
-    private func score(
-        _ device: HomeCandidateRecord,
-        for intent: AgentRuleIntent,
-        normalized: String,
-        semanticHints: AgentSemanticHints
-    ) -> Int {
-        let queryTokens = normalized.agentTokenSet
-        let name = device.displayName.agentNormalizedHomeTokenString
-        let nameTokens = name.agentTokenSet
-        let type = device.deviceType.agentNormalizedHomeTokenString
-        let room = device.room?.agentNormalizedHomeTokenString
-        let aliases = device.metadata["aliases"]?
-            .split(separator: ",")
-            .map { String($0).agentNormalizedHomeTokenString } ?? []
-
-        var total = 0
-        if normalized.contains(name) { total += 20 }
-        if aliases.contains(where: { !$0.isEmpty && containsTokenPhrase(normalized, phrase: $0) }) { total += 14 }
-        if normalized.contains(type) || HomeDeviceTypeRelations.matches(type, in: intent.deviceTypeHints) { total += 7 }
-        if let room, normalized.contains(room) { total += 6 }
-
-        let overlap = queryTokens.intersection(nameTokens).count
-        total += min(overlap * 2, 8)
-
-        if intent.capabilityPreferences.contains(where: { device.capabilities.contains($0.capability) }) {
-            total += 6
-        }
-
-        if semanticHints.preferredDeviceIDs.contains(device.id) {
-            total += 8
-        }
-        if !semanticHints.preferredCapabilityIDs.isDisjoint(with: Set(device.capabilities)) {
-            total += 4
-        }
-
-        if device.type == .routine, intent.family == .routine {
-            total += 8
-        }
-
-        return total
-    }
-
-    private func containsTokenPhrase(_ normalizedText: String, phrase: String) -> Bool {
-        let normalizedPhrase = phrase.agentNormalizedHomeTokenString
-        guard !normalizedPhrase.isEmpty else { return false }
-        return " \(normalizedText) ".contains(" \(normalizedPhrase) ")
     }
 
     private func semanticHints(for text: String, memoryHints: [MemoryHint]) async -> AgentSemanticHints {

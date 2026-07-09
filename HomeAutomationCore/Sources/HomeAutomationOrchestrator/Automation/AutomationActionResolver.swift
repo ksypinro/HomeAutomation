@@ -18,7 +18,10 @@ import OSLog
 /// let results = await resolver.resolveAll(["Turn on AC", "Turn off lamp"], ...)
 /// ```
 public struct AutomationActionResolver: Sendable {
-    public static let defaultMaxConcurrentActions = Int.max
+    /// Actions fan out per-action subgraphs whose FM calls serialize on the
+    /// shared on-device model; bounding concurrency keeps queue wait (and
+    /// soft-timeout races) predictable.
+    public static let defaultMaxConcurrentActions = 2
 
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "AutomationActionResolver")
     private let registry: AgentRegistry
@@ -27,6 +30,7 @@ public struct AutomationActionResolver: Sendable {
     private let subgraphRunner: GraphSubgraphRunner
     private let circuitBreakers: CircuitBreakerRegistry
     private let maxConcurrentActions: Int
+    private let miniPipeline: AutomationActionMiniPipeline?
 
     public init(
         registry: AgentRegistry,
@@ -35,7 +39,8 @@ public struct AutomationActionResolver: Sendable {
         scheduler: GraphScheduler,
         subgraphRunner: GraphSubgraphRunner,
         circuitBreakers: CircuitBreakerRegistry,
-        maxConcurrentActions: Int = Self.defaultMaxConcurrentActions
+        maxConcurrentActions: Int = Self.defaultMaxConcurrentActions,
+        miniPipeline: AutomationActionMiniPipeline? = nil
     ) {
         self.registry = registry
         self.graphPlanner = graphPlanner
@@ -43,6 +48,13 @@ public struct AutomationActionResolver: Sendable {
         self.subgraphRunner = subgraphRunner
         self.circuitBreakers = circuitBreakers
         self.maxConcurrentActions = max(1, maxConcurrentActions)
+        self.miniPipeline = miniPipeline
+    }
+
+    /// True when actions resolve through the Tier 1 mini-pipeline instead of
+    /// the per-action direct-command subgraph.
+    public var usesMiniPipeline: Bool {
+        miniPipeline != nil
     }
 
     /// Resolves a single action description through the direct-command pipeline.
@@ -58,6 +70,10 @@ public struct AutomationActionResolver: Sendable {
         runID: UUID
     ) async -> AutomationActionResolutionResult {
         logger.info("Resolving automation action: '\(actionText, privacy: .private)'")
+
+        if let miniPipeline {
+            return await miniPipeline.resolve(actionText, eventBus: eventBus, runID: runID)
+        }
 
         // Create a fresh context store for this action.
         // executeLowRiskCommands is false to prevent any mock execution.
@@ -299,6 +315,13 @@ public struct AutomationActionResolver: Sendable {
         await contextStore.setOperation(operation)
         await contextStore.setLanguage(deterministicState.language)
         await contextStore.setDomain(deterministicState.domain)
+        // Action fragments are short imperatives the deterministic parser handles
+        // well; threshold-gate the subgraph NLU so the model is only consulted
+        // when deterministic confidence is below the per-task thresholds.
+        await contextStore.setArtifact(
+            NLUModelCallMode.thresholdGated,
+            for: ContextArtifactKeys.nluPolicyOverride()
+        )
     }
 
     private static func namespacedPipelineEvent(

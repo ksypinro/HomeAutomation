@@ -52,6 +52,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let circuitBreakers: CircuitBreakerRegistry
     private let deviceRegistry: any DeviceRegistryProtocol
     private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
+    private let orchestrationMode: OrchestrationMode
+    private let loopOrchestrator: VerifierLoopOrchestrator?
 
     public init(
         dependencies: HomeAutomationRuntimeDependencies
@@ -65,6 +67,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.circuitBreakers = dependencies.circuitBreakers
         self.deviceRegistry = dependencies.deviceRegistry
         self.smartThingsRuleCreator = dependencies.smartThingsRuleCreator
+        self.orchestrationMode = dependencies.orchestrationMode
+        self.loopOrchestrator = dependencies.loopOrchestrator
     }
 
     public convenience init(
@@ -341,6 +345,61 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         "reason": operation.reason
                     ]
                 )
+
+                if orchestrationMode == .verifierLoop, let loopOrchestrator {
+                    let loopStarted = Date()
+                    let loopOutput = await loopOrchestrator.run(
+                        request: request,
+                        operationHint: operation,
+                        eventBus: eventBus,
+                        runID: runID
+                    )
+                    metrics.loop = loopOutput.metrics
+
+                    switch loopOutput.exit {
+                    case .escalated(_, let reason) where reason == .verifierUnavailable || reason == .iterationCap || reason == .noProgress || reason == .repairLatch:
+                        if policy.shouldUseModels() {
+                            logger.info("Loop escalated (\(reason.rawValue)), falling through to graph path.")
+                            break
+                        }
+                        let result = LoopResultBridge.bridgeToResult(
+                            exit: loopOutput.exit,
+                            operationHint: operation
+                        )
+                        metrics.finishedAt = Date()
+                        metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
+                        metrics.outcome = "loopEscalated"
+                        await metricsCollector.store(metrics)
+                        await eventBus.publish(OrchestratorPipelineEvent(
+                            runID: runID, stage: "outcome", status: .completed,
+                            detail: "Loop escalated: \(reason.rawValue)"
+                        ))
+                        await eventBus.finish()
+                        await eventForwarder.value
+                        continuation.yield(.result(result))
+                        continuation.finish()
+                        return
+
+                    default:
+                        let result = LoopResultBridge.bridgeToResult(
+                            exit: loopOutput.exit,
+                            operationHint: operation
+                        )
+                        metrics.finishedAt = Date()
+                        metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
+                        metrics.outcome = Self.outcomeName(for: result.resolution)
+                        await metricsCollector.store(metrics)
+                        await eventBus.publish(OrchestratorPipelineEvent(
+                            runID: runID, stage: "outcome", status: .completed,
+                            detail: result.resolution.displaySummary
+                        ))
+                        await eventBus.finish()
+                        await eventForwarder.value
+                        continuation.yield(.result(result))
+                        continuation.finish()
+                        return
+                    }
+                }
 
                 if operation.operation == .automationCreation {
                     let started = Date()

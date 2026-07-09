@@ -46,7 +46,13 @@ public struct SlotExtractionAgent: HomeAgent {
     }
 
     public func run(_ input: String, context: ResolutionContext) async throws -> HomeSlotExtractionResult {
-        let enrichedInput = await AgentRAGSupport.nluInput(input, task: "slot extraction", contextRetriever: contextRetriever)
-        return try await worker.extractSlots(input, modelPrompt: enrichedInput)
+        let enrichedInput = await AgentRAGSupport.nluInput(
+            input,
+            task: "slot extraction",
+            contextRetriever: contextRetriever,
+            deterministicConfidence: AgentTextParser.deterministicState(for: input).slots.confidence
+        )
+        let modeOverride = context.artifact(for: ContextArtifactKeys.nluPolicyOverride())
+        return try await worker.extractSlots(input, modelPrompt: enrichedInput, modeOverride: modeOverride)
     }
 }

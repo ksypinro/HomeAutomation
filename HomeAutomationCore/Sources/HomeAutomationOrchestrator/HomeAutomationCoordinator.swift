@@ -42,7 +42,8 @@ public protocol AutomationCoordinating: Sendable {
 
     func makeActionResolver(
         agentRegistry: AgentRegistry,
-        graphCoordinator: GraphCoordinator
+        graphCoordinator: GraphCoordinator,
+        deviceRegistry: (any DeviceRegistryProtocol)?
     ) -> AutomationActionResolver
 
     func makeComponentFanOutRunner(
@@ -221,6 +222,26 @@ public struct HomeAutomationAgentFactoryDependencies: Sendable {
         self.smartThingsCoordinator = smartThingsCoordinator
         self.smartThingsRuleCreator = smartThingsRuleCreator
     }
+
+    /// Returns a copy of these dependencies with a different automation coordinator.
+    public func replacingAutomationCoordinator(
+        _ automationCoordinator: AutomationCoordinator
+    ) -> HomeAutomationAgentFactoryDependencies {
+        HomeAutomationAgentFactoryDependencies(
+            deviceRegistry: deviceRegistry,
+            contextRetriever: contextRetriever,
+            foundationModelAvailability: foundationModelAvailability,
+            policy: policy,
+            graphPlanner: graphPlanner,
+            graphCoordinator: graphCoordinator,
+            scheduler: scheduler,
+            circuitBreakers: circuitBreakers,
+            constructionServices: constructionServices,
+            automationCoordinator: automationCoordinator,
+            smartThingsCoordinator: smartThingsCoordinator,
+            smartThingsRuleCreator: smartThingsRuleCreator
+        )
+    }
 }
 
 /// Coordinator-created collaborators used by the default agent registry factory.
@@ -290,32 +311,67 @@ public struct AutomationCoordinator: AutomationCoordinating {
     public let triggerResolutionAgent: AutomationTriggerResolutionAgent
     public let conditionClauseResolutionAgent: AutomationConditionClauseResolutionAgent
     public let validationPolicy: AutomationValidationPolicy
+    public let sessionPool: FoundationModelSessionPool
     private let foundationModelAvailability: @Sendable () -> Bool
     private let contextRetriever: ContextRetriever?
+    private let useMiniPipeline: Bool
 
     public init(
         foundationModelAvailability: @escaping @Sendable () -> Bool,
         contextRetriever: ContextRetriever? = nil,
-        validationPolicy: AutomationValidationPolicy = AutomationValidationPolicy()
+        validationPolicy: AutomationValidationPolicy = AutomationValidationPolicy(),
+        useMiniPipeline: Bool = false
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.contextRetriever = contextRetriever
+        self.useMiniPipeline = useMiniPipeline
+        self.sessionPool = FoundationModelSessionPool(maxPoolSize: 2)
         self.componentSegmentationAgent = AutomationComponentSegmentationAgent(
             worker: AutomationComponentSegmentationWorkerSession(
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                speculativeMode: true,
+                sessionPool: sessionPool
             )
         )
         self.triggerResolutionAgent = AutomationTriggerResolutionAgent(
             worker: AutomationTriggerResolutionWorkerSession(
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                sessionPool: sessionPool
             )
         )
         self.conditionClauseResolutionAgent = AutomationConditionClauseResolutionAgent(
             worker: AutomationConditionClauseResolutionWorkerSession(
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                sessionPool: sessionPool
             )
         )
         self.validationPolicy = validationPolicy
+    }
+
+    public func prewarmSessions() async {
+        await sessionPool.register(
+            kind: .conditionClause,
+            instructions: AutomationConditionClauseResolutionWorkerSession.sessionInstructions
+        )
+        await sessionPool.register(
+            kind: .triggerResolution,
+            instructions: AutomationTriggerResolutionWorkerSession.sessionInstructions
+        )
+        await sessionPool.register(
+            kind: .segmentation,
+            instructions: AutomationComponentSegmentationWorkerSession.sessionInstructions
+        )
+        await sessionPool.prewarm(kinds: [.conditionClause, .triggerResolution, .segmentation])
+    }
+
+    /// Returns a copy of this coordinator with the Tier 1 mini-pipeline flag set.
+    public func withMiniPipeline(_ enabled: Bool) -> AutomationCoordinator {
+        AutomationCoordinator(
+            foundationModelAvailability: foundationModelAvailability,
+            contextRetriever: contextRetriever,
+            validationPolicy: validationPolicy,
+            useMiniPipeline: enabled
+        )
     }
 
     public func makeAutomationDraftAgent() -> AutomationDraftAgent {
@@ -343,15 +399,33 @@ public struct AutomationCoordinator: AutomationCoordinating {
 
     public func makeActionResolver(
         agentRegistry: AgentRegistry,
-        graphCoordinator: GraphCoordinator
+        graphCoordinator: GraphCoordinator,
+        deviceRegistry: (any DeviceRegistryProtocol)? = nil
     ) -> AutomationActionResolver {
-        AutomationActionResolver(
+        let mini: AutomationActionMiniPipeline?
+        if useMiniPipeline, let deviceRegistry {
+            mini = AutomationActionMiniPipeline(
+                registry: deviceRegistry,
+                validator: AgentCommandValidator(),
+                fragmentNLU: FragmentNLUWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                capabilityWorker: CapabilityResolutionWorker(
+                    foundationModelAvailability: foundationModelAvailability
+                )
+            )
+        } else {
+            mini = nil
+        }
+
+        return AutomationActionResolver(
             registry: agentRegistry,
             graphPlanner: graphCoordinator.graphPlanner,
             policy: graphCoordinator.policy,
             scheduler: graphCoordinator.scheduler,
             subgraphRunner: graphCoordinator.subgraphRunner,
-            circuitBreakers: graphCoordinator.circuitBreakers
+            circuitBreakers: graphCoordinator.circuitBreakers,
+            miniPipeline: mini
         )
     }
 
@@ -360,14 +434,29 @@ public struct AutomationCoordinator: AutomationCoordinating {
         graphCoordinator: GraphCoordinator,
         deviceRegistry: any DeviceRegistryProtocol
     ) -> AutomationComponentFanOutRunner {
-        AutomationComponentFanOutRunner(
+        let conditionWorker = AutomationConditionClauseResolutionWorkerSession(
+            foundationModelAvailability: foundationModelAvailability
+        )
+        let fmSegmentationWorker = AutomationComponentSegmentationWorkerSession(
+            foundationModelAvailability: foundationModelAvailability,
+            speculativeMode: false,
+            sessionPool: sessionPool
+        )
+        return AutomationComponentFanOutRunner(
             triggerAgent: triggerResolutionAgent,
             conditionAgent: conditionClauseResolutionAgent,
             actionResolver: makeActionResolver(
                 agentRegistry: agentRegistry,
-                graphCoordinator: graphCoordinator
+                graphCoordinator: graphCoordinator,
+                deviceRegistry: deviceRegistry
             ),
-            registry: deviceRegistry
+            registry: deviceRegistry,
+            batchedConditionResolver: BatchedConditionClauseResolver(
+                singleResolver: conditionWorker,
+                foundationModelAvailability: foundationModelAvailability
+            ),
+            segmentationWorker: fmSegmentationWorker,
+            speculativeCompiler: SpeculativeAssemblyCompiler()
         )
     }
 }
@@ -386,6 +475,16 @@ public struct AgentCoordinator: AgentCoordinating {
 
     public func makeAgentRegistry() -> AgentRegistry {
         registryFactory.makeAgentRegistry(dependencies: dependencies)
+    }
+
+    /// Builds a registry whose automation agents use the given coordinator
+    /// (e.g. one with the Tier 1 mini-pipeline flag enabled).
+    public func makeAgentRegistry(
+        automationCoordinator: AutomationCoordinator
+    ) -> AgentRegistry {
+        registryFactory.makeAgentRegistry(
+            dependencies: dependencies.replacingAutomationCoordinator(automationCoordinator)
+        )
     }
 }
 
@@ -429,6 +528,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let circuitBreakers: CircuitBreakerRegistry
     public let deviceRegistry: any DeviceRegistryProtocol
     public let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
+    public let orchestrationMode: OrchestrationMode
+    public let loopOrchestrator: VerifierLoopOrchestrator?
 
     public init(
         agentRegistry: AgentRegistry,
@@ -439,7 +540,9 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         conversationMemory: ConversationMemory,
         circuitBreakers: CircuitBreakerRegistry,
         deviceRegistry: any DeviceRegistryProtocol,
-        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
+        orchestrationMode: OrchestrationMode = .graph,
+        loopOrchestrator: VerifierLoopOrchestrator? = nil
     ) {
         self.agentRegistry = agentRegistry
         self.graphPlanner = graphPlanner
@@ -450,6 +553,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.circuitBreakers = circuitBreakers
         self.deviceRegistry = deviceRegistry
         self.smartThingsRuleCreator = smartThingsRuleCreator
+        self.orchestrationMode = orchestrationMode
+        self.loopOrchestrator = loopOrchestrator
     }
 }
 
@@ -565,6 +670,64 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
             circuitBreakers: circuitBreakers,
             deviceRegistry: deviceRegistry,
             smartThingsRuleCreator: smartThingsRuleCreator
+        )
+    }
+
+    public func makeRuntimeDependencies(
+        orchestrationMode: OrchestrationMode = .graph,
+        useMiniPipeline: Bool = false
+    ) -> HomeAutomationRuntimeDependencies {
+        let agentRegistry: AgentRegistry
+        if useMiniPipeline {
+            agentRegistry = agentCoordinator.makeAgentRegistry(
+                automationCoordinator: automationCoordinator.withMiniPipeline(true)
+            )
+        } else {
+            agentRegistry = makeAgentRegistry()
+        }
+
+        return HomeAutomationRuntimeDependencies(
+            agentRegistry: agentRegistry,
+            graphPlanner: graphPlanner,
+            policy: policy,
+            scheduler: scheduler,
+            metricsCollector: OrchestratorMetricsCollector(),
+            conversationMemory: ConversationMemory(),
+            circuitBreakers: circuitBreakers,
+            deviceRegistry: deviceRegistry,
+            smartThingsRuleCreator: smartThingsRuleCreator,
+            orchestrationMode: orchestrationMode,
+            loopOrchestrator: orchestrationMode == .verifierLoop
+                ? makeVerifierLoopOrchestrator()
+                : nil
+        )
+    }
+
+    /// Builds the verifier-loop orchestrator from coordinator-owned dependencies.
+    public func makeVerifierLoopOrchestrator(
+        policy loopPolicy: VerifierLoopPolicy = VerifierLoopPolicy()
+    ) -> VerifierLoopOrchestrator {
+        VerifierLoopOrchestrator(
+            pipeline: DeterministicDraftPipeline(registry: deviceRegistry),
+            verifier: DraftVerifierWorkerSession(
+                foundationModelAvailability: foundationModelAvailability
+            ),
+            promptBuilder: VerifierPromptBuilder(),
+            planner: RepairPlanner(),
+            specialists: RepairSpecialistRegistry(
+                fragmentNLU: FragmentNLUWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                targetResolver: ActionTargetResolver(registry: deviceRegistry),
+                riskAssessor: AutomationRiskAssessor(),
+                capabilityWorker: CapabilityResolutionWorker(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                operationDetection: { text in
+                    HomeOperationDetectionService().analyzeSemantics(text)
+                }
+            ),
+            policy: loopPolicy
         )
     }
 

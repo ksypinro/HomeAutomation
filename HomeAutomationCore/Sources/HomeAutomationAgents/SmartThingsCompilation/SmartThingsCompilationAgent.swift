@@ -18,6 +18,23 @@ public struct SmartThingsCompilationAgent: HomeAgent {
         _ input: SmartThingsCompilationInput,
         context: ResolutionContext
     ) async throws -> SmartThingsCompilationOutput {
+        if let speculative = context.scopedValue(for: AutomationRuntimeContextKeys.speculativeCompilation),
+           let json = speculative.smartThingsRuleJSON {
+            let plan = HomeAutomationCreationPlan(
+                name: input.ruleDraft.name,
+                ruleDraft: input.ruleDraft,
+                resolvedActions: input.resolvedActions,
+                smartThingsRuleJSON: json,
+                requiresConfirmation: input.requiresConfirmation || input.validation?.requiresConfirmation == true,
+                unsupportedCompilationReason: input.validation?.unsupportedCompilationReason
+            )
+            return SmartThingsCompilationOutput(
+                plan: plan,
+                document: nil,
+                detail: speculative.compilationDetail
+            )
+        }
+
         let initialPlan = HomeAutomationCreationPlan(
             name: input.ruleDraft.name,
             ruleDraft: input.ruleDraft,

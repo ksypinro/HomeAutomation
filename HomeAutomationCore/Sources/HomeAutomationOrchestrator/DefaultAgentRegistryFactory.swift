@@ -116,11 +116,13 @@ public enum DefaultAgentRegistryFactory {
                                 unsupportedFragments: ["Agent registry unavailable"]
                             )
                         }
+                        async let prewarm: Void = automationCoordinator.prewarmSessions()
                         let runner = automationCoordinator.makeComponentFanOutRunner(
                             agentRegistry: agentRegistry,
                             graphCoordinator: graphCoordinator,
                             deviceRegistry: registry
                         )
+                        _ = await prewarm
                         return await runner.resolve(plan: componentPlan, context: context)
                     }
                 ),
@@ -182,7 +184,8 @@ public enum DefaultAgentRegistryFactory {
                         }
                         let resolver = automationCoordinator.makeActionResolver(
                             agentRegistry: agentRegistry,
-                            graphCoordinator: graphCoordinator
+                            graphCoordinator: graphCoordinator,
+                            deviceRegistry: registry
                         )
                         return await resolver.resolveAll(
                             actionDescriptions,

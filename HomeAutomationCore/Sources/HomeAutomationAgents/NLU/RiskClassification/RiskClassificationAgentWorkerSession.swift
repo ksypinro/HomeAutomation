@@ -18,7 +18,7 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
             SystemLanguageModel.default.isAvailable
         },
         modelCallPolicy: NLUModelCallPolicy = .default,
-        modelSoftTimeoutNanoseconds: UInt64 = 12_000_000_000
+        modelSoftTimeoutNanoseconds: UInt64 = NLUSoftTimeoutBudget.default.nluClassNanoseconds
     ) {
         self.classify = classify
         self.modelClassify = modelClassify
@@ -27,13 +27,17 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
         self.modelSoftTimeoutNanoseconds = modelSoftTimeoutNanoseconds
     }
 
-    public func classifyRisk(_ text: String) async throws -> HomeRiskClassificationResult {
+    public func classifyRisk(
+        _ text: String,
+        modeOverride: NLUModelCallMode? = nil
+    ) async throws -> HomeRiskClassificationResult {
         logger.debug("[Input] text: \(text, privacy: .public)")
         if let classify {
             let result = try await classify(text)
             logger.debug("[MockOutput] result: \(String(describing: result), privacy: .public)")
             return result
         }
+        let effectivePolicy = modelCallPolicy.overridingMode(modeOverride)
         let deterministicState = AgentTextParser.deterministicState(for: text)
         let fallback = deterministicState.risk
         logger.debug("[DeterministicFallback] result: \(String(describing: fallback), privacy: .public)")
@@ -42,8 +46,13 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
             return fallback
         }
 
+        guard effectivePolicy.shouldUseModel(task: .riskClassification, deterministicState: deterministicState) else {
+            logger.info("[Policy] Deterministic risk classification stands (mode: \(effectivePolicy.mode.rawValue, privacy: .public)); skipping model call.")
+            return fallback
+        }
+
         let hintText: String
-        if modelCallPolicy.shouldProvideHint(task: .riskClassification, deterministicState: deterministicState) {
+        if effectivePolicy.shouldProvideHint(task: .riskClassification, deterministicState: deterministicState) {
             hintText = """
 
             Deterministic analysis suggests: riskLevel=\(fallback.riskLevel), \
@@ -79,7 +88,7 @@ public struct RiskClassificationAgentWorkerSession: Sendable {
                 }
                 return try await FoundationModelCallRecorder.record(
                     agentID: AgentID.riskClassification.rawValue,
-                    policyMode: modelCallPolicy.mode.rawValue,
+                    policyMode: effectivePolicy.mode.rawValue,
                     modelAvailability: "available",
                     promptCharacterCount: instructionsText.count + prompt.count
                 ) {

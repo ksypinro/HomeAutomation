@@ -36,6 +36,11 @@ public enum AutomationRuntimeContextKeys {
         scope: .root
     )
 
+    public static let speculativeCompilation = ScopedContextKey<SpeculativeCompilationResult>(
+        "speculativeCompilation",
+        scope: .root
+    )
+
     public static let smartThingsCompilation = ScopedContextKey<SmartThingsCompilationOutput>(
         "smartThingsCompilation",
         scope: .backend("smartthings")
