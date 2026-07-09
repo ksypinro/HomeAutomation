@@ -112,11 +112,17 @@ public enum LoopResultBridge {
         candidates: [HomeCandidateRecord],
         aggregation: HomeCandidateAggregationResult
     ) -> HomeAutomationResolverResult {
+        let plan = StructuralDraftBuilder.automationCreationPlan(from: envelope)
+
         let resolution: HomeCommandResolution
-        if envelope.risk.level == .high || envelope.risk.level == .critical {
-            resolution = .unsupported("Automation requires manual confirmation due to high risk.")
+        if let reason = plan.unsupportedCompilationReason, plan.smartThingsRuleJSON == nil {
+            // The envelope couldn't be expressed as a SmartThings rule
+            // (e.g. a device trigger the envelope doesn't carry structurally).
+            resolution = .unsupported(reason)
+        } else if plan.requiresConfirmation {
+            resolution = .automationRequiresConfirmation(plan)
         } else {
-            resolution = .unsupported("Automation drafted via verifier loop.")
+            resolution = .automationDrafted(plan)
         }
 
         return HomeAutomationResolverResult(

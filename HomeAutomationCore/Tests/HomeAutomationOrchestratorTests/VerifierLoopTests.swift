@@ -401,6 +401,43 @@ struct VerifierLoopTests {
             Issue.record("Expected needsClarification resolution")
         }
     }
+
+    @Test("LoopResultBridge bridges accepted schedule automation to automationDrafted with JSON")
+    func bridgeAcceptedAutomationExit() {
+        let action = ActionDraft(
+            rawText: "turn on the bedroom lamp",
+            order: 0,
+            command: CommandDraftSection(
+                targetDeviceID: "bedroom_lamp",
+                candidateTable: [
+                    CompactCandidate(id: "bedroom_lamp", name: "Bedroom Lamp", room: "bedroom", deviceType: "light"),
+                ],
+                capability: "switch",
+                commandName: "on",
+                room: "bedroom"
+            )
+        )
+        let envelope = DraftEnvelope(
+            userText: "turn on the bedroom lamp every day at 7 PM",
+            operation: .automationCreation,
+            operationConfidence: 0.95,
+            automation: AutomationDraftSection(
+                trigger: TriggerDraft(type: .schedule, time: HomeAutomationTimeOfDay(hour: 19, minute: 0), repeatRule: .everyDay, confidence: 0.9),
+                actions: [action]
+            ),
+            risk: RiskSection(level: .low, floorReason: "safe")
+        )
+
+        let exit = LoopExit.accepted(envelope: envelope, iterations: 1)
+        let result = LoopResultBridge.bridgeToResult(exit: exit, operationHint: nil)
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected automationDrafted, got \(result.resolution.displaySummary)")
+            return
+        }
+        #expect(plan.smartThingsRuleJSON != nil)
+        #expect(!plan.resolvedActions.isEmpty)
+    }
 }
 
 private actor CallCounter {

@@ -474,9 +474,14 @@ sequenceDiagram
 `LoopResultBridge.bridgeToResult` converts a `LoopExit` into the same
 `HomeAutomationResolverResult` shape the graph produces, so callers are agnostic to the path:
 
-- **accepted** → `StructuralDraftBuilder` builds the `HomeCommandDraft`; confirmation-requiring
-  drafts map to `.requiresConfirmation`, ambiguous ones to `.needsClarification`, the rest to
-  `.readyToExecute(plan)`.
+- **accepted (direct command)** → `StructuralDraftBuilder` builds the `HomeCommandDraft`;
+  confirmation-requiring drafts map to `.requiresConfirmation`, ambiguous ones to
+  `.needsClarification`, the rest to `.readyToExecute(plan)`.
+- **accepted (automation)** → `StructuralDraftBuilder.automationCreationPlan(from:)` maps the
+  envelope to a `HomeAutomationCreationPlan` and compiles Rules API JSON via
+  `SmartThingsRuleCompiler`; high/critical risk maps to `.automationRequiresConfirmation`, a
+  clean compile to `.automationDrafted(plan)`, and an uncompilable envelope (e.g. a device
+  trigger) to `.unsupported(reason)`.
 - **clarification** → `.needsClarification(question)` with the envelope's candidate table
   surfaced as retrieved/hydrated candidates.
 - **escalated** → when the FM is available, the orchestrator *falls through to the legacy
@@ -662,13 +667,14 @@ it is the escalation target, which is what makes the loop safe to ship increment
 | 1 | ~~High~~ **Fixed** | ~~`.verifierLoop` mode is not wired in production~~ — `makeRuntimeDependencies(orchestrationMode: .verifierLoop)` now constructs the loop via `makeVerifierLoopOrchestrator()`, and `HomeCommandOrchestrator` records `LoopRunMetrics` on run metrics. Covered by `RuntimeDependencyWiringTests`. |
 | 2 | ~~High~~ **Fixed** | ~~`useMiniPipeline` parameter is a no-op in the runtime-deps overload~~ — the flag now threads through `AutomationCoordinator.withMiniPipeline(_:)` and `AgentCoordinator.makeAgentRegistry(automationCoordinator:)` into the built registry; `AutomationActionResolver.usesMiniPipeline` makes it observable in tests. |
 | 3 | ~~Medium~~ **Fixed** | ~~The comparison runner is deterministic-only~~ — `OrchestrationComparisonRunner(requireLiveModel:)` + `--compare-orchestration --require-live-model true` run arms against the live FM; deterministic remains the CI-safe default. |
-| 4 | Medium | `LoopResultBridge.makeAutomationResult` bridges *accepted automation envelopes* to `.unsupported(...)` placeholders — the loop path is production-complete for direct commands only; automation acceptance still needs compile-to-SmartThings bridging (task H2). |
+| 4 | ~~Medium~~ **Fixed** | ~~Accepted automation envelopes bridge to `.unsupported(...)` placeholders~~ — `StructuralDraftBuilder.automationCreationPlan(from:)` maps the envelope to a `HomeAutomationCreationPlan` and compiles Rules API JSON via `SmartThingsRuleCompiler`; the bridge returns `.automationDrafted` / `.automationRequiresConfirmation`. Schedule-triggered automations are end-to-end; device triggers still report an unsupported reason (needs H6's structured trigger condition). |
 | 5 | ~~Low~~ **Fixed** | ~~The two loop FM-call exit gates read the same aggregate~~ — arm summaries now split by `OrchestrationSuiteCategory` (directCommand vs automation); each FM-call gate reads its own category with aggregate fallback. |
 | 6 | ~~Low~~ **Fixed** | ~~Room-less devices always fail the τ-gate~~ — `command.room` is omitted from `fieldConfidence` when the device has no room, so τ-gates and zero-confidence pre-repair skip it. |
 | 7 | Low (partial) | Capability repair is now wired to `CapabilityResolutionWorker` (deterministic fallback + optional FM). Trigger/condition/segmentation specialists still return nil (latch → escalate) — required before the loop path serves automations end-to-end (task H6, depends on H2). |
 
-Remaining before a default flip: H2 (automation envelope bridging) and a live-model
-comparison run on real hardware; H6 (automation repair specialists) follows H2.
+Remaining before a default flip: a live-model comparison run on real hardware, structured
+device-trigger conditions in the envelope, and H6 (automation repair specialists) to close the
+loop path for device-triggered and multi-condition automations.
 
 ---
 
