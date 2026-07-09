@@ -311,6 +311,7 @@ public struct AutomationCoordinator: AutomationCoordinating {
     public let triggerResolutionAgent: AutomationTriggerResolutionAgent
     public let conditionClauseResolutionAgent: AutomationConditionClauseResolutionAgent
     public let validationPolicy: AutomationValidationPolicy
+    public let sessionPool: FoundationModelSessionPool
     private let foundationModelAvailability: @Sendable () -> Bool
     private let contextRetriever: ContextRetriever?
     private let useMiniPipeline: Bool
@@ -324,6 +325,7 @@ public struct AutomationCoordinator: AutomationCoordinating {
         self.foundationModelAvailability = foundationModelAvailability
         self.contextRetriever = contextRetriever
         self.useMiniPipeline = useMiniPipeline
+        self.sessionPool = FoundationModelSessionPool(maxPoolSize: 2)
         self.componentSegmentationAgent = AutomationComponentSegmentationAgent(
             worker: AutomationComponentSegmentationWorkerSession(
                 foundationModelAvailability: foundationModelAvailability
@@ -331,15 +333,29 @@ public struct AutomationCoordinator: AutomationCoordinating {
         )
         self.triggerResolutionAgent = AutomationTriggerResolutionAgent(
             worker: AutomationTriggerResolutionWorkerSession(
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                sessionPool: sessionPool
             )
         )
         self.conditionClauseResolutionAgent = AutomationConditionClauseResolutionAgent(
             worker: AutomationConditionClauseResolutionWorkerSession(
-                foundationModelAvailability: foundationModelAvailability
+                foundationModelAvailability: foundationModelAvailability,
+                sessionPool: sessionPool
             )
         )
         self.validationPolicy = validationPolicy
+    }
+
+    public func prewarmSessions() async {
+        await sessionPool.register(
+            kind: .conditionClause,
+            instructions: AutomationConditionClauseResolutionWorkerSession.sessionInstructions
+        )
+        await sessionPool.register(
+            kind: .triggerResolution,
+            instructions: AutomationTriggerResolutionWorkerSession.sessionInstructions
+        )
+        await sessionPool.prewarm(kinds: [.conditionClause, .triggerResolution])
     }
 
     /// Returns a copy of this coordinator with the Tier 1 mini-pipeline flag set.
@@ -412,7 +428,10 @@ public struct AutomationCoordinator: AutomationCoordinating {
         graphCoordinator: GraphCoordinator,
         deviceRegistry: any DeviceRegistryProtocol
     ) -> AutomationComponentFanOutRunner {
-        AutomationComponentFanOutRunner(
+        let conditionWorker = AutomationConditionClauseResolutionWorkerSession(
+            foundationModelAvailability: foundationModelAvailability
+        )
+        return AutomationComponentFanOutRunner(
             triggerAgent: triggerResolutionAgent,
             conditionAgent: conditionClauseResolutionAgent,
             actionResolver: makeActionResolver(
@@ -420,7 +439,11 @@ public struct AutomationCoordinator: AutomationCoordinating {
                 graphCoordinator: graphCoordinator,
                 deviceRegistry: deviceRegistry
             ),
-            registry: deviceRegistry
+            registry: deviceRegistry,
+            batchedConditionResolver: BatchedConditionClauseResolver(
+                singleResolver: conditionWorker,
+                foundationModelAvailability: foundationModelAvailability
+            )
         )
     }
 }

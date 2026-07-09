@@ -69,12 +69,15 @@ public struct VerifierLoopOrchestrator: Sendable {
                 maxRepairCalls: policy.maxRepairCallsPerIteration
             )
 
-            for step in preRepairPlan.steps {
-                if let result = await specialists.execute(step, currentEnvelope) {
-                    currentEnvelope = EnvelopeMerger.apply(result, to: currentEnvelope, iteration: 0)
-                    preVerifyRepairCount += 1
-                    repairCallCount += 1
-                }
+            let preResults = await executeRepairsInParallel(
+                steps: preRepairPlan.steps,
+                envelope: currentEnvelope
+            )
+            for (stepIndex, result) in preResults {
+                _ = stepIndex
+                currentEnvelope = EnvelopeMerger.apply(result, to: currentEnvelope, iteration: 0)
+                preVerifyRepairCount += 1
+                repairCallCount += 1
             }
 
             await publishEvent(eventBus, runID: runID, stage: "verifierLoop/preRepair", detail: "Pre-verify repair: \(preVerifyRepairCount) fields patched")
@@ -221,11 +224,13 @@ public struct VerifierLoopOrchestrator: Sendable {
 
             await publishEvent(eventBus, runID: runID, stage: "verifierLoop/repair/\(iteration)", detail: "Repairing \(repairPlan.steps.count) steps")
 
-            for step in repairPlan.steps {
-                if let result = await specialists.execute(step, currentEnvelope) {
-                    currentEnvelope = EnvelopeMerger.apply(result, to: currentEnvelope, iteration: iteration)
-                    repairCallCount += 1
-                }
+            let iterationResults = await executeRepairsInParallel(
+                steps: repairPlan.steps,
+                envelope: currentEnvelope
+            )
+            for (_, result) in iterationResults {
+                currentEnvelope = EnvelopeMerger.apply(result, to: currentEnvelope, iteration: iteration)
+                repairCallCount += 1
             }
 
             for step in repairPlan.steps {
@@ -246,6 +251,40 @@ public struct VerifierLoopOrchestrator: Sendable {
                 preVerifyRepairCount: preVerifyRepairCount
             )
         )
+    }
+
+    // MARK: - Parallel repair
+
+    /// Runs repair steps concurrently — the planner guarantees disjoint fields
+    /// per step, so results don't conflict. Returns results sorted by the
+    /// step's original index (specialist-priority order) for deterministic
+    /// merge ordering.
+    private func executeRepairsInParallel(
+        steps: [RepairPlanner.RepairStep],
+        envelope: DraftEnvelope
+    ) async -> [(stepIndex: Int, result: RepairResult)] {
+        guard !steps.isEmpty else { return [] }
+
+        let results = await withTaskGroup(
+            of: (Int, RepairResult?).self
+        ) { group in
+            for (index, step) in steps.enumerated() {
+                group.addTask {
+                    let result = await self.specialists.execute(step, envelope)
+                    return (index, result)
+                }
+            }
+
+            var collected: [(Int, RepairResult)] = []
+            for await (index, result) in group {
+                if let result {
+                    collected.append((index, result))
+                }
+            }
+            return collected
+        }
+
+        return results.sorted { $0.0 < $1.0 }
     }
 
     // MARK: - Helpers

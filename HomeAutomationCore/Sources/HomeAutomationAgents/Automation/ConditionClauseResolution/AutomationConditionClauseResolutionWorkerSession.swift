@@ -4,9 +4,11 @@ import HomeAutomationCore
 import os
 
 public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
+    public static let sessionInstructions = AutomationConditionClauseResolutionPromptBuilder.instructions
     private let foundationModelAvailability: @Sendable () -> Bool
     private let resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)?
     private let deterministicAcceptThreshold: Double
+    private let sessionPool: FoundationModelSessionPool?
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ConditionClauseResolution")
 
     public init(
@@ -14,11 +16,13 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
             SystemLanguageModel.default.isAvailable
         },
         resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)? = nil,
-        deterministicAcceptThreshold: Double = 0.8
+        deterministicAcceptThreshold: Double = 0.8,
+        sessionPool: FoundationModelSessionPool? = nil
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.resolve = resolve
         self.deterministicAcceptThreshold = deterministicAcceptThreshold
+        self.sessionPool = sessionPool
     }
 
     public func resolve(
@@ -45,9 +49,14 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
         let prompt = AutomationConditionClauseResolutionPromptBuilder.prompt(input: input, fallback: fallback)
         logger.debug("[FoundationModelInput] \(prompt, privacy: .public)")
         do {
-            let session = LanguageModelSession(
-                instructions: Instructions(AutomationConditionClauseResolutionPromptBuilder.instructions)
-            )
+            let session: LanguageModelSession
+            if let sessionPool {
+                session = await sessionPool.acquire(kind: .conditionClause)
+            } else {
+                session = LanguageModelSession(
+                    instructions: Instructions(AutomationConditionClauseResolutionPromptBuilder.instructions)
+                )
+            }
             let fmOutput = try await FoundationModelCallRecorder.record(
                 agentID: AgentID.automationConditionClauseResolution.rawValue,
                 policyMode: "model-first-with-fallback",
@@ -59,6 +68,9 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
                     to: Prompt(prompt),
                     generating: AutomationConditionClauseFMOutput.self
                 ).content
+            }
+            if let sessionPool {
+                await sessionPool.release(kind: .conditionClause, session: session)
             }
             let output = try result(from: fmOutput, input: input, fallback: fallback)
             logger.debug("[FoundationModelOutput] \(String(describing: output), privacy: .public)")

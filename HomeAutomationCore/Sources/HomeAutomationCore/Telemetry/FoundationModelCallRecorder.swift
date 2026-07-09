@@ -12,9 +12,10 @@ public struct FoundationModelCallRecorder: Sendable {
         outputCharacterCount: @Sendable @escaping (Value) -> Int = { String(describing: $0).count },
         selectedToolNames: [String] = [],
         estimatedToolOutputCharacterCount: Int = 0,
+        priority: FMPriority = .interactive,
         operation: @Sendable () async throws -> Value
     ) async throws -> Value {
-        let queueWait = await FoundationModelGate.shared.admit()
+        let queueWait = await FoundationModelGate.shared.admit(priority: priority)
         defer { Task { await FoundationModelGate.shared.release() } }
 
         let startedAt = Date()
@@ -40,7 +41,8 @@ public struct FoundationModelCallRecorder: Sendable {
                 "promptCharacterCount": .int(promptCharacterCount),
                 "selectedToolNames": .string(selectedToolNames.joined(separator: ",")),
                 "estimatedToolOutputCharacterCount": .int(estimatedToolOutputCharacterCount),
-                "fmQueueWaitMs": .double(queueWait * 1_000)
+                "fmQueueWaitMs": .double(queueWait * 1_000),
+                "fmPriority": .string(priority.rawValue)
             ], privacy: [
                 "modelCallID": .internalID
             ])

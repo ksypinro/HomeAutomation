@@ -4,9 +4,11 @@ import HomeAutomationCore
 import os
 
 public struct AutomationTriggerResolutionWorkerSession: Sendable {
+    public static let sessionInstructions = AutomationTriggerResolutionPromptBuilder.instructions
     private let foundationModelAvailability: @Sendable () -> Bool
     private let resolve: (@Sendable (AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionFMOutput)?
     private let deterministicAcceptThreshold: Double
+    private let sessionPool: FoundationModelSessionPool?
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.TriggerResolution")
 
     public init(
@@ -14,11 +16,13 @@ public struct AutomationTriggerResolutionWorkerSession: Sendable {
             SystemLanguageModel.default.isAvailable
         },
         resolve: (@Sendable (AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionFMOutput)? = nil,
-        deterministicAcceptThreshold: Double = 0.8
+        deterministicAcceptThreshold: Double = 0.8,
+        sessionPool: FoundationModelSessionPool? = nil
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.resolve = resolve
         self.deterministicAcceptThreshold = deterministicAcceptThreshold
+        self.sessionPool = sessionPool
     }
 
     public func resolve(_ input: AutomationTriggerResolutionInput) async throws -> AutomationTriggerResolutionOutput {
@@ -46,9 +50,14 @@ public struct AutomationTriggerResolutionWorkerSession: Sendable {
         let prompt = AutomationTriggerResolutionPromptBuilder.prompt(input: input, fallback: fallback)
         logger.debug("[FoundationModelInput] \(prompt, privacy: .public)")
         do {
-            let session = LanguageModelSession(
-                instructions: Instructions(AutomationTriggerResolutionPromptBuilder.instructions)
-            )
+            let session: LanguageModelSession
+            if let sessionPool {
+                session = await sessionPool.acquire(kind: .triggerResolution)
+            } else {
+                session = LanguageModelSession(
+                    instructions: Instructions(AutomationTriggerResolutionPromptBuilder.instructions)
+                )
+            }
             let fmOutput = try await FoundationModelCallRecorder.record(
                 agentID: AgentID.automationTriggerResolution.rawValue,
                 policyMode: "model-first-with-fallback",
@@ -59,6 +68,9 @@ public struct AutomationTriggerResolutionWorkerSession: Sendable {
                     to: Prompt(prompt),
                     generating: AutomationTriggerResolutionFMOutput.self
                 ).content
+            }
+            if let sessionPool {
+                await sessionPool.release(kind: .triggerResolution, session: session)
             }
             let result = try output(from: fmOutput, id: input.component.id, fallback: fallback)
             logger.debug("[FoundationModelOutput] \(String(describing: result), privacy: .public)")
