@@ -9,6 +9,9 @@ public enum RepairResult: Sendable {
     case capability(fieldID: FieldID, HomeCapabilityDecision)
     case trigger(AutomationTriggerResolutionOutput)
     case conditionClause(index: Int, AutomationConditionClauseResolutionResult)
+    /// Multiple disputed condition leaves repaired in a single batched pass
+    /// (Phase III batching reused by the `.conditionClause` repair specialist).
+    case conditionClauses([(index: Int, result: AutomationConditionClauseResolutionResult)])
     case segmentation(AutomationComponentPlan)
     case riskRaise(HomeRiskClassificationResult)
     case operation(HomeOperationDetectionResult)
@@ -41,6 +44,11 @@ public enum EnvelopeMerger {
 
         case .conditionClause(let index, let clauseResult):
             return mergeConditionClause(index, result: clauseResult, into: envelope, iteration: iteration)
+
+        case .conditionClauses(let clauseResults):
+            return clauseResults.reduce(envelope) { partial, entry in
+                mergeConditionClause(entry.index, result: entry.result, into: partial, iteration: iteration)
+            }
 
         case .segmentation(let componentPlan):
             return mergeSegmentation(componentPlan, into: envelope, iteration: iteration)
@@ -254,6 +262,7 @@ public enum EnvelopeMerger {
     ) -> DraftEnvelope {
         guard let auto = envelope.automation, let trigger = output.trigger else { return envelope }
 
+        let existingRawText = auto.trigger?.rawText
         let triggerDraft: TriggerDraft
         switch trigger {
         case .schedule(let schedule):
@@ -262,12 +271,15 @@ public enum EnvelopeMerger {
                 time: schedule.timeOfDay,
                 repeatRule: schedule.repeatRule,
                 timezoneIdentifier: schedule.timezoneIdentifier,
+                rawText: existingRawText,
                 confidence: output.confidence
             )
         case .device(let deviceTrigger):
             triggerDraft = TriggerDraft(
                 type: .device,
                 deviceDescription: deviceTrigger.description,
+                rawText: existingRawText,
+                deviceCondition: deviceTrigger.condition,
                 confidence: output.confidence
             )
         }

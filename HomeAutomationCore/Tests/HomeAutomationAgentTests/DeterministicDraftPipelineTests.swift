@@ -134,6 +134,43 @@ struct DeterministicDraftPipelineTests {
         #expect(envelope.fieldConfidence[.triggerTime]! > 0.0)
     }
 
+    @Test("Schedule trigger retains its raw fragment and carries no device condition")
+    func scheduleTriggerRetainsRawText() async {
+        let pipeline = makePipeline()
+        let envelope = await pipeline.makeAutomationEnvelope(
+            text: "turn on the bedroom lamp every day at 7 PM"
+        )
+
+        let trigger = envelope.automation?.trigger
+        #expect(trigger?.type == .schedule)
+        #expect(trigger?.rawText?.isEmpty == false)
+        #expect(trigger?.deviceCondition == nil)
+    }
+
+    @Test("Device trigger populates a resolved, compilable device condition")
+    func deviceTriggerEnvelopePopulatesCondition() async {
+        let pipeline = makePipeline()
+        let envelope = await pipeline.makeAutomationEnvelope(
+            text: "When the entry contact sensor opens, turn on the porch light"
+        )
+
+        let auto = envelope.automation
+        #expect(auto?.trigger?.type == .device)
+        #expect(auto?.trigger?.rawText?.isEmpty == false)
+
+        guard case .comparison(let comparison)? = auto?.trigger?.deviceCondition else {
+            Issue.record("Expected a resolved comparison device condition")
+            return
+        }
+        guard case .deviceAttribute(_, let deviceID, let capability, let attribute) = comparison.left else {
+            Issue.record("Expected a device-attribute left operand")
+            return
+        }
+        #expect(deviceID == "entry_contact_sensor")
+        #expect(capability == "contactSensor")
+        #expect(attribute == "contact")
+    }
+
     @Test("Multi-action automation with conditions produces correct structure")
     func multiActionAutomationEnvelope() async {
         let pipeline = makePipeline()

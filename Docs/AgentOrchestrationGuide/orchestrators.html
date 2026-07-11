@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Code-level comparison of the three HomeAutomation orchestration arms and a prioritized improvement review.">
+  <title>Three Orchestrators · HomeAutomation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="shell">
+    <header class="mobile-bar"><strong>Agent Field Guide</strong><button class="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button></header>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="index.html"><span class="brand-mark">H</span><span><strong>HomeAutomation</strong><small>Agent field guide</small></span></a>
+      <p class="nav-label">Guide</p>
+      <nav class="site-nav" aria-label="Documentation pages">
+        <a href="index.html"><span>00</span><span>System overview</span></a>
+        <a href="agents-core.html"><span>01</span><span>Routing &amp; context</span></a>
+        <a href="agents-command.html"><span>02</span><span>Command agents</span></a>
+        <a href="agents-automation.html"><span>03</span><span>Automation agents</span></a>
+        <a href="orchestrators.html"><span>04</span><span>Three orchestrators</span></a>
+        <a href="orchestrator.html"><span>05</span><span>Latency playbook</span></a>
+      </nav>
+      <div class="sidebar-note"><strong>Analysis scope</strong>This page describes live code, including gaps where design documents and runtime behavior diverge.</div>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="content">
+        <header class="hero compact">
+          <p class="eyebrow">04 · Comparative runtime analysis</p>
+          <h1>Three paths, one result contract.</h1>
+          <p class="lede">The evaluation harness compares a baseline DAG, that DAG with a deterministic Tier‑1 automation action path, and a bounded verifier loop. They accept the same request and return the same result type—but their cost, safety coverage, and maturity differ.</p>
+          <div class="hero-meta"><span class="pill">graph</span><span class="pill">graphWithTier1</span><span class="pill amber">verifierLoop</span></div>
+        </header>
+
+        <section class="section" id="definition">
+          <div class="section-heading"><h2>First, name them correctly</h2><p>The word “orchestrator” is used at two levels in this repository.</p></div>
+          <div class="grid-2">
+            <article class="panel"><h3>Runtime modes: two</h3><p><code>OrchestrationMode</code> contains <code>graph</code> and <code>verifierLoop</code>. <code>HomeCommandOrchestrator</code> branches on this value after root routing.</p></article>
+            <article class="panel"><h3>Evaluation arms: three</h3><p><code>OrchestrationArm</code> adds <code>graphWithTier1</code>. It is still graph mode, but its registry wires automation actions to <code>AutomationActionMiniPipeline</code>.</p></article>
+          </div>
+          <div class="callout"><strong>Shared input and output</strong><p>All arms receive text, <code>executeLowRiskCommands</code>, and SmartThings creation options through <code>CommandRequest</code>. They stream pipeline events and terminate with <code>HomeAutomationResolverResult</code>.</p></div>
+        </section>
+
+        <section class="section" id="shared-ingress">
+          <div class="section-heading"><h2>Shared ingress</h2><p>Even verifier-loop mode currently pays this front-end cost before its own deterministic Stage 0.</p></div>
+          <div class="flow">
+            <div class="flow-step"><em>01</em><b>Validate</b><span>Trim text; reject an empty command.</span></div>
+            <div class="flow-step"><em>02</em><b>Initialize</b><span>Request, context actor, event bus, metrics, trace, and run identity.</span></div>
+            <div class="flow-step"><em>03</em><b>Memory hint</b><span>Inject the last resolved device only when follow-up language is detected.</span></div>
+            <div class="flow-step"><em>04</em><b>Root graph</b><span>OperationDetectionAgent may make a model call and tool round-trip.</span></div>
+            <div class="flow-step"><em>05</em><b>Dispatch</b><span>Direct command, automation, unsupported, or loop path.</span></div>
+          </div>
+        </section>
+
+        <section class="section" id="three-arms">
+          <div class="section-heading"><h2>The three execution paths</h2><p>Each summary follows control flow, calls, output, resilience, and the critical latency shape.</p></div>
+
+          <article class="orchestrator-card" id="legacy-graph">
+            <div class="ordinal">01</div>
+            <div>
+              <p class="mode-note">Runtime mode · production default</p>
+              <h3>Legacy graph / DAG</h3>
+              <p><b>Algorithm.</b> <code>GraphPlanner</code> selects a static operation-specific DAG. <code>GraphScheduler</code> validates it, repeatedly launches every dependency-ready node, commits typed patches as tasks finish, and stops on terminal context or an approved transition.</p>
+              <p><b>Direct-command topology.</b> Three parallel NLU nodes → barrier → four parallel evidence/candidate nodes → eleven-node sequential judge/rank/hydrate/capability/draft/safety/execution spine. With models unavailable, a deterministic fallback graph runs.</p>
+              <p><b>Automation topology.</b> Seven outer stages are sequential. The fan-out node internally schedules trigger, actions, and conditions with a six-task cap, condition batching, clarification cancellation, session pooling, and speculative segmentation/compilation.</p>
+              <p><b>Reachable model tools.</b> <code>analyzeOperationSemantics</code>; capability device-detail/all-capability tools; draft device search, command inspection, candidate hydration, and optional current-state tool.</p>
+              <ul>
+                <li><b>Best qualities:</b> validated static topology, typed data isolation, real parallel waves, circuit breakers, graph-level timeouts/retries, checkpoints, rich traces, and mature fail-closed gates.</li>
+                <li><b>Main cost:</b> a model-first front end and a long sequential critical path; automation actions can each repeat a full direct-command subgraph.</li>
+                <li><b>Output:</b> context-derived direct result, automation result, clarification, confirmation, or unsupported terminal state.</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="orchestrator-card" id="tier1-graph">
+            <div class="ordinal">02</div>
+            <div>
+              <p class="mode-note">Graph configuration · evaluation arm</p>
+              <h3>Graph + Automation Tier‑1</h3>
+              <p><b>Algorithm.</b> The outer scheduler and graphs are unchanged. Only each automation action branch changes: deterministic envelope → candidate hydration → confidence gate → optional capability specialist → structural draft → deterministic validation.</p>
+              <p><b>Call budget.</b> A confident action uses zero FM calls. If the minimum envelope-field confidence is below <code>0.78</code>, the pipeline makes at most one capability-resolution model call with two canonical tools.</p>
+              <p><b>Parallelism.</b> Actions still run inside the six-way component fan-out and results are restored to declaration order. The resolver’s separate two-action cap applies to <code>resolveAll</code>, not the active single-action fan-out calls.</p>
+              <ul>
+                <li><b>Best qualities:</b> large multi-action latency reduction with the same outer graph, validation, compiler, and reversible feature flag.</li>
+                <li><b>Main limitation:</b> a low confidence in any field calls the capability specialist even when target, intent, room, or risk is the weak field.</li>
+                <li><b>Resilience gap:</b> direct mini-pipeline worker calls bypass graph-level specialist timeouts, retries, and circuit breakers; only the 300-second outer fan-out timeout remains.</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="orchestrator-card" id="verifier-loop">
+            <div class="ordinal">03</div>
+            <div>
+              <p class="mode-note">Runtime mode · bounded experimental path</p>
+              <h3>Deterministic verifier loop</h3>
+              <p><b>Algorithm.</b> Build a field-level <code>DraftEnvelope</code> deterministically; pre-repair zero-confidence fields; verify through one reusable constrained session; route disputes to specialists; run disjoint repairs concurrently; merge in stable order; latch repaired fields; re-verify with a delta prompt.</p>
+              <p><b>Hard bounds.</b> Three verifier iterations, three repair groups per iteration, six disputes per verdict, field latching, strict progress, and escalation on verifier failure, no progress, repair latch, or iteration cap.</p>
+              <p><b>Calls.</b> The verifier has no tools. Target/risk/operation repairs are deterministic; capability repair can use two canonical tools; fragment NLU performs two model responses. Escalation makes the full graph tool set reachable.</p>
+              <ul>
+                <li><b>Best qualities:</b> low expected model-call count, typed provenance/confidence, constrained verdicts, targeted parallel repairs, delta prompts, and a safe legacy escalation concept.</li>
+                <li><b>Coverage gap:</b> trigger, condition, segmentation, and holistic repair dispatch currently return <code>nil</code>.</li>
+                <li><b>Safety gap:</b> accepted loop outputs return through <code>LoopResultBridge</code> before the graph’s mandatory direct-command/automation finalization gates.</li>
+              </ul>
+            </div>
+          </article>
+        </section>
+
+        <section class="section" id="comparison">
+          <div class="section-heading"><h2>Side-by-side</h2><p>This is a code-shape comparison, not a claim of measured speedup; current telemetry caveats appear below.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Dimension</th><th>Legacy graph</th><th>Graph + Tier‑1</th><th>Verifier loop</th></tr></thead>
+              <tbody>
+                <tr><td>Top-level mode</td><td><code>graph</code></td><td><code>graph</code> + feature flag</td><td><code>verifierLoop</code></td></tr>
+                <tr><td>Planning</td><td>Static validated DAG per operation</td><td>Same DAG; action service swap</td><td>Deterministic envelope + fixed verify/repair controller</td></tr>
+                <tr><td>Direct command</td><td>Full model-first graph</td><td>Same as baseline</td><td>Deterministic draft + verifier; may escalate</td></tr>
+                <tr><td>Automation action</td><td>Nested full direct subgraph</td><td>0–1 FM mini-pipeline</td><td>Envelope actions + targeted disputes</td></tr>
+                <tr><td>Concurrency</td><td>DAG-ready waves; bounded automation fan-out</td><td>Same, with shorter action branches</td><td>Parallel pre-repair and per-iteration repair groups</td></tr>
+                <tr><td>Safety maturity</td><td>Strongest; mandatory graph gates</td><td>Same outer validation, but mini-worker resilience bypass</td><td>Incomplete final-gate parity in current code</td></tr>
+                <tr><td>Failure strategy</td><td>Retries, circuits, transitions, fallback, fail closed</td><td>Same outer strategy; direct mini calls fall back locally</td><td>Bounded escalation; graph work is currently recomputed</td></tr>
+                <tr><td>Best present role</td><td>Correctness reference and escalation path</td><td>Lowest-risk automation latency candidate</td><td>Shadow/A-B path until safety and repair gaps close</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="improvements">
+          <div class="section-heading"><h2>Improvement review</h2><p>Prioritized from release blockers to latency refinements. These are findings, not changes already made.</p></div>
+
+          <h3>P0 · Safety and correctness</h3>
+          <div class="recommendation-grid">
+            <article class="recommendation"><span class="rank">P0.1 · shared finalizer</span><h3>Run one mandatory post-draft gate chain for every arm</h3><p>Loop acceptance currently bypasses safety validation, parameter validation, confirmation policy, execution planning, automation validation, and requested SmartThings creation. Create a common finalization subgraph and never let an arm return a mutation-capable result before it.</p><footer>Evidence: HomeCommandOrchestrator.swift:408–425; LoopResultBridge.swift:47–136.</footer></article>
+            <article class="recommendation"><span class="rank">P0.2 · verdict invariants</span><h3>Normalize acceptance, clarification, and risk</h3><p>Accept only when there are no disputes, no clarification request, and no understated risk. Convert <code>riskUnderstated</code> to a risk dispute and check it before the accepted fast path.</p><footer>Evidence: DraftVerdict.swift:171–178; VerifierLoopOrchestrator.swift:141–166.</footer></article>
+            <article class="recommendation"><span class="rank">P0.3 · repair truth</span><h3>Latch only fields that were actually repaired</h3><p>Group repair steps by specialist and component scope, return written field IDs from each specialist, and latch only successful writes. Today one multi-action specialist result can repair one field while the loop latches several.</p><footer>Evidence: RepairPlanner.swift:55–89; RepairSpecialistRegistry.swift:28–68.</footer></article>
+            <article class="recommendation"><span class="rank">P0.4 · specialist completeness</span><h3>Make scheduled repairs real</h3><p>Implement fragment-NLU merge, hydrate capability-repair candidates, and add trigger/condition/segmentation specialists—or stop scheduling those paths. Rebuild the envelope when operation repair changes command versus automation shape.</p><footer>Evidence: EnvelopeMerger.swift:55–74,238–246; RepairSpecialistRegistry.swift:87–123.</footer></article>
+          </div>
+
+          <h3 style="margin-top:38px">P0 · Measurement integrity</h3>
+          <div class="recommendation-grid">
+            <article class="recommendation"><span class="rank">P0.5 · call accounting</span><h3>Count model calls where they happen</h3><p>Use a run-scoped counter inside <code>FoundationModelCallRecorder</code>. Stage-status inference counts non-model nodes, misses threshold skips and repeated attempts, omits automation/loop early returns, and can report zero for real work.</p><footer>Evidence: OrchestratorMetrics.swift:518–556.</footer></article>
+            <article class="recommendation"><span class="rank">P0.6 · comparable clocks</span><h3>Measure true gate wait and one end-to-end window</h3><p>The comparison labels graph-node queue duration (seconds) as FM queue milliseconds. Read actual gate telemetry, include root routing in every arm, identify cold/warm/thermal runs, and counterbalance live arm order.</p><footer>Evidence: OrchestrationComparisonRunner.swift:273–275; current loop/automation duration windows differ.</footer></article>
+          </div>
+
+          <h3 style="margin-top:38px">P1 · Latency and resilience</h3>
+          <div class="recommendation-grid">
+            <article class="recommendation"><span class="rank">P1.1 · loop ingress</span><h3>Remove duplicate model routing in loop mode</h3><p>Use deterministic operation detection for loop mode and let the verifier dispute it. Pass the context’s memory hints into the deterministic envelope. Add the same short soft deadline to model-backed root routing when the graph path needs it.</p><footer>Removes one hot-path FM call and restores follow-up context.</footer></article>
+            <article class="recommendation"><span class="rank">P1.2 · reuse escalation</span><h3>Seed a minimal escalation graph</h3><p>Call and extend <code>LoopResultBridge.seedContext</code>, then skip already-valid stages through an escalation-specific DAG. Current loop escalation simply falls through and repeats target, capability, and draft work.</p><footer>Evidence: LoopResultBridge.swift:31–43; HomeCommandOrchestrator.swift:384–390.</footer></article>
+            <article class="recommendation"><span class="rank">P1.3 · stop early</span><h3>Cancel sibling work on terminal outcomes</h3><p>When clarification, unsupported, or terminal failure is known, cancel already-running siblings that are not required cleanup. The scheduler currently stops launching new nodes but still waits for the task group.</p><footer>Evidence: GraphScheduler.swift:284–321.</footer></article>
+            <article class="recommendation"><span class="rank">P1.4 · graph semantics</span><h3>Honor required nodes and manifest retry policy</h3><p>A missing/open-circuit required non-safety node should fail or fall back—not be marked complete. Replace ambiguous hard-coded retry counts with manifest <code>maxAttempts</code> semantics and cancel the losing timeout sleeper.</p><footer>Evidence: GraphNodeExecutionLoop.swift:165–233; OrchestratorPolicyEngine.swift:32–39,124–134.</footer></article>
+            <article class="recommendation"><span class="rank">P1.5 · Tier‑1 specialists</span><h3>Escalate the field that is actually weak</h3><p>Target weakness should call target resolution; intent/slots should call fragment NLU; capability/command should call the capability worker; risk should call deterministic risk policy. Apply target changes and wrap each specialist in timeout/circuit telemetry.</p><footer>The injected fragment-NLU worker is currently unused by the mini-pipeline.</footer></article>
+            <article class="recommendation"><span class="rank">P1.6 · speculation</span><h3>Patch only the plan diff</h3><p>Reuse Wave‑1 outcomes for unchanged component IDs and resolve only added or changed trigger/action/condition work. Current code computes a diff, then reruns the entire refined plan.</p><footer>Evidence: AutomationComponentFanOutRunner.swift:129–161.</footer></article>
+            <article class="recommendation"><span class="rank">P1.7 · scarce model gate</span><h3>Activate real priority and aging</h3><p>All recorder call sites currently use the default interactive lane, so the documented two-lane scheduler is inert. Label long draft/action work as pipeline, keep short verifier/trigger/condition calls interactive, then add aging to prevent starvation.</p><footer>Evidence: FoundationModelGate.swift; no production .pipeline call site.</footer></article>
+            <article class="recommendation"><span class="rank">P1.8 · sessions</span><h3>Prewarm correctly and isolate state</h3><p>Constructing a <code>LanguageModelSession</code> is not Apple’s <code>prewarm(promptPrefix:)</code>. Sessions accumulate transcript, so do not pool them across unrelated requests; reuse only within a run or recreate from an immutable prefix, and discard failed sessions.</p><footer>Platform constraints are sourced on the latency playbook page.</footer></article>
+          </div>
+        </section>
+
+        <section class="section" id="recommendation">
+          <div class="section-heading"><h2>Recommended rollout posture</h2><p>Safety parity and trustworthy measurement come before a default-mode decision.</p></div>
+          <div class="timeline">
+            <article class="timeline-item"><h3>Keep graph as the reference</h3><p>Repair required-node, retry, cancellation, priority, and telemetry semantics while preserving it as the broadest-coverage escalation path.</p></article>
+            <article class="timeline-item"><h3>Promote Tier‑1 first</h3><p>After field-specific escalation and specialist timeout/circuit integration, it offers the lowest-risk large reduction for multi-action automations.</p></article>
+            <article class="timeline-item"><h3>Shadow the verifier loop</h3><p>Do not make it default until the common final safety chain, complete automation specialists, correct repair merging/latching, seeded escalation, memory handling, and live call telemetry all pass.</p></article>
+            <article class="timeline-item"><h3>Add adaptive selection only after measurement</h3><p>The next page proposes a fourth orchestrator that routes among the three existing arms and schedules their frontier more intelligently.</p></article>
+          </div>
+        </section>
+
+        <section class="section footnotes" id="source-map">
+          <div class="section-heading"><h2>Primary code references</h2><p>Open these local sources for the executable definitions behind the analysis.</p></div>
+          <p><a href="../../HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift">OrchestrationComparisonRunner.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeCommandOrchestrator.swift">HomeCommandOrchestrator.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphPlanner.swift">GraphPlanner.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphScheduler.swift">GraphScheduler.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/VerifierLoopOrchestrator.swift">VerifierLoopOrchestrator.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/Automation/AutomationActionMiniPipeline.swift">AutomationActionMiniPipeline.swift</a>.</p>
+        </section>
+
+        <footer class="page-footer"><a href="agents-automation.html">← Automation agents</a><a href="orchestrator.html">Next: modern latency playbook →</a></footer>
+      </div>
+    </main>
+  </div>
+  <script src="site.js"></script>
+</body>
+</html>

@@ -184,6 +184,16 @@ public struct TriggerDraft: Sendable, Hashable, Codable {
     public let repeatRule: HomeAutomationRepeatRule?
     public let timezoneIdentifier: String?
     public let deviceDescription: String?
+    /// The trigger fragment as segmented from the user text. Kept so any repair
+    /// specialist can re-parse the trigger without re-segmenting the whole
+    /// command (see `RepairSpecialistRegistry`'s `.trigger` handler).
+    public let rawText: String?
+    /// The structured device-trigger condition for `type == .device`, resolved
+    /// to a compilable `HomeAutomationCondition` (device id + capability +
+    /// attribute + operator + value). `nil` for schedule triggers, or when the
+    /// deterministic parser could not resolve the device — in which case the
+    /// `.trigger` repair specialist fills it in.
+    public let deviceCondition: HomeAutomationCondition?
     public let confidence: Double
 
     public init(
@@ -192,6 +202,8 @@ public struct TriggerDraft: Sendable, Hashable, Codable {
         repeatRule: HomeAutomationRepeatRule? = nil,
         timezoneIdentifier: String? = nil,
         deviceDescription: String? = nil,
+        rawText: String? = nil,
+        deviceCondition: HomeAutomationCondition? = nil,
         confidence: Double
     ) {
         self.type = type
@@ -199,6 +211,8 @@ public struct TriggerDraft: Sendable, Hashable, Codable {
         self.repeatRule = repeatRule
         self.timezoneIdentifier = timezoneIdentifier
         self.deviceDescription = deviceDescription
+        self.rawText = rawText
+        self.deviceCondition = deviceCondition
         self.confidence = confidence
     }
 

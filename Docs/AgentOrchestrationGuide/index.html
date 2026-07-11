@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A code-grounded field guide to the HomeAutomation agents and orchestration runtime.">
+  <title>HomeAutomation Agent Field Guide</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="shell">
+    <header class="mobile-bar">
+      <strong>Agent Field Guide</strong>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+    </header>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">H</span>
+        <span><strong>HomeAutomation</strong><small>Agent field guide</small></span>
+      </a>
+      <p class="nav-label">Guide</p>
+      <nav class="site-nav" aria-label="Documentation pages">
+        <a href="index.html"><span>00</span><span>System overview</span></a>
+        <a href="agents-core.html"><span>01</span><span>Routing &amp; context</span></a>
+        <a href="agents-command.html"><span>02</span><span>Command agents</span></a>
+        <a href="agents-automation.html"><span>03</span><span>Automation agents</span></a>
+        <a href="orchestrators.html"><span>04</span><span>Three orchestrators</span></a>
+        <a href="orchestrator.html"><span>05</span><span>Latency playbook</span></a>
+      </nav>
+      <div class="sidebar-note">
+        <strong>Code snapshot</strong>
+        Verified against the workspace on 11 July 2026. Source links open the exact implementation file.
+      </div>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="content">
+        <header class="hero">
+          <p class="eyebrow">Code-grounded architecture manual · 2026</p>
+          <h1>From a sentence to a safe home action.</h1>
+          <p class="lede">A practical map of every specialist agent, the tools and services each one calls, the context patches they produce, and the three orchestration arms used to measure quality and latency.</p>
+          <div class="hero-meta">
+            <span class="pill">39 HomeAgent implementations</span>
+            <span class="pill">36 registry-facing adapters</span>
+            <span class="pill amber">3 evaluated orchestration arms</span>
+          </div>
+        </header>
+
+        <section class="section" id="mental-model">
+          <div class="section-heading">
+            <h2>The mental model</h2>
+            <p>Agents do narrow work. The orchestrator owns order, concurrency, safety, failure policy, and the final answer.</p>
+          </div>
+          <div class="flow" aria-label="Input to output flow">
+            <div class="flow-step"><em>01 · ingest</em><b>CommandRequest</b><span>Trim text, attach execution options and a safe conversational memory hint.</span></div>
+            <div class="flow-step"><em>02 · route</em><b>Root graph</b><span>OperationDetectionAgent chooses direct command, automation creation, or unsupported.</span></div>
+            <div class="flow-step"><em>03 · resolve</em><b>Specialist work</b><span>NLU, retrieval, candidates, automation components, drafting, or loop repairs run.</span></div>
+            <div class="flow-step"><em>04 · govern</em><b>Policy &amp; gates</b><span>Typed patches, validation, circuit breakers, timeouts, confirmation, and mutation rules.</span></div>
+            <div class="flow-step"><em>05 · return</em><b>Resolver result</b><span>Ready, executed, confirmation required, clarification, automation draft, or unsupported.</span></div>
+          </div>
+          <div class="callout">
+            <strong>The key contract</strong>
+            <p>A graph agent reads a snapshot of <code>ResolutionContext</code>, receives a typed input through <code>ContextualHomeAgent</code>, and returns a <code>ResolutionContextPatch</code>. The scheduler—not the agent—commits shared state.</p>
+          </div>
+        </section>
+
+        <section class="section" id="inventory">
+          <div class="section-heading">
+            <h2>Agent inventory</h2>
+            <p>The pages split the catalog by where information enters, becomes a command, or becomes an automation.</p>
+          </div>
+          <div class="grid-3">
+            <article class="panel">
+              <p class="eyebrow">01 · understand</p>
+              <h3>Routing, NLU, knowledge &amp; candidates</h3>
+              <p>Detect the operation, extract meaning, retrieve advisory evidence, find devices, and choose canonical targets and capabilities.</p>
+              <p><a href="agents-core.html">Read the context agents →</a></p>
+            </article>
+            <article class="panel">
+              <p class="eyebrow">02 · command</p>
+              <h3>Draft, safety, execution &amp; response</h3>
+              <p>Compose the prompt/tool package, generate a command draft, validate it deterministically, plan execution, and form safe terminal responses.</p>
+              <p><a href="agents-command.html">Read the command agents →</a></p>
+            </article>
+            <article class="panel">
+              <p class="eyebrow">03 · automate</p>
+              <h3>Automation, SmartThings &amp; loop workers</h3>
+              <p>Segment triggers/actions/conditions, fan out component resolution, assemble and validate a rule, compile it, and optionally create it.</p>
+              <p><a href="agents-automation.html">Read the automation agents →</a></p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="contracts">
+          <div class="section-heading">
+            <h2>How one agent works</h2>
+            <p>The same five-part lifecycle applies whether the implementation uses a model, RAG, a registry, or only deterministic rules.</p>
+          </div>
+          <div class="grid-2">
+            <article class="panel">
+              <h3>1. Input construction</h3>
+              <p>A contextual adapter reads only the fields needed from the latest context snapshot. Missing mandatory prerequisites become a structured input error before the agent starts.</p>
+            </article>
+            <article class="panel">
+              <h3>2. Narrow processing</h3>
+              <p>The typed <code>run(input, context)</code> method performs one responsibility. Model-backed workers usually start with deterministic hints and retain a deterministic fallback.</p>
+            </article>
+            <article class="panel">
+              <h3>3. Tool or service calls</h3>
+              <p>Calls may reach Foundation Models, RAG retrieval, the device registry, capability catalogs, SmartThings compilation/creation, or compact model tools. Most safety agents call no model.</p>
+            </article>
+            <article class="panel">
+              <h3>4. Typed output &amp; patch</h3>
+              <p>The result is mapped to context keys or typed artifacts. Patches can also request clarification, mark unsupported input, or return a structured failure.</p>
+            </article>
+            <article class="panel">
+              <h3>5. Scheduler decision</h3>
+              <p>The graph runtime records timing, updates the circuit breaker, applies retry and fail-closed rules, commits the patch, then recomputes which nodes are ready.</p>
+            </article>
+            <article class="panel">
+              <h3>6. Observable outcome</h3>
+              <p>Events stream to the UI while traces, graph timings, FM usage, retrieval reports, loop convergence, and circuit states are collected for evaluation.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="tools">
+          <div class="section-heading">
+            <h2>Tooling layers</h2>
+            <p>“Tool call” means more than an LLM function call in this codebase; the guide labels the exact kind on every agent card.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Layer</th><th>Examples</th><th>Authority</th></tr></thead>
+              <tbody>
+                <tr><td>Foundation Model sessions</td><td>Operation, semantic NLU, slot, risk, capability, verifier, trigger/condition workers</td><td>Advisory; bounded by model policy, soft timeouts, schemas, and deterministic fallback.</td></tr>
+                <tr><td>Model-visible tools</td><td><code>OperationSemanticAnalyzerTool</code>, <code>AvailableDeviceTypesTool</code>, candidate/capability inspection tools</td><td>Expose constrained canonical facts to a model; they do not execute devices.</td></tr>
+                <tr><td>Retrieval</td><td><code>ContextRetriever</code>, hybrid RAG, semantic examples, retrieval judge retry</td><td>Advisory evidence; canonical data is hydrated again before decisions.</td></tr>
+                <tr><td>Domain services</td><td>Device registry, candidate resolver, capability registry, command validator, execution planner</td><td>Canonical selection and deterministic validation.</td></tr>
+                <tr><td>External mutation</td><td><code>SmartThingsRuleCreating</code>, mock device executor</td><td>Allowed only after validation, policy, confirmation, and explicit creation/execution options.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="orchestration-note">
+          <div class="section-heading">
+            <h2>About the “three orchestrators”</h2>
+            <p>The evaluation names three arms, but the runtime exposes two top-level modes.</p>
+          </div>
+          <div class="callout warning">
+            <strong>Important naming distinction</strong>
+            <p><code>graph</code> and <code>verifierLoop</code> are runtime modes. <code>graphWithTier1</code> is the same graph runtime with <code>useMiniPipeline: true</code> for automation actions. The comparison harness treats all three as separate arms so latency and quality can be measured fairly.</p>
+          </div>
+          <p><a href="orchestrators.html">Compare the three arms and review improvement findings →</a></p>
+        </section>
+
+        <footer class="page-footer">
+          <span>HomeAutomation Agent &amp; Orchestration Field Guide</span>
+          <a href="orchestrator.html">Next: modern latency playbook →</a>
+        </footer>
+      </div>
+    </main>
+  </div>
+  <script src="site.js"></script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import os
 
 public struct AutomationActionMiniPipeline: Sendable {
     private let pipeline: DeterministicDraftPipeline
+    private let registry: any DeviceRegistryProtocol
     private let validator: AgentCommandValidator
     private let fragmentNLU: FragmentNLUWorkerSession
     private let capabilityWorker: CapabilityResolutionWorker
@@ -19,6 +20,7 @@ public struct AutomationActionMiniPipeline: Sendable {
         deterministicConfidenceThreshold: Double = 0.78
     ) {
         self.pipeline = DeterministicDraftPipeline(registry: registry)
+        self.registry = registry
         self.validator = validator
         self.fragmentNLU = fragmentNLU
         self.capabilityWorker = capabilityWorker
@@ -33,7 +35,7 @@ public struct AutomationActionMiniPipeline: Sendable {
         logger.info("Mini-pipeline resolving: '\(actionText, privacy: .private)'")
 
         let envelope = await pipeline.makeCommandEnvelope(text: actionText)
-        let candidates = candidateRecords(from: envelope)
+        let candidates = await candidateRecords(from: envelope)
         let state = AgentTextParser.deterministicState(for: actionText)
 
         var capDecision: HomeCapabilityDecision?
@@ -110,12 +112,24 @@ public struct AutomationActionMiniPipeline: Sendable {
         )
     }
 
-    private func candidateRecords(from envelope: DraftEnvelope) -> [HomeCandidateRecord] {
+    /// Hydrates the envelope's compact candidate table from the device
+    /// registry. The compact records carry no capability data, and
+    /// `AgentCommandValidator` rejects any draft whose target device does not
+    /// list the chosen capability — so validating against unhydrated records
+    /// silently fails every action as "capability not supported".
+    private func candidateRecords(from envelope: DraftEnvelope) async -> [HomeCandidateRecord] {
         let compactCandidates = envelope.command?.candidateTable ?? []
+        guard !compactCandidates.isEmpty else { return [] }
+        let devicesByID = Dictionary(
+            uniqueKeysWithValues: await registry.allDevices().map { ($0.id, $0) }
+        )
         var seen = Set<String>()
         return compactCandidates.compactMap { compact -> HomeCandidateRecord? in
             guard !seen.contains(compact.id) else { return nil }
             seen.insert(compact.id)
+            if let device = devicesByID[compact.id] {
+                return device
+            }
             return HomeCandidateRecord(
                 id: compact.id,
                 displayName: compact.name,

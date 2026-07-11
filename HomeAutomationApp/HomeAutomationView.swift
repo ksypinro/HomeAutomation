@@ -12,6 +12,7 @@ struct HomeAutomationView: View {
                     commandInput
                     sampleCommands
                     executionToggle
+                    orchestratorPicker
                     resolveButton
                     output
                     pipelineTimeline
@@ -90,6 +91,28 @@ struct HomeAutomationView: View {
             }
         }
         .toggleStyle(.switch)
+        .padding(14)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var orchestratorPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Orchestrator")
+                .font(.headline)
+
+            Picker("Orchestrator", selection: $viewModel.orchestratorChoice) {
+                ForEach(OrchestratorChoice.allCases) { choice in
+                    Text(choice.displayName).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
+
+            Text(viewModel.orchestratorChoice.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         .padding(14)
         .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
     }

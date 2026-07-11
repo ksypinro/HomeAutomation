@@ -65,20 +65,31 @@ public enum HomeCommandResolution: Sendable, Hashable, Codable {
         case .requiresConfirmation:
             return "This command requires confirmation before execution."
         case .automationDrafted(let plan):
+            let suffix = Self.conditionReadingSuffix(for: plan)
             if plan.backendResponse?.status == .created {
-                return "Automation created with \(plan.resolvedActions.count) action(s)."
+                return "Automation created with \(plan.resolvedActions.count) action(s)\(suffix)."
             }
             if plan.smartThingsRuleJSON != nil {
-                return "Automation drafted with \(plan.resolvedActions.count) action(s) and SmartThings JSON."
+                return "Automation drafted with \(plan.resolvedActions.count) action(s) and SmartThings JSON\(suffix)."
             }
-            return "Automation drafted with \(plan.resolvedActions.count) action(s)."
-        case .automationRequiresConfirmation:
-            return "This automation requires confirmation before it can be created."
+            return "Automation drafted with \(plan.resolvedActions.count) action(s)\(suffix)."
+        case .automationRequiresConfirmation(let plan):
+            let suffix = Self.conditionReadingSuffix(for: plan)
+            return "This automation requires confirmation before it can be created\(suffix)."
         case .needsClarification(let question):
             return question
         case .unsupported(let reason):
             return reason
         }
+    }
+
+    /// Renders the committed condition interpretation as a `" if <reading>"`
+    /// suffix so the parser's boolean-precedence reading is always user-visible
+    /// on a drafted automation (redesign item A-4). Empty when the automation
+    /// has no condition.
+    private static func conditionReadingSuffix(for plan: HomeAutomationCreationPlan) -> String {
+        guard let condition = plan.ruleDraft.condition else { return "" }
+        return " if \(condition.parenthesizedDescription())"
     }
 }
 

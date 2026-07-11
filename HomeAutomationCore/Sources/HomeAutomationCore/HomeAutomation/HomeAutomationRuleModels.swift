@@ -155,6 +155,89 @@ public indirect enum HomeAutomationCondition: Sendable, Hashable, Codable {
     case comparison(HomeAutomationComparisonCondition)
 }
 
+public extension HomeAutomationCondition {
+    /// Human-readable, parenthesized rendering of the condition's boolean
+    /// structure — e.g. `(Light is on AND Fan is off) OR TV is off`. Nested
+    /// AND/OR groups are wrapped in parentheses so the committed precedence
+    /// reading is unambiguous; the outermost group is not. Pass `deviceNames`
+    /// to substitute resolved device IDs with display names.
+    func parenthesizedDescription(deviceNames: [String: String] = [:]) -> String {
+        render(nested: false, deviceNames: deviceNames)
+    }
+
+    private func render(nested: Bool, deviceNames: [String: String]) -> String {
+        switch self {
+        case .and(let children):
+            return Self.joinGroup(children, separator: " AND ", nested: nested, deviceNames: deviceNames)
+        case .or(let children):
+            return Self.joinGroup(children, separator: " OR ", nested: nested, deviceNames: deviceNames)
+        case .not(let child):
+            return "NOT \(child.render(nested: true, deviceNames: deviceNames))"
+        case .changes(let child):
+            return "changes \(child.render(nested: true, deviceNames: deviceNames))"
+        case .comparison(let comparison):
+            return comparison.readableDescription(deviceNames: deviceNames)
+        }
+    }
+
+    private static func joinGroup(
+        _ children: [HomeAutomationCondition],
+        separator: String,
+        nested: Bool,
+        deviceNames: [String: String]
+    ) -> String {
+        let parts = children.map { $0.render(nested: true, deviceNames: deviceNames) }
+        let joined = parts.joined(separator: separator)
+        guard children.count > 1 else { return joined }
+        return nested ? "(\(joined))" : joined
+    }
+}
+
+public extension HomeAutomationComparisonCondition {
+    /// Renders a single comparison as a natural clause. Prefers a resolved
+    /// device display name plus the operator/value (`Fan is off`); falls back to
+    /// the operand's raw description, which for deterministically drafted
+    /// automations already reads as a full clause.
+    func readableDescription(deviceNames: [String: String] = [:]) -> String {
+        if case .deviceAttribute(let description, let deviceID, _, _) = left {
+            if let deviceID, let name = deviceNames[deviceID] {
+                return "\(name) \(valuePhrase())"
+            }
+            let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return "\(Self.operandText(left)) \(valuePhrase())"
+    }
+
+    private func valuePhrase() -> String {
+        let value = Self.operandText(right)
+        switch operatorName {
+        case .equals: return "is \(value)"
+        case .greaterThan: return "is above \(value)"
+        case .lessThan: return "is below \(value)"
+        case .greaterThanOrEquals: return "is at least \(value)"
+        case .lessThanOrEquals: return "is at most \(value)"
+        case .between: return "is between \(value)"
+        case .changes: return "changes to \(value)"
+        }
+    }
+
+    private static func operandText(_ operand: HomeAutomationConditionOperand) -> String {
+        switch operand {
+        case .deviceAttribute(let description, _, _, _):
+            return description
+        case .literalString(let value), .locationMode(let value), .unsupported(let value):
+            return value
+        case .literalNumber(let value, let unit):
+            let number = value.rounded() == value ? String(Int(value)) : String(value)
+            return unit.map { "\(number) \($0)" } ?? number
+        case .literalRange(let start, let end, let unit):
+            let range = "\(start) and \(end)"
+            return unit.map { "\(range) \($0)" } ?? range
+        }
+    }
+}
+
 public struct HomeAutomationRuleDraft: Sendable, Hashable, Codable {
     public let name: String
     public let domain: HomeAutomationCommandDomain

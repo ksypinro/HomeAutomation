@@ -91,6 +91,17 @@ public enum EvaluationCorpus {
             )
         ),
         EvaluationCase(
+            id: "trigger-resolution.device-contact-open",
+            suite: "trigger-resolution",
+            tags: ["automation", "trigger", "device-trigger"],
+            input: "When the entry contact sensor opens, turn on the porch light",
+            expected: EvaluationExpectedOutput(
+                expectedDeviceIDs: ["porch_light"],
+                actionCount: 1,
+                allowedOutcome: .drafted
+            )
+        ),
+        EvaluationCase(
             id: "smartthings-compilation.daily-schedule",
             suite: "smartthings-compilation",
             tags: ["automation", "smartthings"],
