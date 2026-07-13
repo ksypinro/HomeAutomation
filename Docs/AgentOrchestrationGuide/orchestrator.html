@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A research-backed modern orchestration design for reducing HomeAutomation latency.">
+  <title>Modern Latency Orchestrator · HomeAutomation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="shell">
+    <header class="mobile-bar"><strong>Agent Field Guide</strong><button class="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button></header>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="index.html"><span class="brand-mark">H</span><span><strong>HomeAutomation</strong><small>Agent field guide</small></span></a>
+      <p class="nav-label">Guide</p>
+      <nav class="site-nav" aria-label="Documentation pages">
+        <a href="index.html"><span>00</span><span>System overview</span></a>
+        <a href="agents-core.html"><span>01</span><span>Routing &amp; context</span></a>
+        <a href="agents-command.html"><span>02</span><span>Command agents</span></a>
+        <a href="agents-automation.html"><span>03</span><span>Automation agents</span></a>
+        <a href="orchestrators.html"><span>04</span><span>Three orchestrators</span></a>
+        <a href="orchestrator.html"><span>05</span><span>Latency playbook</span></a>
+      </nav>
+      <div class="sidebar-note"><strong>Evidence rule</strong>Conference papers are labeled separately from emerging preprints. Reported research speedups are not projected onto Apple’s on-device model without live-device A/B testing.</div>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="content">
+        <header class="hero compact">
+          <p class="eyebrow">05 · Proposed fourth orchestrator</p>
+          <h1>Adaptive Portfolio + Frontier.</h1>
+          <p class="lede">Choose the cheapest safe existing workflow for each request, compile only its necessary dependencies, and schedule scarce Foundation Model work by critical path, predicted job size, prefix state, and aging.</p>
+          <div class="hero-meta"><span class="pill">deterministic router</span><span class="pill">minimal DAG</span><span class="pill amber">critical-path FM frontier</span></div>
+        </header>
+
+        <section class="section" id="thesis">
+          <div class="section-heading"><h2>Why this design fits</h2><p>The repository already owns a portfolio of three reusable workflows and a comparison harness; routing among them is cheaper than asking another LLM to invent a plan.</p></div>
+          <div class="grid-3">
+            <article class="panel"><span class="metric-value">01</span><h3>Route before spending</h3><p>Use deterministic features and hard coverage/safety constraints to avoid a loop that will predictably escalate or a full graph when Tier‑1 is sufficient.</p></article>
+            <article class="panel"><span class="metric-value">02</span><h3>Remove false barriers</h3><p>Compile an input-specific dependency DAG so raw-text retrieval and deterministic work start as soon as their true inputs exist.</p></article>
+            <article class="panel"><span class="metric-value">03</span><h3>Schedule the bottleneck</h3><p>Treat the on-device model as a scarce serialized resource. Prioritize work that shortens remaining critical path rather than whoever reaches a FIFO lane first.</p></article>
+          </div>
+          <div class="callout warning"><strong>Prerequisite</strong><p>Apply the P0 safety and measurement fixes in <a href="orchestrators.html#improvements">the comparison review</a> first. An adaptive router must never learn around missing safety gates or optimize against inaccurate call counts.</p></div>
+        </section>
+
+        <section class="section" id="algorithm">
+          <div class="section-heading"><h2>The algorithm</h2><p>Six deterministic stages, followed by one shared finalizer and an offline feedback loop.</p></div>
+          <div class="flow">
+            <div class="flow-step"><em>A · observe</em><b>Feature snapshot</b><span>Compute difficulty, ambiguity, coverage, risk, queue, and warm-state signals once.</span></div>
+            <div class="flow-step"><em>B · constrain</em><b>Safety allowlist</b><span>Remove any arm that lacks coverage or mandatory final-gate parity for this request.</span></div>
+            <div class="flow-step"><em>C · choose</em><b>Portfolio router</b><span>Score graph, Tier‑1, loop, and an optional exact zero-FM template.</span></div>
+            <div class="flow-step"><em>D · execute</em><b>Frontier scheduler</b><span>Dispatch CPU tasks immediately; order FM residuals by downstream critical-path value.</span></div>
+            <div class="flow-step"><em>E/F · finish</em><b>Batch, cancel, verify</b><span>Fuse compatible residuals, stop on terminal outcomes, run common safety finalization, log truth.</span></div>
+          </div>
+
+          <div class="grid-2" style="margin-top:18px">
+            <article class="panel">
+              <h3>A · One deterministic feature pass</h3>
+              <p>Compute operation and confidence, text length/language, action and condition counts, minimum field confidence, top-two candidate margin, unsupported fragments, condition precedence ambiguity, risk floor, memory-reference flag, RAG/model availability, FM gate depth, and cold/warm state.</p>
+            </article>
+            <article class="panel">
+              <h3>B · Hard safety/coverage allowlist</h3>
+              <p>Device-trigger automation cannot use the loop until its specialists exist. Unknown/OOD/ambiguous requests fall back to the broad graph. Model-unavailable requests use deterministic fallback. Safety failures are forbidden—not merely given a negative score.</p>
+            </article>
+            <article class="panel">
+              <h3>C · Portfolio utility router</h3>
+              <p>Start with auditable rules. Later learn an offline uncertainty-aware score:</p>
+              <p><code>U = P(correct) − λ·p95_latency − μ·FM_calls − ν·P(escalation)</code></p>
+              <p>Only score allowed arms. High uncertainty or out-of-distribution features choose the safe reference graph.</p>
+            </article>
+            <article class="panel">
+              <h3>D · Minimal dependency DAG</h3>
+              <p>Build from approved templates, then prune nodes whose facts are already high-confidence and cached. Remove the current all-to-all NLU/evidence barrier: for example, raw-text examples need not wait for risk classification.</p>
+            </article>
+            <article class="panel">
+              <h3>E · Critical-path frontier</h3>
+              <p>For each ready FM job, estimate service time and remaining downstream critical path. Rank by critical-path reduction per expected model millisecond, then add queue age and prefix/session affinity. Aging prevents starvation.</p>
+            </article>
+            <article class="panel">
+              <h3>F · Batch, cancel, and learn</h3>
+              <p>Fuse compatible residual fields that share schema/instructions, cancel non-essential work after clarification or terminal failure, run the same deterministic finalizer for every arm, and record verified outcome plus actual call-level telemetry.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="routing-table">
+          <div class="section-heading"><h2>Safe initial routing rules</h2><p>Deploy rules before a learned router. They are inspectable, reversible, and generate clean shadow labels.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Observed request</th><th>Initial arm</th><th>Reason</th></tr></thead>
+              <tbody>
+                <tr><td>Exact template, low risk, one high-margin device, all parameters canonical</td><td>Validated zero-FM exact template, if added</td><td>No verifier is necessary when deterministic confidence and final gates are sufficient.</td></tr>
+                <tr><td>Low-risk single-device command with strong candidate margin, no memory reference</td><td>Verifier loop</td><td>One verification call is likely cheaper than the full model-first direct graph.</td></tr>
+                <tr><td>Confident schedule automation with simple action fragments</td><td>Graph + Tier‑1</td><td>Existing mini-pipeline can resolve each confident action with zero FM calls.</td></tr>
+                <tr><td>Device trigger, nested/ambiguous conditions, unsupported fragment, or unresolved precedence</td><td>Legacy graph</td><td>Loop repair coverage is incomplete; prefer the broadest mature path.</td></tr>
+                <tr><td>Pronoun or memory-reference command</td><td>Legacy graph until loop memory is fixed</td><td>The current loop drops injected memory hints.</td></tr>
+                <tr><td>Router predicts loop escalation above threshold</td><td>Legacy graph directly</td><td>Avoid paying loop cost before repeating work in the graph.</td></tr>
+                <tr><td>Foundation Model unavailable</td><td>Deterministic fallback graph</td><td>Preserve safe, bounded zero-FM behavior.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="frontier">
+          <div class="section-heading"><h2>Frontier scheduling in practice</h2><p>Replace the static two-lane intent with a run-aware score while retaining bounded admission.</p></div>
+          <div class="callout"><strong>Suggested ready-job score</strong><p><code>score(j) = criticalPathSaved(j) / estimatedServiceMs(j) + ageBoost(j) + prefixAffinity(j) − cancellationRisk(j)</code></p></div>
+          <div class="grid-2">
+            <article class="panel"><h3>Critical-path saved</h3><p>Prefer a short verifier or condition call that unlocks final assembly over the first attempt of a long action subgraph with several downstream calls.</p></article>
+            <article class="panel"><h3>Estimated service time</h3><p>Learn per worker kind, prompt tokens, output schema size, warm/cold label, and recent device performance. Benchmark model concurrency 1 versus 2 on actual hardware.</p></article>
+            <article class="panel"><h3>Prefix affinity</h3><p>Prefer jobs that can use an already-prewarmed immutable instruction prefix. Do not reuse stateful transcripts across unrelated requests.</p></article>
+            <article class="panel"><h3>Cancellation risk</h3><p>Deprioritize expensive work likely to be discarded if another ready branch may produce clarification. Cancel queued work the moment a terminal decision is committed.</p></article>
+          </div>
+        </section>
+
+        <section class="section" id="modern-patterns">
+          <div class="section-heading"><h2>Modern patterns considered</h2><p>The proposed orchestrator combines ideas that transfer to this codebase and leaves infrastructure-specific claims at the boundary.</p></div>
+          <div class="recommendation-grid">
+            <article class="recommendation"><span class="rank">Peer reviewed · ICML 2024</span><h3>LLMCompiler-style dataflow</h3><p>A planner forms a dependency DAG and a task fetcher dispatches ready work. The paper reports up to 3.7× latency improvement over ReAct on its workloads; here the transferable idea is dependency-minimal parallel execution, not the numeric result.</p><footer><a href="https://proceedings.mlr.press/v235/kim24y.html">LLMCompiler, PMLR 235</a> · 21–27 July 2024.</footer></article>
+            <article class="recommendation"><span class="rank">Peer reviewed · ICLR 2025</span><h3>Learned utility routing</h3><p>RouteLLM shows that a learned inference-time router can choose between stronger and weaker models while preserving benchmark quality at lower cost. HomeAutomation should route between complete workflows and explicitly add latency/escalation to the objective.</p><footer><a href="https://proceedings.iclr.cc/paper_files/paper/2025/hash/5503a7c69d48a2f86fc00b3dc09de686-Abstract-Conference.html">RouteLLM, ICLR 2025</a>.</footer></article>
+            <article class="recommendation"><span class="rank">Peer reviewed · ICLR 2025 oral</span><h3>Offline workflow search</h3><p>AFlow uses execution feedback and Monte Carlo tree search over code-represented workflows. Use this only offline over approved templates, with latency/call count in the objective and mandatory validators locked.</p><footer><a href="https://openreview.net/forum?id=z5uVAKwmjf">AFlow, OpenReview</a> · published 22 January 2025.</footer></article>
+            <article class="recommendation"><span class="rank">Primary research · 2023</span><h3>Residual batching</h3><p>Batch Prompting groups compatible samples in one inference and reports substantial time/token reductions on studied API workloads, while warning that decoding/runtime details matter. Extend existing condition batching to low-confidence action capability and fused NLU fields, then benchmark on Apple hardware.</p><footer><a href="https://arxiv.org/abs/2301.08721">Batch Prompting</a> · 19 January 2023.</footer></article>
+            <article class="recommendation"><span class="rank">Emerging · 2026 preprint</span><h3>Workflow portfolio selection</h3><p>FlowBank curates complementary workflows and predicts query/workflow utility—the closest research analogue to selecting among this repository’s three prebuilt arms. Treat it as emerging evidence, not established practice.</p><footer><a href="https://arxiv.org/abs/2606.11290">FlowBank</a> · 9 June 2026.</footer></article>
+            <article class="recommendation"><span class="rank">Emerging · 2025/2026</span><h3>Difficulty and contextual-bandit orchestration</h3><p>DAAO adapts workflow depth to query difficulty; CB-Orchestrator frames workflow selection as a contextual bandit. They support a future offline-trained, uncertainty-aware router after static rules and measurement are sound.</p><footer><a href="https://arxiv.org/abs/2509.11079">DAAO</a> · <a href="https://openreview.net/forum?id=gEZ8gWc9LW">CB-Orchestrator</a>.</footer></article>
+            <article class="recommendation"><span class="rank">Emerging systems · 2026 preprints</span><h3>Critical-path-aware serving</h3><p>MARS, Pythia, and FATE expose workflow semantics, downstream critical path, warm prefix state, and future-ready work to a scheduler. Their server/GPU speedups do not transfer directly, but the ready-frontier scoring principle does.</p><footer><a href="https://arxiv.org/abs/2604.26963">MARS</a> · <a href="https://arxiv.org/abs/2604.25899">Pythia</a> · <a href="https://arxiv.org/abs/2605.07238">FATE</a>.</footer></article>
+            <article class="recommendation"><span class="rank">Platform authority · Apple</span><h3>Stateful sessions and real prewarming</h3><p>Apple documents a session as a stateful context with a transcript, and separately exposes <code>prewarm(promptPrefix:)</code>. Use immutable-prefix prewarming with at least a one-second lead; avoid cross-request transcript pooling and measure cache effects in Instruments.</p><footer><a href="https://developer.apple.com/documentation/foundationmodels/languagemodelsession">LanguageModelSession</a> · <a href="https://developer.apple.com/documentation/foundationmodels/languagemodelsession/prewarm(promptprefix:)">prewarm(promptPrefix:)</a> · <a href="https://developer.apple.com/documentation/foundationmodels/analyzing-the-runtime-performance-of-your-foundation-models-app">performance analysis</a>.</footer></article>
+          </div>
+        </section>
+
+        <section class="section" id="avoid">
+          <div class="section-heading"><h2>What not to add for latency</h2><p>Several fashionable agent patterns increase calls and are poorly matched to a closed, safety-critical home domain.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Pattern</th><th>Why not on this hot path</th><th>Safer alternative</th></tr></thead>
+              <tbody>
+                <tr><td>Tree/Graph-of-Thought, debate, self-consistency</td><td>Expands branches and model calls; the on-device model is the bottleneck.</td><td>One deterministic candidate plus bounded verification/targeted repair.</td></tr>
+                <tr><td>Parallel hedged model requests</td><td>Redundant calls compete for a mostly serialized resource and increase queueing.</td><td>Speculate with cheap deterministic work against one model refinement.</td></tr>
+                <tr><td>LLM planner on every request</td><td>The planning call can dominate a simple command and may synthesize unsafe topology.</td><td>Route among validated templates using deterministic features.</td></tr>
+                <tr><td>Unrestricted online exploration</td><td>Bandit exploration is inappropriate for mutations and high-risk commands.</td><td>Train offline; shadow; conservative canary; never explore outside hard safety constraints.</td></tr>
+                <tr><td>GPU-serving optimizations as local promises</td><td>Continuous batching, KV placement, and disaggregated serving require provider internals Apple Foundation Models does not expose.</td><td>Adopt only if a remote/custom model provider is introduced.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="roadmap">
+          <div class="section-heading"><h2>Adoption roadmap</h2><p>Each stage is independently measurable and reversible.</p></div>
+          <div class="timeline">
+            <article class="timeline-item"><h3>0 · Establish truthful telemetry</h3><p>Actual call spans, gate wait, end-to-end p50/p95, time to first token, cold/warm/thermal labels, randomized arm order, safety/accuracy parity, escalation rate, and router regret versus a per-case oracle.</p></article>
+            <article class="timeline-item"><h3>1 · Apply no-regret fixes</h3><p>Shared finalizer, deterministic/soft-timed loop root, seeded escalation, real prewarming and session isolation, priority labels, speculative diff reuse, early cancellation, and correct retry/required-node semantics.</p></article>
+            <article class="timeline-item"><h3>2 · Ship a static conservative router in shadow</h3><p>Use the table above, log its choice without changing user behavior, and compare with all three arms on the evaluation corpus and live hardware.</p></article>
+            <article class="timeline-item"><h3>3 · Train an offline utility predictor</h3><p>Begin with calibrated supervised predictions; optionally move to LinUCB or Neural-Linear UCB. Uncertainty/OOD always falls back to graph. No live exploration for mutation or high-risk cases.</p></article>
+            <article class="timeline-item"><h3>4 · Add critical-path frontier and fused batches</h3><p>Remove false barriers, estimate job duration, implement aging and prefix affinity, fuse residual NLU/action calls, and compare gate concurrency one versus two on actual devices.</p></article>
+            <article class="timeline-item"><h3>5 · Optional offline workflow search</h3><p>Use AFlow/FlowBank-like search only over approved templates. Every candidate must preserve mandatory gates, pass <code>GraphValidator</code>, and clear golden plus live-device suites before it enters the portfolio.</p></article>
+          </div>
+        </section>
+
+        <section class="section" id="acceptance">
+          <div class="section-heading"><h2>Acceptance metrics</h2><p>Optimize the distribution, not an average that hides cold starts and escalations.</p></div>
+          <div class="metric-grid">
+            <article class="metric"><span class="metric-value">p50 / p95</span><span class="metric-label">End-to-end duration including root routing and finalization</span></article>
+            <article class="metric"><span class="metric-value">TTFT</span><span class="metric-label">Model time to first token, split by cold/warm and worker kind</span></article>
+            <article class="metric"><span class="metric-value">FM calls</span><span class="metric-label">Actual session.respond count and tokens, not executed stage proxies</span></article>
+            <article class="metric"><span class="metric-value">Queue ms</span><span class="metric-label">True FoundationModelGate wait with correct units and priority</span></article>
+            <article class="metric"><span class="metric-value">Regret</span><span class="metric-label">Chosen-arm utility versus the best allowed arm for each evaluated case</span></article>
+            <article class="metric"><span class="metric-value">0 drift</span><span class="metric-label">Safety-gate, confirmation, and mutation-policy parity is a hard requirement</span></article>
+          </div>
+          <div class="callout"><strong>Claim discipline</strong><p>Every latency gain on this page is a hypothesis until reproduced on supported Apple hardware with the real Foundation Model, correct telemetry, randomized arm order, and the same output/safety acceptance criteria.</p></div>
+        </section>
+
+        <footer class="page-footer"><a href="orchestrators.html">← Three orchestrators</a><a href="index.html">Return to overview →</a></footer>
+      </div>
+    </main>
+  </div>
+  <script src="site.js"></script>
+</body>
+</html>

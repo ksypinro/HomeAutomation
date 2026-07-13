@@ -77,6 +77,117 @@ struct AutomationCreationFlowTests {
         #expect(end == 80)
     }
 
+    // MARK: - A-4: confirmation renders the condition interpretation
+
+    private func leafCondition(_ description: String, value: String = "off") -> HomeAutomationCondition {
+        .comparison(
+            HomeAutomationComparisonCondition(
+                left: .deviceAttribute(description: description, deviceID: "d", capability: "switch", attribute: "switch"),
+                operatorName: .equals,
+                right: .literalString(value)
+            )
+        )
+    }
+
+    @Test
+    func draftedSummaryShowsParenthesizedConditionReading() {
+        let condition = HomeAutomationCondition.or([
+            .and([
+                leafCondition("living room ceiling light is off"),
+                leafCondition("living room tv is off"),
+            ]),
+            leafCondition("bedroom lamp is off"),
+        ])
+        let ruleDraft = HomeAutomationRuleDraft(
+            name: "Nightly scene",
+            trigger: .schedule(
+                HomeAutomationScheduleTrigger(repeatRule: .everyDay, timeOfDay: HomeAutomationTimeOfDay(hour: 7, minute: 0))
+            ),
+            condition: condition,
+            actionDescriptions: ["turn on bedroom AC"],
+            confidence: 0.9
+        )
+        let plan = HomeAutomationCreationPlan(
+            name: "Nightly scene",
+            ruleDraft: ruleDraft,
+            resolvedActions: [],
+            smartThingsRuleJSON: "{}",
+            requiresConfirmation: false,
+            unsupportedCompilationReason: nil
+        )
+
+        let summary = HomeCommandResolution.automationDrafted(plan).displaySummary
+        #expect(summary.contains("if (living room ceiling light is off AND living room tv is off) OR bedroom lamp is off"))
+    }
+
+    @Test
+    func draftedSummaryWithoutConditionHasNoReadingSuffix() {
+        let ruleDraft = HomeAutomationRuleDraft(
+            name: "Daily AC",
+            trigger: .schedule(
+                HomeAutomationScheduleTrigger(repeatRule: .everyDay, timeOfDay: HomeAutomationTimeOfDay(hour: 7, minute: 0))
+            ),
+            condition: nil,
+            actionDescriptions: ["turn on bedroom AC"],
+            confidence: 0.9
+        )
+        let plan = HomeAutomationCreationPlan(
+            name: "Daily AC",
+            ruleDraft: ruleDraft,
+            resolvedActions: [],
+            smartThingsRuleJSON: "{}",
+            requiresConfirmation: false,
+            unsupportedCompilationReason: nil
+        )
+
+        let summary = HomeCommandResolution.automationDrafted(plan).displaySummary
+        #expect(!summary.contains(" if "))
+    }
+
+    // MARK: - G-2 / Case D: loop-path device triggers with graph parity
+
+    private func deviceTriggerDeviceID(_ trigger: HomeAutomationTrigger?) -> String? {
+        guard case .device(let deviceTrigger)? = trigger,
+              case .comparison(let comparison) = deviceTrigger.condition,
+              case .deviceAttribute(_, let deviceID, _, _) = comparison.left else {
+            return nil
+        }
+        return deviceID
+    }
+
+    @Test
+    func deviceTriggerDraftsUnderVerifierLoopWithGraphParity() async throws {
+        let registry = HomeAutomationCoordinator.makeMockDeviceRegistry()
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: registry,
+            foundationModelAvailability: { false }
+        )
+        let text = "When the entry contact sensor opens, turn on the porch light"
+
+        let graph = try await HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies()
+        ).resolve(text, executeLowRiskCommands: false)
+        let loop = try await HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+        ).resolve(text, executeLowRiskCommands: false)
+
+        guard case .automationDrafted(let graphPlan) = graph.resolution else {
+            Issue.record("Graph arm expected .automationDrafted, got \(graph.resolution)")
+            return
+        }
+        guard case .automationDrafted(let loopPlan) = loop.resolution else {
+            Issue.record("Verifier-loop arm expected .automationDrafted, got \(loop.resolution)")
+            return
+        }
+
+        // Both arms compile a SmartThings rule with a device trigger that
+        // resolves to the same sensor — parity on Case D.
+        #expect(graphPlan.smartThingsRuleJSON != nil)
+        #expect(loopPlan.smartThingsRuleJSON != nil)
+        #expect(deviceTriggerDeviceID(graphPlan.ruleDraft.trigger) == "entry_contact_sensor")
+        #expect(deviceTriggerDeviceID(loopPlan.ruleDraft.trigger) == "entry_contact_sensor")
+    }
+
     @Test
     func patternParserExtractsChangesCondition() throws {
         let parser = AutomationPatternParser()

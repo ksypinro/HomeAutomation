@@ -152,10 +152,17 @@ public enum StructuralDraftBuilder {
                 )
             )
         case .device:
-            // The envelope keeps only a description for device triggers; the
-            // compiler needs a structured condition, so leave it unmapped and
-            // let compilation report the gap (finding H6).
-            return nil
+            // Map the envelope's structured device-trigger condition to the
+            // rule model. When the condition is absent (deterministic resolution
+            // failed and no repair filled it), leave it unmapped so compilation
+            // reports the gap rather than emitting an invalid rule.
+            guard let condition = trigger.deviceCondition else { return nil }
+            return .device(
+                HomeAutomationDeviceTrigger(
+                    description: trigger.deviceDescription ?? trigger.rawText ?? "device trigger",
+                    condition: condition
+                )
+            )
         }
     }
 

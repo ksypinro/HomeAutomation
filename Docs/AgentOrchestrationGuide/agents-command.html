@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Draft, safety, execution, fallback, and response agents in HomeAutomation.">
+  <title>Command Agents · HomeAutomation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="shell">
+    <header class="mobile-bar"><strong>Agent Field Guide</strong><button class="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button></header>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="index.html"><span class="brand-mark">H</span><span><strong>HomeAutomation</strong><small>Agent field guide</small></span></a>
+      <p class="nav-label">Guide</p>
+      <nav class="site-nav" aria-label="Documentation pages">
+        <a href="index.html"><span>00</span><span>System overview</span></a>
+        <a href="agents-core.html"><span>01</span><span>Routing &amp; context</span></a>
+        <a href="agents-command.html"><span>02</span><span>Command agents</span></a>
+        <a href="agents-automation.html"><span>03</span><span>Automation agents</span></a>
+        <a href="orchestrators.html"><span>04</span><span>Three orchestrators</span></a>
+        <a href="orchestrator.html"><span>05</span><span>Latency playbook</span></a>
+      </nav>
+      <div class="sidebar-note"><strong>Safety rule</strong>Only <code>MockExecutionAgent</code> mutates device state. Safety, parameter, confirmation, planning, and execution nodes are governed as mandatory gates.</div>
+    </aside>
+    <main class="main" id="main">
+      <div class="content" data-catalog-groups="Draft,Safety,Execution,Fallback,Response">
+        <header class="hero compact">
+          <p class="eyebrow">02 · Command construction</p>
+          <h1>Turn context into a governed command.</h1>
+          <p class="lede">These agents compose the model package, draft a structured command, validate it with deterministic policy, plan or execute it, and produce safe fallback or response outcomes.</p>
+          <div class="hero-meta"><span class="pill">13 agent implementations</span><span class="pill amber">5 governed command gates</span></div>
+        </header>
+
+        <section class="section">
+          <div class="section-heading"><h2>The command spine</h2><p>Once a target and capability are known, most nodes run sequentially because each consumes the previous artifact.</p></div>
+          <div class="flow">
+            <div class="flow-step"><em>compose</em><b>Instruction package</b><span>Compact candidates, canonical facts, RAG evidence, tools, and prompt budget.</span></div>
+            <div class="flow-step"><em>generate</em><b>Command draft</b><span>Structured target, intent, capability, command, parameters, and confidence.</span></div>
+            <div class="flow-step"><em>validate</em><b>Safety &amp; parameters</b><span>Target support, risk floor, command legality, ranges, and enums.</span></div>
+            <div class="flow-step"><em>govern</em><b>Confirmation &amp; plan</b><span>Sensitive or high-risk work pauses; allowed work becomes an execution plan.</span></div>
+            <div class="flow-step"><em>finish</em><b>Execute or explain</b><span>Mock mutation, ready plan, clarification, unsupported, or summary.</span></div>
+          </div>
+          <div class="callout warning"><strong>Fail closed, with one nuance</strong><p>The graph planner marks safety validation, parameter validation, confirmation, and mock execution as safety gates; execution planning is required and separately treated as mandatory by policy. A missing/failed mandatory node must produce a safe terminal result, not device mutation.</p></div>
+        </section>
+
+        <section class="section" aria-labelledby="catalog-heading">
+          <div class="section-heading"><h2 id="catalog-heading">Agent-by-agent catalog</h2><p>Every card names its real input, processing path, called services, emitted value, and failure behavior.</p></div>
+          <div class="search-bar"><input id="agent-search" type="search" placeholder="Search these agents…" aria-label="Search agents"><span class="result-count" id="visible-count">13 agents</span></div>
+          <div id="agent-catalog"></div>
+        </section>
+
+        <footer class="page-footer"><a href="agents-core.html">← Routing &amp; context</a><a href="agents-automation.html">Next: automation agents →</a></footer>
+      </div>
+    </main>
+  </div>
+  <script src="agent-data.js"></script>
+  <script src="site.js"></script>
+</body>
+</html>

@@ -45,11 +45,56 @@ struct AgentDashboardItem: Identifiable, Hashable {
     let circuitState: String
 }
 
+/// User-facing orchestrator strategies. Mirrors the three arms in
+/// `OrchestrationArm` — the mode is baked into the runtime dependencies at
+/// construction, so switching rebuilds the orchestrator from the retained
+/// coordinator (the RAG index is built once and shared across rebuilds).
+enum OrchestratorChoice: String, CaseIterable, Identifiable {
+    case graph
+    case graphTier1
+    case verifierLoop
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .graph: return "Graph"
+        case .graphTier1: return "Graph + Tier 1"
+        case .verifierLoop: return "Verifier Loop"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .graph:
+            return "Full multi-agent graph — the reference pipeline."
+        case .graphTier1:
+            return "Graph runtime with the deterministic Tier 1 mini-pipeline for automation actions (0–1 FM calls per action)."
+        case .verifierLoop:
+            return "Deterministic draft → FM verifier → targeted repairs (max 3 iterations); escalates to the graph on failure."
+        }
+    }
+
+    var engineName: String {
+        switch self {
+        case .graph: return "Multi-Agent Orchestrator (Graph)"
+        case .graphTier1: return "Multi-Agent Orchestrator (Graph + Tier 1)"
+        case .verifierLoop: return "Verifier-Loop Orchestrator"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class HomeAutomationViewModel {
     var command = "Set the bedroom lamp to 40 percent"
     var executeLowRiskCommands = true
+    var orchestratorChoice: OrchestratorChoice = .graph {
+        didSet {
+            guard orchestratorChoice != oldValue else { return }
+            rebuildOrchestrator()
+        }
+    }
     var isRunning = false
     var resultText = ""
     var metricsText = ""
@@ -61,6 +106,7 @@ final class HomeAutomationViewModel {
     var currentPipelineStage: String?
 
     private let registry = MockHomeDeviceRegistry()
+    private var coordinator: HomeAutomationCoordinator
     private var orchestrator: HomeCommandOrchestrator
 
     let sampleCommands = [
@@ -76,19 +122,38 @@ final class HomeAutomationViewModel {
     ]
 
     init() {
-        orchestrator = HomeCommandOrchestrator(deviceRegistry: registry)
-		
+        let initialCoordinator = HomeAutomationCoordinator(deviceRegistry: registry)
+        coordinator = initialCoordinator
+        orchestrator = initialCoordinator.makeOrchestrator()
+
         Task {
             await initializeRAG()
         }
-		
+
         Task.detached {
             HomeFoundationModelPrewarmer.prewarmDefaultSession()
         }
     }
 
     func initializeRAG() async {
-        orchestrator = await HomeCommandOrchestrator.makeRAGEnabled(deviceRegistry: registry)
+        coordinator = await HomeCommandOrchestrator.makeRAGEnabledCoordinator(deviceRegistry: registry)
+        rebuildOrchestrator()
+    }
+
+    /// Mints a fresh orchestrator from the retained coordinator for the
+    /// selected mode. The RAG index and device registry are reused; only the
+    /// runtime dependencies (agent registry, loop orchestrator) are rebuilt.
+    private func rebuildOrchestrator() {
+        let dependencies: HomeAutomationRuntimeDependencies
+        switch orchestratorChoice {
+        case .graph:
+            dependencies = coordinator.makeRuntimeDependencies()
+        case .graphTier1:
+            dependencies = coordinator.makeRuntimeDependencies(useMiniPipeline: true)
+        case .verifierLoop:
+            dependencies = coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+        }
+        orchestrator = HomeCommandOrchestrator(dependencies: dependencies)
     }
 
     func resolveCommand() {
@@ -123,7 +188,7 @@ final class HomeAutomationViewModel {
                     throw FoundationLabCoreError.invalidRequest("Orchestrator stream ended without a result")
                 }
 
-                let engineName = "Multi-Agent Orchestrator"
+                let engineName = orchestratorChoice.engineName
                 resultText = Self.format(output, engineName: engineName)
                 metricsText = await orchestrator.lastMetricsJSON() ?? ""
                 await refreshAgentDashboardFromMetrics()
@@ -131,7 +196,7 @@ final class HomeAutomationViewModel {
                 commandHistory.insert(
                     HomeCommandHistoryItem(
                         command: trimmedCommand,
-                        engine: "Orchestrator",
+                        engine: orchestratorChoice.displayName,
                         summary: output.resolution.displaySummary,
                         timestamp: Date(),
                         succeeded: output.draft != nil || {
@@ -151,7 +216,7 @@ final class HomeAutomationViewModel {
                 commandHistory.insert(
                     HomeCommandHistoryItem(
                         command: trimmedCommand,
-                        engine: "Orchestrator",
+                        engine: orchestratorChoice.displayName,
                         summary: error.localizedDescription,
                         timestamp: Date(),
                         succeeded: false

@@ -133,8 +133,8 @@ public struct DeterministicDraftPipeline: Sendable {
             sourceText: trimmed
         )
 
-        let triggerDraft = await resolveTriggerDeterministically(componentPlan.trigger)
         let devices = await registry.allDevices()
+        let triggerDraft = await resolveTriggerDeterministically(componentPlan.trigger, devices: devices)
 
         var actions: [ActionDraft] = []
         var actionProvenance: [FieldID: FieldProvenance] = [:]
@@ -159,13 +159,26 @@ public struct DeterministicDraftPipeline: Sendable {
             }
         }
 
+        // For a device trigger with no explicit `if` clause, the component plan
+        // duplicates the trigger's condition as a standalone condition leaf
+        // (the pattern-parser hint tool derives conditions from the trigger when
+        // there is no `if`). That duplicate would compile as a redundant — and
+        // here unresolved — `if`, so drop it: the trigger already carries the
+        // structured condition.
+        let hasExplicitConditionClause =
+            AutomationPatternParser.splitCondition(from: trimmed).conditionText != nil
+        let dropTriggerDerivedConditions =
+            triggerDraft?.type == .device && !hasExplicitConditionClause
+        let effectiveConditionComponents = dropTriggerDerivedConditions ? [] : componentPlan.conditions
+        let effectiveConditionTree = dropTriggerDerivedConditions ? nil : componentPlan.conditionTree
+
         let conditionLeaves = conditionLeafDrafts(
-            from: componentPlan.conditions,
+            from: effectiveConditionComponents,
             devices: devices,
             normalized: trimmed.agentNormalizedHomeTokenString
         )
 
-        let conditionTree = componentPlan.conditionTree.map { ConditionTreeDraft(from: $0) }
+        let conditionTree = effectiveConditionTree.map { ConditionTreeDraft(from: $0) }
         let precedenceAmbiguous = hasPrecedenceAmbiguity(trimmed)
 
         var provenance: [FieldID: FieldProvenance] = [
@@ -332,7 +345,8 @@ public struct DeterministicDraftPipeline: Sendable {
     }
 
     private func resolveTriggerDeterministically(
-        _ component: AutomationTriggerComponent?
+        _ component: AutomationTriggerComponent?,
+        devices: [HomeCandidateRecord]
     ) async -> TriggerDraft? {
         guard let component else { return nil }
         let worker = AutomationTriggerResolutionWorkerSession(
@@ -344,7 +358,7 @@ public struct DeterministicDraftPipeline: Sendable {
         )
         guard let output = try? await worker.resolve(input),
               let trigger = output.trigger else {
-            return TriggerDraft(type: .schedule, confidence: 0.0)
+            return TriggerDraft(type: .schedule, rawText: component.rawText, confidence: 0.0)
         }
 
         switch trigger {
@@ -354,15 +368,56 @@ public struct DeterministicDraftPipeline: Sendable {
                 time: schedule.timeOfDay,
                 repeatRule: schedule.repeatRule,
                 timezoneIdentifier: schedule.timezoneIdentifier,
+                rawText: component.rawText,
                 confidence: output.confidence
             )
         case .device(let deviceTrigger):
+            // The trigger worker produces a device trigger whose condition
+            // operands are still unresolved (nil deviceID/capability/attribute).
+            // Run the deterministic condition resolver so the envelope carries a
+            // compilable condition; if it can't resolve, keep the worker's
+            // condition and let the `.trigger` repair specialist (or escalation)
+            // fill it in.
+            let resolvedCondition = await resolveDeviceTriggerCondition(
+                component: component,
+                fallback: deviceTrigger.condition,
+                devices: devices
+            )
             return TriggerDraft(
                 type: .device,
                 deviceDescription: deviceTrigger.description,
+                rawText: component.rawText,
+                deviceCondition: resolvedCondition,
                 confidence: output.confidence
             )
         }
+    }
+
+    /// Resolves a device trigger's condition deterministically by reusing the
+    /// condition-clause worker (FM disabled), which performs the same robust
+    /// device/capability/attribute matching the graph arm uses for triggers.
+    private func resolveDeviceTriggerCondition(
+        component: AutomationTriggerComponent,
+        fallback: HomeAutomationCondition,
+        devices: [HomeCandidateRecord]
+    ) async -> HomeAutomationCondition? {
+        let worker = AutomationConditionClauseResolutionWorkerSession(
+            foundationModelAvailability: { false }
+        )
+        let input = AutomationConditionClauseResolutionInput(
+            component: AutomationConditionComponent(
+                id: component.id,
+                rawText: component.rawText,
+                order: 0
+            ),
+            fullUserText: component.rawText,
+            availableDevices: devices,
+            triggerPolicy: .always
+        )
+        if let result = try? await worker.resolve(input), let condition = result.condition {
+            return condition
+        }
+        return fallback
     }
 
     private func conditionLeafDrafts(

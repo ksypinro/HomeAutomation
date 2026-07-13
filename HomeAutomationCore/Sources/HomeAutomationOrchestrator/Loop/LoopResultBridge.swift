@@ -116,8 +116,11 @@ public enum LoopResultBridge {
 
         let resolution: HomeCommandResolution
         if let reason = plan.unsupportedCompilationReason, plan.smartThingsRuleJSON == nil {
-            // The envelope couldn't be expressed as a SmartThings rule
-            // (e.g. a device trigger the envelope doesn't carry structurally).
+            // The envelope couldn't be expressed as a SmartThings rule. Device
+            // triggers are now compiled structurally (Phase 1), so this path is
+            // reached only when a field is genuinely unresolvable — e.g. an
+            // ambiguous device the deterministic parser and the `.trigger`/
+            // `.conditionClause` repair specialists both left unresolved.
             resolution = .unsupported(reason)
         } else if plan.requiresConfirmation {
             resolution = .automationRequiresConfirmation(plan)

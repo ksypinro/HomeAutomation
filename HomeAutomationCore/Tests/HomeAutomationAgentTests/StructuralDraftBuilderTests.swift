@@ -167,7 +167,80 @@ struct StructuralDraftBuilderTests {
         #expect(plan.smartThingsRuleJSON != nil)
     }
 
-    @Test("Device-trigger envelope surfaces an unsupported compilation reason")
+    @Test("Device-trigger automation envelope compiles to SmartThings JSON")
+    func deviceTriggerAutomationCompilesToJSON() async {
+        let pipeline = DeterministicDraftPipeline(registry: MockHomeDeviceRegistry())
+        let envelope = await pipeline.makeAutomationEnvelope(
+            text: "When the entry contact sensor opens, turn on the porch light"
+        )
+
+        let plan = StructuralDraftBuilder.automationCreationPlan(from: envelope)
+
+        #expect(plan.unsupportedCompilationReason == nil)
+        #expect(plan.smartThingsRuleJSON != nil)
+        #expect(plan.ruleDraft.trigger != nil)
+        if case .device = plan.ruleDraft.trigger {
+            // expected
+        } else {
+            Issue.record("Expected a device trigger, got \(String(describing: plan.ruleDraft.trigger))")
+        }
+        let json = plan.smartThingsRuleJSON ?? ""
+        #expect(json.contains("entry_contact_sensor"))
+        #expect(json.contains("porch_light"))
+    }
+
+    @Test("Device trigger with a resolved condition compiles")
+    func deviceTriggerWithConditionCompiles() {
+        let action = ActionDraft(
+            rawText: "turn on the porch light",
+            order: 0,
+            command: CommandDraftSection(
+                targetDeviceID: "porch_light",
+                candidateTable: [
+                    CompactCandidate(id: "porch_light", name: "Porch Light", room: nil, deviceType: "light"),
+                ],
+                capability: "switch",
+                commandName: "on",
+                room: nil
+            )
+        )
+        let condition = HomeAutomationCondition.comparison(
+            HomeAutomationComparisonCondition(
+                left: .deviceAttribute(
+                    description: "entry contact sensor",
+                    deviceID: "entry_contact_sensor",
+                    capability: "contactSensor",
+                    attribute: "contact"
+                ),
+                operatorName: .equals,
+                right: .literalString("open"),
+                triggerPolicy: .always
+            )
+        )
+        let envelope = DraftEnvelope(
+            userText: "when the entry contact sensor opens turn on the porch light",
+            operation: .automationCreation,
+            operationConfidence: 0.9,
+            automation: AutomationDraftSection(
+                trigger: TriggerDraft(
+                    type: .device,
+                    deviceDescription: "entry contact sensor opens",
+                    rawText: "the entry contact sensor opens",
+                    deviceCondition: condition,
+                    confidence: 0.8
+                ),
+                actions: [action]
+            ),
+            risk: RiskSection(level: .low, floorReason: "safe")
+        )
+
+        let plan = StructuralDraftBuilder.automationCreationPlan(from: envelope)
+
+        #expect(plan.unsupportedCompilationReason == nil)
+        #expect(plan.smartThingsRuleJSON != nil)
+    }
+
+    @Test("Device-trigger envelope without a resolved condition is unsupported")
     func deviceTriggerEnvelopeIsUnsupported() {
         let action = ActionDraft(
             rawText: "turn on the porch light",

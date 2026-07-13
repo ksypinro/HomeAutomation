@@ -173,6 +173,31 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         indexCache: VectorIndexCache = VectorIndexCache(),
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
     ) async -> HomeCommandOrchestrator {
+        await makeRAGEnabledCoordinator(
+            deviceRegistry: deviceRegistry,
+            foundationModelAvailability: foundationModelAvailability,
+            foundationModelAvailabilityStatus: foundationModelAvailabilityStatus,
+            metricsCollector: metricsCollector,
+            indexCache: indexCache,
+            smartThingsRuleCreator: smartThingsRuleCreator
+        ).makeOrchestrator()
+    }
+
+    /// Builds the RAG-enabled coordinator without committing to an orchestration
+    /// mode. Callers that let the user switch modes at runtime hold on to this
+    /// coordinator and mint a fresh orchestrator per mode via
+    /// `makeRuntimeDependencies(orchestrationMode:useMiniPipeline:)` — the
+    /// vector index is built once and reused across rebuilds.
+    public static func makeRAGEnabledCoordinator(
+        deviceRegistry: (any DeviceRegistryProtocol)? = nil,
+        foundationModelAvailability: @escaping @Sendable () -> Bool = {
+            SystemLanguageModel.default.isAvailable
+        },
+        foundationModelAvailabilityStatus: @escaping @Sendable () -> String? = { nil },
+        metricsCollector: OrchestratorMetricsCollector? = nil,
+        indexCache: VectorIndexCache = VectorIndexCache(),
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
+    ) async -> HomeAutomationCoordinator {
         let baseCoordinator = HomeAutomationCoordinator(
             deviceRegistry: deviceRegistry,
             foundationModelAvailability: foundationModelAvailability,
@@ -192,7 +217,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             conversationMemory: baseCoordinator.conversationMemory,
             circuitBreakers: baseCoordinator.circuitBreakers,
             smartThingsRuleCreator: smartThingsRuleCreator
-        ).makeOrchestrator()
+        )
     }
 
     /// Synchronously waits for the complete resolution of a user command.

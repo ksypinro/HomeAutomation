@@ -707,7 +707,12 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
     public func makeVerifierLoopOrchestrator(
         policy loopPolicy: VerifierLoopPolicy = VerifierLoopPolicy()
     ) -> VerifierLoopOrchestrator {
-        VerifierLoopOrchestrator(
+        // Shared single-clause resolver, reused by both the `.conditionClause`
+        // specialist and its batched wrapper.
+        let conditionClauseWorker = AutomationConditionClauseResolutionWorkerSession(
+            foundationModelAvailability: foundationModelAvailability
+        )
+        return VerifierLoopOrchestrator(
             pipeline: DeterministicDraftPipeline(registry: deviceRegistry),
             verifier: DraftVerifierWorkerSession(
                 foundationModelAvailability: foundationModelAvailability
@@ -723,6 +728,18 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
                 capabilityWorker: CapabilityResolutionWorker(
                     foundationModelAvailability: foundationModelAvailability
                 ),
+                triggerWorker: AutomationTriggerResolutionWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                conditionClauseWorker: conditionClauseWorker,
+                batchedConditionResolver: BatchedConditionClauseResolver(
+                    singleResolver: conditionClauseWorker,
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                segmentationWorker: AutomationComponentSegmentationWorkerSession(
+                    foundationModelAvailability: foundationModelAvailability
+                ),
+                deviceRegistry: deviceRegistry,
                 operationDetection: { text in
                     HomeOperationDetectionService().analyzeSemantics(text)
                 }

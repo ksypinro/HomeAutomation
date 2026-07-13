@@ -61,6 +61,61 @@ struct AutomationTier1Tests {
     }
 
     @Test
+    func miniPipelineHydratesCandidatesSoValidationAcceptsSupportedCapability() async throws {
+        // Regression: the mini-pipeline used to validate drafts against candidate
+        // records built with empty capabilities/supportedCommands, so
+        // AgentCommandValidator rejected every correct draft as "capability not
+        // supported" and the whole automation flipped to unsupported — while
+        // isResolved (resolvedAction != nil) still read true.
+        let pipeline = AutomationActionMiniPipeline(
+            registry: MockHomeDeviceRegistry(),
+            validator: AgentCommandValidator(),
+            fragmentNLU: FragmentNLUWorkerSession(foundationModelAvailability: { false }),
+            capabilityWorker: CapabilityResolutionWorker(foundationModelAvailability: { false })
+        )
+
+        let result = await pipeline.resolve(
+            "Turn off bedroom AC",
+            eventBus: AgentEventBus(),
+            runID: UUID()
+        )
+
+        #expect(result.isResolved)
+        if case .unsupported(let reason) = result.resolution {
+            Issue.record("Mini-pipeline rejected a supported capability: \(reason)")
+        }
+        let target = result.hydratedCandidates.first { $0.id == "bedroom_ac" }
+        #expect(target?.capabilities.contains("switch") == true)
+        #expect(target?.supportedCommands["switch"]?.contains("off") == true)
+    }
+
+    @Test
+    func tier1AutomationCreationDraftsMultiActionConditionalRule() async throws {
+        // End-to-end regression for the exact command that produced
+        // "Outcome: unsupported" under graph+Tier1 while plain graph drafted it.
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        let orchestrator = HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies(useMiniPipeline: true)
+        )
+
+        let result = try await orchestrator.resolve(
+            "Turn on the living room tv and turn off bedroom AC everyday at 9PM if bedroom AC is on or bedroom lamp is off",
+            executeLowRiskCommands: false
+        )
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected automation draft under Tier 1, got \(result.resolution.displaySummary)")
+            return
+        }
+        #expect(plan.resolvedActions.count == 2)
+        #expect(plan.resolvedActions.map(\.draft.command) == ["on", "off"])
+        #expect(plan.ruleDraft.condition != nil)
+    }
+
+    @Test
     func miniPipelineReturnsNilDraftForGibberish() async throws {
         let pipeline = AutomationActionMiniPipeline(
             registry: MockHomeDeviceRegistry(),
