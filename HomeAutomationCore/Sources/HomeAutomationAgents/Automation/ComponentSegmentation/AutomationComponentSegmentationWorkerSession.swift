@@ -55,10 +55,12 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
             deterministicHint: fallback
         )
         logger.debug("[FoundationModelInput] \(prompt, privacy: .public)")
+        var pooledSession: LanguageModelSession?
         do {
             let session: LanguageModelSession
             if let sessionPool {
                 session = await sessionPool.acquire(kind: .segmentation)
+                pooledSession = session
             } else {
                 session = LanguageModelSession(
                     instructions: Instructions(AutomationComponentSegmentationPromptBuilder.instructions)
@@ -77,6 +79,7 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
             }
             if let sessionPool {
                 await sessionPool.release(kind: .segmentation, session: session)
+                pooledSession = nil
             }
             let plan = plan(from: output, fallback: fallback)
             guard !plan.actions.isEmpty else {
@@ -86,6 +89,9 @@ public struct AutomationComponentSegmentationWorkerSession: Sendable {
             logger.debug("[FoundationModelOutput] \(String(describing: plan), privacy: .public)")
             return plan
         } catch {
+            if let sessionPool, let pooledSession {
+                await sessionPool.discard(kind: .segmentation, session: pooledSession, reason: .failed)
+            }
             logger.error("[FoundationModelError] \(error.localizedDescription, privacy: .public); using deterministic component plan.")
             if let fallback { return fallback }
             throw error

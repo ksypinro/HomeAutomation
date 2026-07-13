@@ -78,23 +78,25 @@ struct PhaseIIICallReductionTests {
 
     // MARK: - Session Pool
 
-    @Test("Session pool manages acquire/release lifecycle")
+    @Test("Session pool facade creates fresh sessions and discards on release")
     func sessionPoolAcquireRelease() async {
         let pool = FoundationModelSessionPool(maxPoolSize: 2)
         await pool.register(kind: .conditionClause, instructions: "Test instructions")
 
         let session1 = await pool.acquire(kind: .conditionClause)
-        #expect(await pool.poolSize(for: .conditionClause) == 0)
+        #expect(await pool.checkedOutCount(for: .conditionClause) == 1)
 
         await pool.release(kind: .conditionClause, session: session1)
-        #expect(await pool.poolSize(for: .conditionClause) == 1)
+        #expect(await pool.poolSize(for: .conditionClause) == 0)
 
         let session2 = await pool.acquire(kind: .conditionClause)
-        #expect(await pool.poolSize(for: .conditionClause) == 0)
-        _ = session2
+        await pool.release(kind: .conditionClause, session: session2)
+        let snapshot = await pool.snapshot()
+        #expect(snapshot.createdCount == 2)
+        #expect(snapshot.discardedCount == 2)
     }
 
-    @Test("Session pool respects max pool size")
+    @Test("Session pool facade never retains stateful transcripts")
     func sessionPoolMaxSize() async {
         let pool = FoundationModelSessionPool(maxPoolSize: 1)
         await pool.register(kind: .triggerResolution, instructions: "Test instructions")
@@ -103,22 +105,25 @@ struct PhaseIIICallReductionTests {
         let s2 = await pool.acquire(kind: .triggerResolution)
 
         await pool.release(kind: .triggerResolution, session: s1)
-        #expect(await pool.poolSize(for: .triggerResolution) == 1)
+        #expect(await pool.poolSize(for: .triggerResolution) == 0)
 
         await pool.release(kind: .triggerResolution, session: s2)
-        #expect(await pool.poolSize(for: .triggerResolution) == 1)
+        #expect(await pool.poolSize(for: .triggerResolution) == 0)
     }
 
-    @Test("Pre-warming populates pool up to max size")
+    @Test("Pre-warming records real prefix metadata without retaining sessions")
     func prewarmPopulatesPool() async {
         let pool = FoundationModelSessionPool(maxPoolSize: 2)
-        await pool.register(kind: .conditionClause, instructions: "Test instructions")
-        await pool.register(kind: .triggerResolution, instructions: "Test instructions")
+        await pool.register(kind: .conditionClause, instructions: "Test instructions", promptPrefix: "condition prefix")
+        await pool.register(kind: .triggerResolution, instructions: "Test instructions", promptPrefix: "trigger prefix")
 
         await pool.prewarm(kinds: [.conditionClause, .triggerResolution])
+        let snapshot = await pool.snapshot()
 
-        #expect(await pool.poolSize(for: .conditionClause) == 1)
-        #expect(await pool.poolSize(for: .triggerResolution) == 1)
+        #expect(await pool.poolSize(for: .conditionClause) == 0)
+        #expect(await pool.poolSize(for: .triggerResolution) == 0)
+        #expect(snapshot.prewarmCount == 2)
+        #expect(snapshot.prewarmDigests["conditionClause"] == FoundationModelBatchCompatibilityKey.stableDigest("condition prefix"))
     }
 
     @Test("SessionKind raw values match expected identifiers")

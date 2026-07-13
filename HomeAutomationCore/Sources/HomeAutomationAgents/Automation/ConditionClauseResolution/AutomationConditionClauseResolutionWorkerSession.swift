@@ -48,10 +48,12 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
 
         let prompt = AutomationConditionClauseResolutionPromptBuilder.prompt(input: input, fallback: fallback)
         logger.debug("[FoundationModelInput] \(prompt, privacy: .public)")
+        var pooledSession: LanguageModelSession?
         do {
             let session: LanguageModelSession
             if let sessionPool {
                 session = await sessionPool.acquire(kind: .conditionClause)
+                pooledSession = session
             } else {
                 session = LanguageModelSession(
                     instructions: Instructions(AutomationConditionClauseResolutionPromptBuilder.instructions)
@@ -71,11 +73,15 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
             }
             if let sessionPool {
                 await sessionPool.release(kind: .conditionClause, session: session)
+                pooledSession = nil
             }
             let output = try result(from: fmOutput, input: input, fallback: fallback)
             logger.debug("[FoundationModelOutput] \(String(describing: output), privacy: .public)")
             return output
         } catch {
+            if let sessionPool, let pooledSession {
+                await sessionPool.discard(kind: .conditionClause, session: pooledSession, reason: .failed)
+            }
             logger.error("[FoundationModelError] \(error.localizedDescription, privacy: .public); using deterministic condition fallback.")
             return try result(from: nil, input: input, fallback: fallback, confidence: 0.72)
         }

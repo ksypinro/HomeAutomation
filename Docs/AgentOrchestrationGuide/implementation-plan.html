@@ -333,7 +333,7 @@ tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
           </article>
 
           <article class="plan-phase" id="phase-8">
-            <div class="phase-heading"><div class="phase-index">08</div><div><h3>Add explicit residual batching and correct session lifecycle</h3><p>Reduce calls only where schemas and failure isolation are intentionally designed.</p></div><div class="phase-meta"><span class="status-chip">effort L</span><span class="status-chip">shadow prompts first</span></div></div>
+            <div class="phase-heading"><div class="phase-index">08</div><div><h3>Add explicit residual batching and correct session lifecycle</h3><p>Implemented typed residual batch identity, per-item fallback, action-capability batch seam, bounded coalescing policy, and fresh-session/prewarm lifecycle semantics.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">session pooling disabled</span><span class="status-chip">fused NLU remains shadow-only</span></div></div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Do not auto-batch arbitrary frontier jobs.</strong> Add explicit batch adapters with one schema, per-item confidence, stable IDs, and independent deterministic fallback.</li>
@@ -344,7 +344,8 @@ tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
                 <li><strong>Discard failed/overflowed sessions.</strong> Use <code>defer</code> for lifecycle accounting, but do not return an errored transcript to any pool.</li>
               </ol>
               <p><b>Batch compatibility:</b> same run boundary, model, immutable instruction digest, response schema, tool-set digest, locale, policy version, and privacy class. Map outputs by typed item ID—not positional index—and bypass the micro-window for overdue/zero-slack work.</p>
-              <p><b>New files:</b> <code>Automation/BatchedActionCapabilityResolver.swift</code>, optional <code>NLU/UnifiedFrontEndNLUWorkerSession.swift</code>, <code>Telemetry/FoundationModelSessionFactory.swift</code>.</p>
+              <p><b>New files:</b> <code>Automation/BatchedActionCapabilityResolver.swift</code>, <code>Telemetry/FoundationModelBatching.swift</code>, <code>Telemetry/FoundationModelBatchCoalescer.swift</code>, <code>Telemetry/FoundationModelSessionFactory.swift</code>. The optional fused NLU path remains shadow-only and is not active runtime behavior.</p>
+              <p><b>Verification status:</b> residual batching tests cover typed item-ID mapping, missing/duplicate/unknown item fallback, action-capability per-item fallback, no retained session transcripts, real prefix prewarm metadata, and zero-slack/safety coalescing bypass. Phase III call-reduction tests were updated to the fresh-session contract.</p>
             </div><aside class="phase-aside"><h4>Acceptance</h4><ul><li>Batch output preserves item identity/order.</li><li>One bad item does not poison siblings.</li><li>No transcript crosses run IDs.</li><li>Prompt/schema parity shadow report passes.</li><li>Batching reduces actual calls without safety/accuracy drift.</li></ul></aside></div>
           </article>
 

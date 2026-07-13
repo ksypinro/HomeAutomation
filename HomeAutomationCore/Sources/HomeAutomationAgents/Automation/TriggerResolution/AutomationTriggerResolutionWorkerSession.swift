@@ -49,10 +49,12 @@ public struct AutomationTriggerResolutionWorkerSession: Sendable {
 
         let prompt = AutomationTriggerResolutionPromptBuilder.prompt(input: input, fallback: fallback)
         logger.debug("[FoundationModelInput] \(prompt, privacy: .public)")
+        var pooledSession: LanguageModelSession?
         do {
             let session: LanguageModelSession
             if let sessionPool {
                 session = await sessionPool.acquire(kind: .triggerResolution)
+                pooledSession = session
             } else {
                 session = LanguageModelSession(
                     instructions: Instructions(AutomationTriggerResolutionPromptBuilder.instructions)
@@ -71,11 +73,15 @@ public struct AutomationTriggerResolutionWorkerSession: Sendable {
             }
             if let sessionPool {
                 await sessionPool.release(kind: .triggerResolution, session: session)
+                pooledSession = nil
             }
             let result = try output(from: fmOutput, id: input.component.id, fallback: fallback)
             logger.debug("[FoundationModelOutput] \(String(describing: result), privacy: .public)")
             return result
         } catch {
+            if let sessionPool, let pooledSession {
+                await sessionPool.discard(kind: .triggerResolution, session: pooledSession, reason: .failed)
+            }
             logger.error("[FoundationModelError] \(error.localizedDescription, privacy: .public); using deterministic trigger fallback.")
             if let fallback { return fallback }
             throw error

@@ -24,6 +24,7 @@ public struct FoundationModelCallRecorder: Sendable {
     ) async throws -> Value {
         let parent = HomeAutomationTelemetryScope.current
         let ledger = FoundationModelUsageLedgerScope.current
+        let batchContext = FoundationModelBatchContextScope.current
         let enqueuedAtNanoseconds = clock.nowNanoseconds()
         let effectiveArm = arm ?? parent?.foundationModelArm ?? .unknown
         let effectiveJobID = jobID ?? parent?.foundationModelJobID ?? modelCallID
@@ -157,10 +158,16 @@ public struct FoundationModelCallRecorder: Sendable {
                     "fmSchedulerMode": .string(lease.schedulerMode.rawValue),
                     "fmAdmissionFallbackReason": .string(fallbackReason.rawValue),
                     "fmFrontierShadowRank": .string(shadowRank.joined(separator: ",")),
+                    "fmBatchID": .string(batchContext?.batchID ?? ""),
+                    "fmBatchSize": .int(batchContext?.itemCount ?? 1),
+                    "fmBatchCompatibilityDigest": .string(batchContext?.compatibilityDigest ?? ""),
+                    "fmBatchCoalescingDelayMs": .double(batchContext?.coalescingDelayMs ?? 0),
                     "sessionReuse": .string(sessionReuse.rawValue)
                 ], privacy: [
                     "modelCallID": .internalID,
-                    "jobID": .internalID
+                    "jobID": .internalID,
+                    "fmBatchID": .internalID,
+                    "fmBatchCompatibilityDigest": .internalID
                 ])
             )
 
