@@ -545,6 +545,11 @@ Generated from `HomeAutomationCore/Sources/**/*.swift`. This inventory is intent
 | `PreparedDeviceSnapshot` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PreparedOrchestrationRequest.swift` | local | pure model | Local construction | Stable sorted device snapshot with registry fingerprint. |
 | `DeviceSummary` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PreparedOrchestrationRequest.swift` | local | pure model | Local construction | Privacy-bounded summary used for registry freshness fingerprints. |
 | `PreparedOrchestrationRequest` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PreparedOrchestrationRequest.swift` | local | pure model | Local construction | Reusable deterministic preparation artifact stored in run context. |
+| `PortfolioUtilityComponents` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PortfolioDecision.swift` | local | pure model | Local construction | Bounded static utility components for shadow portfolio decisions. |
+| `PortfolioArmDecisionRecord` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PortfolioDecision.swift` | local | pure model | Local construction | Per-arm eligibility, rejection, selection, and utility record. |
+| `PortfolioDecision` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PortfolioDecision.swift` | local | pure model | Local construction | Complete shadow static routing decision with selected/fallback arms and explanations. |
+| `PortfolioEligibilityPolicy` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/PortfolioEligibilityPolicy.swift` | local | dependency | Run/session coordinator | Hard allowlist policy for portfolio arm eligibility in shadow mode. |
+| `StaticPortfolioRouter` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/StaticPortfolioRouter.swift` | local | dependency | Run/session coordinator | Deterministic static router that emits shadow decisions without executing arms. |
 
 ## Classification Rules
 

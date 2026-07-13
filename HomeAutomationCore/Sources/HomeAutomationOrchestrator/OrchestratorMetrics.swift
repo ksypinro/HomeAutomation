@@ -295,6 +295,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var retrievalQuality: RetrievalQualityMetrics
     public var metricsV2: RunMetricsV2?
     public var loop: LoopRunMetrics?
+    public var portfolioDecision: PortfolioDecision?
 
     public init(command: String) {
         self.command = command
@@ -316,6 +317,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.retrievalQuality = RetrievalQualityMetrics()
         self.metricsV2 = nil
         self.loop = nil
+        self.portfolioDecision = nil
     }
 
     public mutating func captureEvaluationFields(

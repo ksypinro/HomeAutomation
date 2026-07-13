@@ -6,4 +6,9 @@ public enum AdaptiveContextKeys {
         "adaptive.preparedRequest",
         scope: .root
     )
+
+    public static let portfolioDecision = ScopedContextKey<PortfolioDecision>(
+        "adaptive.portfolioDecision",
+        scope: .root
+    )
 }

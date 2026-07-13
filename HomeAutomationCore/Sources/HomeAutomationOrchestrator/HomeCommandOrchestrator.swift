@@ -56,6 +56,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let loopOrchestrator: VerifierLoopOrchestrator?
     private let foundationModelArm: FoundationModelCallArm
     private let featureExtractor: OrchestrationFeatureExtractor
+    private let portfolioRolloutMode: PortfolioRolloutMode
+    private let staticPortfolioRouter: StaticPortfolioRouter
 
     public init(
         dependencies: HomeAutomationRuntimeDependencies
@@ -73,6 +75,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.loopOrchestrator = dependencies.loopOrchestrator
         self.foundationModelArm = dependencies.foundationModelArm
         self.featureExtractor = OrchestrationFeatureExtractor(registry: dependencies.deviceRegistry)
+        self.portfolioRolloutMode = dependencies.portfolioRolloutMode
+        self.staticPortfolioRouter = StaticPortfolioRouter(rolloutMode: dependencies.portfolioRolloutMode)
     }
 
     public convenience init(
@@ -341,6 +345,39 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
                 metrics.stageDurations["adaptivePreparation"] = preparedRequest.featureSnapshot.extractionDurationMs / 1_000
+
+                if portfolioRolloutMode.computesShadowDecision {
+                    let routerStarted = DispatchTime.now().uptimeNanoseconds
+                    let decision = staticPortfolioRouter.decide(preparedRequest)
+                    let routerDurationMs = Self.milliseconds(from: routerStarted, to: DispatchTime.now().uptimeNanoseconds)
+                    await contextStore.setScopedValue(decision, for: AdaptiveContextKeys.portfolioDecision)
+                    metrics.portfolioDecision = decision
+                    metrics.stageDurations["portfolioRouter"] = routerDurationMs / 1_000
+                    await eventBus.publish(OrchestratorPipelineEvent(
+                        runID: runID,
+                        stage: "portfolioShadowDecision",
+                        status: .completed,
+                        detail: decision.explanation
+                    ))
+                    await HomeAutomationTelemetry.shared.log(
+                        "portfolio.shadowDecision",
+                        context: runTelemetryContext.merging(stage: "portfolioShadowDecision"),
+                        status: "completed",
+                        durationMs: routerDurationMs,
+                        payload: [
+                            "rolloutMode": decision.rolloutMode.rawValue,
+                            "selectedArm": decision.selectedArm.rawValue,
+                            "executingArm": foundationModelArm.rawValue,
+                            "eligibleArms": decision.eligibleArmLabels.joined(separator: ","),
+                            "rejectedArms": decision.rejectedArmLabels.joined(separator: ","),
+                            "ruleID": decision.ruleID,
+                            "explanation": decision.explanation,
+                            "policyVersion": String(decision.policyVersion),
+                            "featureSchemaVersion": String(decision.featureSchemaVersion),
+                            "registryFreshness": decision.registryFreshness.rawValue
+                        ]
+                    )
+                }
 
                 let rootRouting = await HomeAutomationTelemetryScope.$current.withValue(
                     runTelemetryContext.merging(
@@ -1029,6 +1066,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             return "\(routed.operation.rawValue) confidence=\(confidence)"
         }
         return "\(routed.operation.rawValue) confidence=\(confidence) detected=\(detected.operation.rawValue)"
+    }
+
+    private static func milliseconds(from start: UInt64, to end: UInt64) -> Double {
+        guard end >= start else { return 0 }
+        return Double(end - start) / 1_000_000.0
     }
 
     private static func featureAvailability(from status: String) -> PortfolioFeatureAvailability {

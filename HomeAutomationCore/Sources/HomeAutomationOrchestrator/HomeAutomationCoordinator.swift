@@ -531,6 +531,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let orchestrationMode: OrchestrationMode
     public let loopOrchestrator: VerifierLoopOrchestrator?
     public let foundationModelArm: FoundationModelCallArm
+    public let portfolioRolloutMode: PortfolioRolloutMode
 
     public init(
         agentRegistry: AgentRegistry,
@@ -544,7 +545,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
         orchestrationMode: OrchestrationMode = .graph,
         loopOrchestrator: VerifierLoopOrchestrator? = nil,
-        foundationModelArm: FoundationModelCallArm = .graph
+        foundationModelArm: FoundationModelCallArm = .graph,
+        portfolioRolloutMode: PortfolioRolloutMode = .disabled
     ) {
         self.agentRegistry = agentRegistry
         self.graphPlanner = graphPlanner
@@ -558,6 +560,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.orchestrationMode = orchestrationMode
         self.loopOrchestrator = loopOrchestrator
         self.foundationModelArm = foundationModelArm
+        self.portfolioRolloutMode = portfolioRolloutMode
     }
 }
 
@@ -678,7 +681,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
 
     public func makeRuntimeDependencies(
         orchestrationMode: OrchestrationMode = .graph,
-        useMiniPipeline: Bool = false
+        useMiniPipeline: Bool = false,
+        portfolioRolloutMode: PortfolioRolloutMode = .disabled
     ) -> HomeAutomationRuntimeDependencies {
         let agentRegistry: AgentRegistry
         if useMiniPipeline {
@@ -703,7 +707,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
             loopOrchestrator: orchestrationMode == .verifierLoop
                 ? makeVerifierLoopOrchestrator()
                 : nil,
-            foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm
+            foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm,
+            portfolioRolloutMode: portfolioRolloutMode
         )
     }
 
