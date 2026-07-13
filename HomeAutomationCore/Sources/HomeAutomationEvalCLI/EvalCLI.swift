@@ -23,6 +23,11 @@ struct HomeAutomationEvalCLI {
             return
         }
 
+        if options.adaptiveReleaseGates {
+            try runAdaptiveReleaseGates(options: options)
+            return
+        }
+
         if options.shadowVerify {
             try await runShadowVerify(options: options)
             return
@@ -129,6 +134,35 @@ struct HomeAutomationEvalCLI {
         print("Report: \(target.path)")
     }
 
+    private static func runAdaptiveReleaseGates(options: EvaluationCLIOptions) throws {
+        let routerReport: PortfolioRouterEvaluationReport?
+        if let path = options.portfolioRouterReportPath {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            routerReport = try decoder.decode(
+                PortfolioRouterEvaluationReport.self,
+                from: Data(contentsOf: URL(fileURLWithPath: path))
+            )
+        } else {
+            routerReport = nil
+        }
+        let report = AdaptiveReleaseGateReport.make(
+            router: routerReport,
+            configVersion: options.rolloutConfigVersion,
+            rolloutMode: options.rolloutModeLabel,
+            rollbackDrillPassed: options.rollbackDrillPassed,
+            hardwareGatePassed: options.hardwareGatePassed
+        )
+        let target = options.outputURL.appendingPathComponent("adaptive-release-gates.json")
+        try AdaptiveReleaseGateReport.write(report, to: target)
+        print("Adaptive release gates: \(report.results.filter(\.passed).count)/\(report.results.count) passed")
+        print("Report: \(target.path)")
+        if !report.passed {
+            throw EvaluationCLIError.failedCases(report.results.filter { !$0.passed }.count)
+        }
+    }
+
+
     private static func makeComparisonReport(options: EvaluationCLIOptions) async throws -> OrchestrationComparisonReport {
         let runner = OrchestrationComparisonRunner(
             caseLimit: options.caseLimit,
@@ -224,6 +258,12 @@ private struct EvaluationCLIOptions {
     let evaluatePortfolioRouter: Bool
     let modelArtifactPath: String?
     let portfolioTrainingPath: String?
+    let adaptiveReleaseGates: Bool
+    let portfolioRouterReportPath: String?
+    let rollbackDrillPassed: Bool
+    let hardwareGatePassed: Bool
+    let rolloutConfigVersion: String
+    let rolloutModeLabel: String
     let seed: UInt64
     let repetitions: Int
     let warmups: Int
@@ -249,6 +289,12 @@ private struct EvaluationCLIOptions {
         var evaluatePortfolioRouter = false
         var modelArtifactPath: String?
         var portfolioTrainingPath: String?
+        var adaptiveReleaseGates = false
+        var portfolioRouterReportPath: String?
+        var rollbackDrillPassed = false
+        var hardwareGatePassed = false
+        var rolloutConfigVersion = "local"
+        var rolloutModeLabel = "disabled"
         var seed: UInt64 = 0
         var repetitions = 1
         var warmups = 0
@@ -336,6 +382,33 @@ private struct EvaluationCLIOptions {
                     throw EvaluationCLIError.invalidArgument("--portfolio-training-path")
                 }
                 portfolioTrainingPath = value
+            case "--adaptive-release-gates":
+                adaptiveReleaseGates = true
+            case "--portfolio-router-report-path":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--portfolio-router-report-path")
+                }
+                portfolioRouterReportPath = value
+            case "--rollback-drill-passed":
+                guard let value = iterator.next() else {
+                    throw EvaluationCLIError.invalidArgument("--rollback-drill-passed")
+                }
+                rollbackDrillPassed = parseBool(value)
+            case "--hardware-gate-passed":
+                guard let value = iterator.next() else {
+                    throw EvaluationCLIError.invalidArgument("--hardware-gate-passed")
+                }
+                hardwareGatePassed = parseBool(value)
+            case "--rollout-config-version":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--rollout-config-version")
+                }
+                rolloutConfigVersion = value
+            case "--rollout-mode":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--rollout-mode")
+                }
+                rolloutModeLabel = value
             case "--seed":
                 guard let value = iterator.next(), let parsed = UInt64(value) else {
                     throw EvaluationCLIError.invalidArgument("--seed")
@@ -388,6 +461,12 @@ private struct EvaluationCLIOptions {
             evaluatePortfolioRouter: evaluatePortfolioRouter,
             modelArtifactPath: modelArtifactPath,
             portfolioTrainingPath: portfolioTrainingPath,
+            adaptiveReleaseGates: adaptiveReleaseGates,
+            portfolioRouterReportPath: portfolioRouterReportPath,
+            rollbackDrillPassed: rollbackDrillPassed,
+            hardwareGatePassed: hardwareGatePassed,
+            rolloutConfigVersion: rolloutConfigVersion,
+            rolloutModeLabel: rolloutModeLabel,
             seed: seed,
             repetitions: repetitions,
             warmups: warmups,
@@ -445,6 +524,7 @@ private struct EvaluationCLIOptions {
       HOME_AUTOMATION_EVAL_LIVE=1 swift run home-automation-eval --compare-orchestration --require-live-model true --output .build/evaluation-comparison-live
       swift run home-automation-eval --export-portfolio-training --dataset seed-v1 --output .build/portfolio-training
       swift run home-automation-eval --evaluate-portfolio-router --portfolio-training-path .build/portfolio-training/portfolio-training-dataset.json --model-artifact-path .build/portfolio-model.json --output .build/portfolio-router-eval
+      swift run home-automation-eval --adaptive-release-gates --portfolio-router-report-path .build/portfolio-router-eval/portfolio-router-evaluation.json --rollback-drill-passed true --hardware-gate-passed false --output .build/adaptive-release
     """
 }
 

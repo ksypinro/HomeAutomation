@@ -16,6 +16,7 @@ struct HomeAutomationView: View {
                     resolveButton
                     output
                     pipelineTimeline
+                    portfolioEvidence
                     agentPerformanceDashboard
                     metricsOutput
                     deviceDashboard
@@ -34,6 +35,32 @@ struct HomeAutomationView: View {
         .task {
             catalogText = await viewModel.deviceCatalogText()
             await viewModel.loadDeviceDashboard()
+        }
+    }
+
+    @ViewBuilder
+    private var portfolioEvidence: some View {
+        if !viewModel.portfolioEvidence.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Adaptive Rollout Evidence", systemImage: "slider.horizontal.3")
+                    .font(.headline)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                    ForEach(viewModel.portfolioEvidence) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(item.value)
+                                .font(.caption.monospaced())
+                                .lineLimit(2)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
         }
     }
 

@@ -58,6 +58,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let foundationModelArm: FoundationModelCallArm
     private let featureExtractor: OrchestrationFeatureExtractor
     private let portfolioRolloutMode: PortfolioRolloutMode
+    private let portfolioRolloutConfiguration: PortfolioRolloutConfiguration
     private let staticPortfolioRouter: StaticPortfolioRouter
     private let adaptivePortfolioController: AdaptivePortfolioController
     private let graphCompilationMode: GraphCompilationMode
@@ -81,10 +82,21 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.foundationModelArm = dependencies.foundationModelArm
         self.featureExtractor = OrchestrationFeatureExtractor(registry: dependencies.deviceRegistry)
         self.portfolioRolloutMode = dependencies.portfolioRolloutMode
-        self.staticPortfolioRouter = StaticPortfolioRouter(rolloutMode: dependencies.portfolioRolloutMode)
+        self.portfolioRolloutConfiguration = dependencies.portfolioRolloutConfiguration
+        let staticPortfolioRouter = StaticPortfolioRouter(rolloutMode: dependencies.portfolioRolloutMode)
+        self.staticPortfolioRouter = staticPortfolioRouter
+        let learnedRouter = dependencies.portfolioModelArtifact.map {
+            LearnedPortfolioRouter(
+                artifact: $0,
+                staticRouter: staticPortfolioRouter,
+                rolloutMode: dependencies.portfolioRolloutMode
+            )
+        }
         self.adaptivePortfolioController = AdaptivePortfolioController(
             rolloutMode: dependencies.portfolioRolloutMode,
-            router: self.staticPortfolioRouter
+            router: self.staticPortfolioRouter,
+            learnedRouter: learnedRouter,
+            configuration: dependencies.portfolioRolloutConfiguration
         )
         self.graphCompilationMode = dependencies.graphCompilationMode
     }
@@ -344,6 +356,11 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                 }
                 let executingFoundationModelArm = portfolioExecutionPlan.executingArm
+                let portfolioRolloutEvidence = adaptivePortfolioController.rolloutEvidence(
+                    decision: portfolioDecision,
+                    executionPlan: portfolioExecutionPlan,
+                    prepared: preparedRequest
+                )
                 let activeRegistry = executingFoundationModelArm == .graphWithTier1
                     ? tier1Registry ?? registry
                     : registry
@@ -384,6 +401,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
                 metrics.stageDurations["adaptivePreparation"] = preparedRequest.featureSnapshot.extractionDurationMs / 1_000
                 metrics.portfolioExecutionPlan = portfolioExecutionPlan
+                metrics.portfolioRolloutEvidence = portfolioRolloutEvidence
 
                 if let decision = portfolioDecision {
                     let routerDurationMs = portfolioDecisionResult.durationMs ?? 0

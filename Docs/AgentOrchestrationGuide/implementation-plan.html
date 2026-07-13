@@ -367,7 +367,7 @@ tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
           </article>
 
           <article class="plan-phase" id="phase-10">
-            <div class="phase-heading"><div class="phase-index">10</div><div><h3>Evaluate, canary, and roll out</h3><p>Move through explicit rollout modes with one-switch rollback to graph.</p></div><div class="phase-meta"><span class="status-chip">effort M</span><span class="status-chip">final gate</span></div></div>
+            <div class="phase-heading"><div class="phase-index">10</div><div><h3>Evaluate, canary, and roll out</h3><p>Implemented rollout modes, independent rollback/canary configuration, operator evidence, and fail-closed release gate reporting with graph-safe rollback.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">final gate</span><span class="status-chip">graph rollback retained</span></div></div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Rollout modes:</strong> <code>disabled</code> → <code>shadowStatic</code> → <code>activeStatic</code> → <code>shadowLearned</code> → <code>activeLearned</code>. Each mode is dependency-injected and recorded per run.</li>
@@ -378,6 +378,7 @@ tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
                 <li><strong>Automate rollback with independent switches.</strong> Configuration separately disables adaptive routing, frontier scheduling, residual batching, and prewarm/session affinity; also carries arm/risk allowlists, canary percentage, and policy/model/config versions. Any safety divergence, artifact mismatch, elevated unsupported/clarification rate, scheduler invariant failure, or latency regression returns new runs to graph without an app restart.</li>
               </ol>
               <p><b>Modified:</b> evaluation runner/exit criteria/CLI, <code>HomeAutomationViewModel.swift</code>, <code>HomeAutomationView.swift</code>, runtime configuration and metrics rendering.</p>
+              <p><b>Verification status:</b> focused Phase 10 tests cover learned rollout-mode semantics, rollback switch behavior, missing-artifact graph fallback, rollout evidence, and release gate fail-closed behavior. Core build passes; hardware/live-model gates remain intentionally represented as explicit release-gate inputs rather than inferred from local deterministic tests.</p>
             </div><aside class="phase-aside"><h4>Definition of shipped</h4><ul><li>All hard safety gates pass.</li><li>Static adaptive is no worse than graph in any protected slice.</li><li>Learned router beats static on predeclared utility without drift.</li><li>Rollback drill succeeds.</li><li>Documentation and type inventory updated.</li></ul></aside></div>
           </article>
         </section>

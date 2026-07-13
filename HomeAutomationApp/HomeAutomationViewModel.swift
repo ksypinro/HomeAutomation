@@ -45,6 +45,12 @@ struct AgentDashboardItem: Identifiable, Hashable {
     let circuitState: String
 }
 
+struct PortfolioEvidenceItem: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let value: String
+}
+
 /// User-facing orchestrator strategies. Mirrors the three arms in
 /// `OrchestrationArm` — the mode is baked into the runtime dependencies at
 /// construction, so switching rebuilds the orchestrator from the retained
@@ -103,6 +109,7 @@ final class HomeAutomationViewModel {
     var agentDashboard: [AgentDashboardItem] = []
     var commandHistory: [HomeCommandHistoryItem] = []
     var pipelineEvents: [HomePipelineEventItem] = []
+    var portfolioEvidence: [PortfolioEvidenceItem] = []
     var currentPipelineStage: String?
 
     private let registry = MockHomeDeviceRegistry()
@@ -166,6 +173,7 @@ final class HomeAutomationViewModel {
         metricsText = ""
         pipelineEvents = []
         agentDashboard = []
+        portfolioEvidence = []
         currentPipelineStage = nil
 
         Task {
@@ -192,6 +200,7 @@ final class HomeAutomationViewModel {
                 resultText = Self.format(output, engineName: engineName)
                 metricsText = await orchestrator.lastMetricsJSON() ?? ""
                 await refreshAgentDashboardFromMetrics()
+                await refreshPortfolioEvidenceFromMetrics()
                 currentPipelineStage = nil
                 commandHistory.insert(
                     HomeCommandHistoryItem(
@@ -294,6 +303,22 @@ final class HomeAutomationViewModel {
                 circuitState: statuses[id] ?? existing?.circuitState ?? "closed"
             )
         }
+    }
+
+    private func refreshPortfolioEvidenceFromMetrics() async {
+        guard let evidence = await orchestrator.lastMetrics()?.portfolioRolloutEvidence else {
+            portfolioEvidence = []
+            return
+        }
+        portfolioEvidence = [
+            PortfolioEvidenceItem(id: "mode", title: "Rollout", value: evidence.rolloutMode.rawValue),
+            PortfolioEvidenceItem(id: "selected", title: "Selected", value: evidence.selectedArm?.rawValue ?? "none"),
+            PortfolioEvidenceItem(id: "executing", title: "Executing", value: evidence.executingArm.rawValue),
+            PortfolioEvidenceItem(id: "fallback", title: "Fallback", value: evidence.fallbackReason.rawValue),
+            PortfolioEvidenceItem(id: "canary", title: "Canary", value: evidence.canary.included ? "included" : "graph holdback"),
+            PortfolioEvidenceItem(id: "config", title: "Config", value: evidence.configVersion),
+            PortfolioEvidenceItem(id: "rollback", title: "Rollback", value: evidence.rollbackReasons.map(\.rawValue).joined(separator: ", ").ifEmpty("none"))
+        ]
     }
 
     private static func status(from status: OrchestratorPipelineEvent.EventStatus) -> HomePipelineEventStatus {
@@ -503,4 +528,10 @@ final class HomeAutomationViewModel {
 		}
     }
 
+}
+
+private extension String {
+    func ifEmpty(_ replacement: String) -> String {
+        isEmpty ? replacement : self
+    }
 }

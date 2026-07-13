@@ -533,6 +533,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let loopOrchestrator: VerifierLoopOrchestrator?
     public let foundationModelArm: FoundationModelCallArm
     public let portfolioRolloutMode: PortfolioRolloutMode
+    public let portfolioRolloutConfiguration: PortfolioRolloutConfiguration
+    public let portfolioModelArtifact: PortfolioModelArtifact?
     public let graphCompilationMode: GraphCompilationMode
 
     public init(
@@ -550,6 +552,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         loopOrchestrator: VerifierLoopOrchestrator? = nil,
         foundationModelArm: FoundationModelCallArm = .graph,
         portfolioRolloutMode: PortfolioRolloutMode = .disabled,
+        portfolioRolloutConfiguration: PortfolioRolloutConfiguration = PortfolioRolloutConfiguration(),
+        portfolioModelArtifact: PortfolioModelArtifact? = nil,
         graphCompilationMode: GraphCompilationMode = .disabled
     ) {
         self.agentRegistry = agentRegistry
@@ -566,6 +570,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.loopOrchestrator = loopOrchestrator
         self.foundationModelArm = foundationModelArm
         self.portfolioRolloutMode = portfolioRolloutMode
+        self.portfolioRolloutConfiguration = portfolioRolloutConfiguration
+        self.portfolioModelArtifact = portfolioModelArtifact
         self.graphCompilationMode = graphCompilationMode
     }
 }
@@ -689,6 +695,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
         orchestrationMode: OrchestrationMode = .graph,
         useMiniPipeline: Bool = false,
         portfolioRolloutMode: PortfolioRolloutMode = .disabled,
+        portfolioRolloutConfiguration: PortfolioRolloutConfiguration = PortfolioRolloutConfiguration(),
+        portfolioModelArtifact: PortfolioModelArtifact? = nil,
         graphCompilationMode: GraphCompilationMode = .disabled
     ) -> HomeAutomationRuntimeDependencies {
         let baseAgentRegistry = makeAgentRegistry()
@@ -719,6 +727,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
                 : nil,
             foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm,
             portfolioRolloutMode: portfolioRolloutMode,
+            portfolioRolloutConfiguration: portfolioRolloutConfiguration,
+            portfolioModelArtifact: portfolioModelArtifact,
             graphCompilationMode: graphCompilationMode
         )
     }
