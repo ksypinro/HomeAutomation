@@ -9,6 +9,27 @@ public enum PreparedRegistryFreshness: String, Sendable, Codable, Hashable {
     case unavailable
 }
 
+public enum PreparedOrchestrationDiagnosticCode: String, Sendable, Codable, Hashable {
+    case cancelled
+    case extractionFailed
+}
+
+public struct PreparedOrchestrationDiagnostic: Sendable, Codable, Hashable {
+    public let code: PreparedOrchestrationDiagnosticCode
+    public let source: PortfolioFeatureSource
+    public let detail: String
+
+    public init(
+        code: PreparedOrchestrationDiagnosticCode,
+        source: PortfolioFeatureSource,
+        detail: String
+    ) {
+        self.code = code
+        self.source = source
+        self.detail = detail
+    }
+}
+
 public struct PreparedCommandRequestMetadata: Sendable, Codable, Hashable {
     public let text: String
     public let executeLowRiskCommands: Bool
@@ -99,6 +120,7 @@ public struct PreparedOrchestrationRequest: Sendable, Codable, Hashable {
     public let resolutionState: HomeResolutionState
     public let candidateIDs: [String]
     public let registryVersion: String
+    public let diagnostics: [PreparedOrchestrationDiagnostic]
 
     public init(
         request: PreparedCommandRequestMetadata,
@@ -108,7 +130,8 @@ public struct PreparedOrchestrationRequest: Sendable, Codable, Hashable {
         memoryReferenceDetected: Bool,
         memoryHints: [MemoryHint],
         resolutionState: HomeResolutionState,
-        candidateIDs: [String]
+        candidateIDs: [String],
+        diagnostics: [PreparedOrchestrationDiagnostic] = []
     ) {
         self.request = request
         self.featureSnapshot = featureSnapshot
@@ -119,6 +142,7 @@ public struct PreparedOrchestrationRequest: Sendable, Codable, Hashable {
         self.resolutionState = resolutionState
         self.candidateIDs = candidateIDs
         self.registryVersion = deviceSnapshot.version
+        self.diagnostics = diagnostics
     }
 
     public func registryFreshness(

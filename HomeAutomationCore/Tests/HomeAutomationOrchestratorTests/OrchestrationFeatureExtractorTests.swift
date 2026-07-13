@@ -122,6 +122,35 @@ struct OrchestrationFeatureExtractorTests {
         #expect(!encoded.contains("bedroom_lamp"))
         #expect(!encoded.contains("Prompt"))
     }
+
+    @Test("cancelled preparation returns bounded diagnostics without mutation")
+    func cancelledPreparationReturnsBoundedDiagnosticsWithoutMutation() async {
+        let registry = CancellationAwareRegistry()
+        let extractor = OrchestrationFeatureExtractor(
+            registry: registry,
+            clock: ManualExtractorClock(values: [1_000_000, 2_000_000])
+        )
+        let task = Task {
+            await extractor.prepare(.init(
+                request: CommandRequest(text: "turn on the bedroom lamp", executeLowRiskCommands: false),
+                foundationModelAvailability: .unavailable,
+                ragAvailability: .unknown,
+                gateDepth: .none,
+                warmStateHint: .unknown
+            ))
+        }
+
+        task.cancel()
+        let prepared = await task.value
+
+        #expect(prepared.diagnostics.map(\.code) == [.cancelled])
+        #expect(prepared.featureSnapshot.operation.missingReason == .extractionFailed)
+        #expect(prepared.featureSnapshot.candidateCount.missingReason == .extractionFailed)
+        #expect(prepared.deviceSnapshot.devices.isEmpty)
+        #expect(prepared.candidateIDs.isEmpty)
+        #expect(prepared.deterministicEnvelope.operation == .unsupported)
+        #expect(await registry.executeCount == 0)
+    }
 }
 
 private final class ManualExtractorClock: FoundationModelMonotonicClock, @unchecked Sendable {
@@ -141,5 +170,28 @@ private final class ManualExtractorClock: FoundationModelMonotonicClock, @unchec
             fallback = values.removeFirst()
         }
         return fallback
+    }
+}
+
+private actor CancellationAwareRegistry: DeviceRegistryProtocol {
+    private(set) var executeCount = 0
+
+    func allDevices() async -> [HomeCandidateRecord] {
+        await Task.yield()
+        return []
+    }
+
+    func retrieveCandidates(
+        text: String,
+        hints: HomeResolutionState,
+        limit: Int
+    ) async -> [HomeCandidateRecord] {
+        await Task.yield()
+        return []
+    }
+
+    func executeLowRiskPlan(_ plan: HomeAutomationExecutionPlan) async throws -> HomeCandidateRecord {
+        executeCount += 1
+        throw NSError(domain: "CancellationAwareRegistry", code: 1)
     }
 }

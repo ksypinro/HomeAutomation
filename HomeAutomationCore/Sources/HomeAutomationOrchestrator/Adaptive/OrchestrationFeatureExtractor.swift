@@ -41,18 +41,46 @@ public struct OrchestrationFeatureExtractor: Sendable {
 
     public func prepare(_ input: Input) async -> PreparedOrchestrationRequest {
         let started = clock.nowNanoseconds()
+        do {
+            return try await buildPrepared(input, started: started)
+        } catch is CancellationError {
+            return failedPreparation(
+                input,
+                started: started,
+                code: .cancelled,
+                detail: "deterministic preparation cancelled before completion"
+            )
+        } catch {
+            return failedPreparation(
+                input,
+                started: started,
+                code: .extractionFailed,
+                detail: "deterministic preparation failed before completion"
+            )
+        }
+    }
+
+    private func buildPrepared(
+        _ input: Input,
+        started: UInt64
+    ) async throws -> PreparedOrchestrationRequest {
+        try Task.checkCancellation()
         let text = input.request.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let state = AgentTextParser.deterministicState(
             for: text,
             riskReason: "Adaptive deterministic preparation"
         )
         let operation = HomeOperationDetectionService().analyzeSemantics(text)
+        try Task.checkCancellation()
         let devices = await registry.allDevices()
+        try Task.checkCancellation()
         let deviceSnapshot = PreparedDeviceSnapshot(devices: devices)
         let deterministicEnvelope = await makeEnvelope(text: text, operation: operation, memoryHints: input.memoryHints)
+        try Task.checkCancellation()
         let candidateIDs = await registry
             .retrieveCandidates(text: text, hints: state, limit: 80)
             .map(\.id)
+        try Task.checkCancellation()
         let memoryReference = ConversationMemoryReferenceDetector.containsMemoryReference(text)
         let candidateMargin = candidateTopTwoMargin(text: text, candidates: devices, state: state)
         let confidences = deterministicEnvelope.fieldConfidence.values.sorted()
@@ -106,6 +134,82 @@ public struct OrchestrationFeatureExtractor: Sendable {
             memoryHints: input.memoryHints,
             resolutionState: state,
             candidateIDs: candidateIDs
+        )
+    }
+
+    private func failedPreparation(
+        _ input: Input,
+        started: UInt64,
+        code: PreparedOrchestrationDiagnosticCode,
+        detail: String
+    ) -> PreparedOrchestrationRequest {
+        let text = input.request.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let operation = HomeOperationDetectionResult(
+            domain: .unsupported,
+            operation: .unsupported,
+            confidence: 0,
+            reason: detail
+        )
+        let state = HomeResolutionState.forOperation(text: text, operation: operation)
+        let deviceSnapshot = PreparedDeviceSnapshot(devices: [])
+        let durationMs = Self.milliseconds(from: started, to: clock.nowNanoseconds())
+        let snapshot = PortfolioFeatureSnapshot(
+            operation: .missing(.extractionFailed, source: .unavailable),
+            operationConfidence: .missing(.extractionFailed, source: .unavailable),
+            languageOODSignal: .missing(.extractionFailed, source: .unavailable),
+            textSizeBucket: .present(
+                PortfolioTextSizeBucket(characterCount: text.count),
+                source: .deterministicParser
+            ),
+            actionCount: .missing(.extractionFailed, source: .unavailable),
+            conditionCount: .missing(.extractionFailed, source: .unavailable),
+            minimumFieldConfidence: .missing(.extractionFailed, source: .unavailable),
+            p50FieldConfidence: .missing(.extractionFailed, source: .unavailable),
+            p90FieldConfidence: .missing(.extractionFailed, source: .unavailable),
+            candidateCount: .missing(.extractionFailed, source: .unavailable),
+            candidateTopTwoMargin: .missing(.extractionFailed, source: .unavailable),
+            unsupportedFragmentCount: .missing(.extractionFailed, source: .unavailable),
+            precedenceAmbiguity: .missing(.extractionFailed, source: .unavailable),
+            riskFloor: .missing(.extractionFailed, source: .unavailable),
+            memoryReference: .missing(.extractionFailed, source: .unavailable),
+            exactTemplateMatch: .missing(.extractionFailed, source: .unavailable),
+            foundationModelAvailability: .present(
+                input.foundationModelAvailability,
+                source: .runtimeAvailability
+            ),
+            ragAvailability: .present(input.ragAvailability, source: .runtimeAvailability),
+            gateDepth: .present(input.gateDepth, source: .runtimeAvailability),
+            warmStateHint: .present(input.warmStateHint, source: .runtimeAvailability),
+            extractionDurationMs: durationMs
+        )
+        let envelope = DraftEnvelope(
+            userText: text,
+            operation: .unsupported,
+            operationConfidence: 0,
+            risk: RiskSection(level: .medium, floorReason: detail),
+            clarification: ClarificationSection(
+                question: "I could not prepare this request safely. Please try again.",
+                ambiguousFieldIDs: [.operation]
+            ),
+            provenance: [.operation: .rules],
+            fieldConfidence: [.operation: 0]
+        )
+        return PreparedOrchestrationRequest(
+            request: PreparedCommandRequestMetadata(request: input.request),
+            featureSnapshot: snapshot,
+            deterministicEnvelope: envelope,
+            deviceSnapshot: deviceSnapshot,
+            memoryReferenceDetected: false,
+            memoryHints: input.memoryHints,
+            resolutionState: state,
+            candidateIDs: [],
+            diagnostics: [
+                PreparedOrchestrationDiagnostic(
+                    code: code,
+                    source: .unavailable,
+                    detail: detail
+                )
+            ]
         )
     }
 

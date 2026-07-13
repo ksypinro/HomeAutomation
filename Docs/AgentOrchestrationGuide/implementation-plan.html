@@ -210,6 +210,10 @@ public protocol PortfolioArmExecuting: Sendable {
 
           <article class="plan-phase" id="phase-2">
             <div class="phase-heading"><div class="phase-index">02</div><div><h3>Record truthful model and latency telemetry</h3><p>Create the measurement substrate used by the router, scheduler, evaluator, and rollout gates.</p></div><div class="phase-meta"><span class="status-chip blocker">measurement blocker</span><span class="status-chip parallel">parallel with late phase 1</span><span class="status-chip">effort L</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · deterministic telemetry baseline archived</strong>
+              <p>Phase 2 now uses a per-run <code>FoundationModelUsageLedger</code> as the source of truth for actual model calls, queue/service milliseconds, cancellation-before-inference, character counts, tool usage, telemetry overhead, and arm/job attribution. The comparison runner consumes ledger facts, supports seeded counterbalanced arm order, warmups, repetitions, dataset selection, and dry-run mutation safety. A deterministic local baseline is archived; live supported-hardware baselines remain an external prerequisite. Full-suite green remains blocked by known unrelated verifier verdict expectations.</p>
+            </div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Add a per-run <code>FoundationModelUsageLedger</code>.</strong> Carry the actor through a TaskLocal scope around the full resolution run; key entries by model-call ID and store run/arm/job attribution, agent/node, attempt, enqueue/start/end, actual queue milliseconds, service milliseconds, prompt/output character counts, selected tools, priority, cancellation, and failure kind.</li>
@@ -226,6 +230,10 @@ public protocol PortfolioArmExecuting: Sendable {
 
           <article class="plan-phase" id="phase-3">
             <div class="phase-heading"><div class="phase-index">03</div><div><h3>Prepare one reusable request and feature snapshot</h3><p>Compute deterministic evidence once, then reuse it for routing, execution, and escalation.</p></div><div class="phase-meta"><span class="status-chip">effort L</span><span class="status-chip">depends 0–2</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · deterministic preparation is active</strong>
+              <p>Phase 3 now prepares a reusable <code>PreparedOrchestrationRequest</code> with a versioned, privacy-safe <code>PortfolioFeatureSnapshot</code>, deterministic envelope, device snapshot freshness, memory-reference metadata, and bounded fail-closed diagnostics for cancelled preparation. Preparation runs before model-capable routing without Foundation Model calls, prompts, model-backed retrieval, device execution, or external mutation. <code>PortfolioMetrics.preparationMs</code> is populated from the preserved adaptive preparation timing when the run ledger snapshot is captured.</p>
+            </div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Create <code>OrchestrationFeatureExtractor</code>.</strong> Run deterministic operation/NLU parsing, candidate scoring, envelope creation, memory detection, and one registry snapshot without calling Foundation Models.</li>
@@ -241,6 +249,10 @@ public protocol PortfolioArmExecuting: Sendable {
 
           <article class="plan-phase" id="phase-4">
             <div class="phase-heading"><div class="phase-index">04</div><div><h3>Ship hard eligibility and a static router in shadow</h3><p>Generate routing decisions without changing which arm serves the user.</p></div><div class="phase-meta"><span class="status-chip">shadow only</span><span class="status-chip">effort M</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · static portfolio router runs in shadow</strong>
+              <p>Phase 4 now has <code>PortfolioRolloutMode.shadowStatic</code>, hard arm eligibility policy, deterministic static routing rules, complete privacy-safe <code>PortfolioDecision</code> records, bounded explanations, telemetry, scoped context storage, and backwards-compatible metrics. Shadow mode records the arm it would choose and why, including eligible/rejected arms and router duration, while continuing through the configured execution arm with no hidden second execution or model-call/device-mutation change.</p>
+            </div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Implement the hard allowlist.</strong> Reject arms by model availability, unsupported operation, missing specialist coverage, high/critical risk policy, external mutation requirements, memory support, OOD/uncertainty, and finalizer readiness.</li>

@@ -494,7 +494,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             metrics.captureEvaluationFields(context: finalized.context, result: result)
                         }
                         metrics.safetyMetrics.finalizationReceipt = finalized.receipt
-                        metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
+                        metrics.captureFoundationModelUsage(
+                            snapshot: await usageLedger.snapshot(),
+                            selectedArm: foundationModelArm
+                        )
                         await metricsCollector.store(metrics)
                         await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
                         await eventBus.publish(OrchestratorPipelineEvent(
@@ -550,7 +553,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             metrics.captureEvaluationFields(context: finalized.context, result: result)
                         }
                         metrics.safetyMetrics.finalizationReceipt = finalized.receipt
-                        metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
+                        metrics.captureFoundationModelUsage(
+                            snapshot: await usageLedger.snapshot(),
+                            selectedArm: foundationModelArm
+                        )
                         await metricsCollector.store(metrics)
                         await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
                         await eventBus.publish(OrchestratorPipelineEvent(
@@ -571,7 +577,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         metrics.finishedAt = Date()
                         metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
                         metrics.outcome = Self.outcomeName(for: result.resolution)
-                        metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
+                        metrics.captureFoundationModelUsage(
+                            snapshot: await usageLedger.snapshot(),
+                            selectedArm: foundationModelArm
+                        )
                         await metricsCollector.store(metrics)
                         await eventBus.publish(OrchestratorPipelineEvent(
                             runID: runID, stage: "outcome", status: .completed,
@@ -614,7 +623,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         result: result,
                         graphRun: execution.graphRun
                     )
-                    metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
+                    metrics.captureFoundationModelUsage(
+                        snapshot: await usageLedger.snapshot(),
+                        selectedArm: foundationModelArm
+                    )
                     await metricsCollector.store(metrics)
 
                     let outcomeEvent = OrchestratorPipelineEvent(
@@ -660,7 +672,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(metrics.startedAt)
                     metrics.graphRun = execution.graphRun
                     metrics.circuitStates = await circuitBreakers.allStatusStrings()
-                    metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
+                    metrics.captureFoundationModelUsage(
+                        snapshot: await usageLedger.snapshot(),
+                        selectedArm: foundationModelArm
+                    )
                     await metricsCollector.store(metrics)
 
                     let outcomeEvent = OrchestratorPipelineEvent(
@@ -722,7 +737,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(metrics.startedAt)
                 metrics.circuitStates = await circuitBreakers.allStatusStrings()
                 metrics.captureEvaluationFields(context: ctx, result: result)
-                metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
+                metrics.captureFoundationModelUsage(
+                    snapshot: await usageLedger.snapshot(),
+                    selectedArm: foundationModelArm
+                )
                 await metricsCollector.store(metrics)
                 await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
 

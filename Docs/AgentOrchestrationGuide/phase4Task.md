@@ -258,8 +258,8 @@ Tasks:
 - [x] Update `Docs/CoordinatorTypeInventory.md` after adding new source declarations.
 - [x] Update this tracker as each slice lands.
 - [x] Add Phase 4 verification notes after implementation.
-- [ ] Update `phase3Task.md` only if Phase 4 changes the way `PortfolioMetrics` consumes `preparationMs`.
-- [ ] Update `implementation-plan.html` status only after implementation and verification are complete.
+- [x] Update `phase3Task.md` only if Phase 4 changes the way `PortfolioMetrics` consumes `preparationMs`.
+- [x] Update `implementation-plan.html` status only after implementation and verification are complete.
 
 Verification notes, 2026-07-13:
 
@@ -276,6 +276,7 @@ Verification notes, 2026-07-13:
 - Full `swift test` still fails in pre-existing verifier/verdict expectations outside the Phase 4 router surface:
   - `DraftVerifierWorkerSessionTests` — “Accepted verdict from mock still clears disputes after constraint”
   - `DraftVerdictTests` — “Accepted verdict clears disputes”
+- Re-run after tracker follow-through: `swift test` passed all Phase 2–4/RAG/Core/Evaluation/Orchestrator suites and failed only in the same two HomeAutomationAgent verifier/verdict tests above, with 4 total expectation issues.
 
 ### P4.9 — Verification Commands
 

@@ -295,6 +295,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var retrievalQuality: RetrievalQualityMetrics
     public var metricsV2: RunMetricsV2?
     public var loop: LoopRunMetrics?
+    public var portfolioMetrics: PortfolioMetrics?
     public var portfolioDecision: PortfolioDecision?
 
     public init(command: String) {
@@ -317,6 +318,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.retrievalQuality = RetrievalQualityMetrics()
         self.metricsV2 = nil
         self.loop = nil
+        self.portfolioMetrics = nil
         self.portfolioDecision = nil
     }
 
@@ -324,7 +326,10 @@ public struct OrchestratorMetrics: Sendable, Codable {
         context: ResolutionContext,
         result: HomeAutomationResolverResult
     ) {
-        stageDurations = agentTraces.reduce(into: [:]) { partial, trace in
+        let adaptiveStageDurations = stageDurations.filter { key, _ in
+            key == "adaptivePreparation" || key == "portfolioRouter"
+        }
+        stageDurations = agentTraces.reduce(into: adaptiveStageDurations) { partial, trace in
             partial[trace.agentID.rawValue] = trace.durationSeconds
         }
         agentStatuses = agentTraces.reduce(into: [:]) { partial, trace in
@@ -427,7 +432,10 @@ public struct OrchestratorMetrics: Sendable, Codable {
         metricsV2 = RunMetricsV2.derive(from: self)
     }
 
-    public mutating func captureFoundationModelUsage(snapshot: FoundationModelUsageSnapshot) {
+    public mutating func captureFoundationModelUsage(
+        snapshot: FoundationModelUsageSnapshot,
+        selectedArm: FoundationModelCallArm = .unknown
+    ) {
         foundationModelUsageSnapshot = snapshot
         foundationModelUsage.modelCallCount = snapshot.summary.actualCallCount
         foundationModelUsage.completedModelCallCount = snapshot.summary.completedCallCount
@@ -441,6 +449,20 @@ public struct OrchestratorMetrics: Sendable, Codable {
         foundationModelUsage.telemetryOverheadMs = snapshot.summary.telemetryOverheadMs
         foundationModelUsage.selectedToolNames = Array(Set(snapshot.entries.flatMap(\.request.selectedToolNames))).sorted()
         foundationModelUsage.toolCount = foundationModelUsage.selectedToolNames.count
+        let observedArm = selectedArm == .unknown
+            ? snapshot.entries.first?.request.arm ?? .unknown
+            : selectedArm
+        let selectedUtility = portfolioDecision?.eligibleArms.first {
+            $0.arm == portfolioDecision?.selectedArm
+        }?.utility.total
+        portfolioMetrics = PortfolioMetrics(
+            snapshot: snapshot,
+            selectedArm: observedArm,
+            preparationMs: stageDurations["adaptivePreparation"].map { $0 * 1_000 },
+            routerMs: stageDurations["portfolioRouter"].map { $0 * 1_000 },
+            eligibleArms: portfolioDecision?.eligibleArms.map(\.arm),
+            predictedUtility: selectedUtility
+        )
         let failures = snapshot.entries.compactMap(\.failureKind)
         foundationModelUsage.contextWindowFailures = failures.filter { $0 == .contextWindowExceeded }.count
         foundationModelUsage.guardrailFailures = failures.filter { $0 == .guardrailRefusal }.count

@@ -125,7 +125,7 @@ Primary file: `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/Or
 Acceptance:
 
 - [x] Tests can install a fake recorder/ledger scope and assert zero Foundation Model call events during preparation.
-- [ ] Cancellation or extraction failure returns bounded diagnostics without partially mutating registry, context, or devices.
+- [x] Cancellation or extraction failure returns bounded diagnostics without partially mutating registry, context, or devices.
 - [x] Extraction is deterministic under repeated runs with the same fixtures.
 
 ### P3.4 — Add Device Snapshot Freshness
@@ -154,7 +154,7 @@ Primary file: `HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeCommand
 - [x] Preserve current graph, Tier-1, and verifier-loop behavior.
 - [x] Do not select an arm based on the feature snapshot in Phase 3.
 - [x] Do not execute a hidden second arm or shadow model path.
-- [ ] Add optional metrics wiring for `preparationMs` using the Phase 2 `PortfolioMetrics` nullable field. Current implementation records `adaptivePreparation` in `OrchestratorMetrics.stageDurations`; full `PortfolioMetrics` attachment remains staged for Phase 4/5 metrics composition.
+- [x] Add optional metrics wiring for `preparationMs` using the Phase 2 `PortfolioMetrics` nullable field. The orchestrator preserves `adaptivePreparation` timing through metrics finalization and copies it into `OrchestratorMetrics.portfolioMetrics`.
 - [x] Ensure existing explicit orchestration modes continue to behave exactly as before when preparation is enabled.
 
 Acceptance:
@@ -184,15 +184,21 @@ Tasks:
 - [x] Test exact-template match and unsupported-fragment features.
 - [x] Test feature privacy by asserting raw command text, prompts, model output, and device names are absent from encoded snapshots.
 - [x] Test preparation duration with an injected clock.
-- [ ] Test extraction failure returns bounded diagnostics and no mutation.
+- [x] Test extraction failure returns bounded diagnostics and no mutation.
 
 ### P3.7 — Update Documentation And Inventory
 
 - [x] Update `Docs/CoordinatorTypeInventory.md` after adding new source declarations.
 - [x] Update adaptive/orchestration documentation to describe deterministic preparation and privacy boundaries.
-- [ ] Add a short note in Phase 2 documentation that `preparationMs` is populated by Phase 3.
-- [ ] Update `implementation-plan.html` status only after implementation and verification are complete.
-- [ ] Document which existing deterministic parser outputs are reused by `OrchestrationFeatureExtractor`.
+- [x] Add a short note in Phase 2 documentation that `preparationMs` is populated by Phase 3.
+- [x] Update `implementation-plan.html` status only after implementation and verification are complete.
+- [x] Document which existing deterministic parser outputs are reused by `OrchestrationFeatureExtractor`.
+
+Implementation notes:
+
+- `OrchestrationFeatureExtractor` reuses `AgentTextParser.deterministicState`, `HomeOperationDetectionService.analyzeSemantics`, `DeterministicDraftPipeline`, `ConversationMemoryReferenceDetector`, and deterministic registry candidate scoring. It does not instantiate `LanguageModelSession`, create prompts, call `session.respond`, perform model-backed retrieval, execute device plans, or mutate SmartThings state.
+- Phase 3 populates `PortfolioMetrics.preparationMs` from the preserved `adaptivePreparation` stage duration when the per-run Foundation Model ledger snapshot is captured. Phase 4 similarly populates `routerMs` and `eligibleArms` when a shadow decision exists.
+- Cancelled preparation now returns a fail-closed `PreparedOrchestrationRequest` with bounded `PreparedOrchestrationDiagnostic` values, missing feature values marked `.extractionFailed`, an empty device snapshot/candidate set, and no device mutation.
 
 ### P3.8 — Verification Commands
 
@@ -217,9 +223,9 @@ Verification on 2026-07-13:
 
 - [x] `swift test --filter PortfolioFeatureSnapshotTests` passed: 3 tests.
 - [x] `swift test --filter PreparedOrchestrationRequestTests` passed: 3 tests.
-- [x] `swift test --filter OrchestrationFeatureExtractorTests` passed: 4 tests.
+- [x] `swift test --filter OrchestrationFeatureExtractorTests` passed: 5 tests, including cancelled-preparation diagnostics.
 - [x] `swift test --filter CoordinatorRefactorTests.coordinatorTypeInventoryListsEverySourceDeclaration` passed: 1 test.
-- [ ] `swift test` still fails in pre-existing verifier verdict expectations:
+- Full `swift test` on 2026-07-13 still fails only in pre-existing verifier verdict expectations:
   - `DraftVerifierWorkerSessionTests` — “Accepted verdict from mock still clears disputes after constraint”
   - `DraftVerdictTests` — “Accepted verdict clears disputes”
   - Total: 4 expectation issues. Phase 3-focused suites passed inside the broader run.

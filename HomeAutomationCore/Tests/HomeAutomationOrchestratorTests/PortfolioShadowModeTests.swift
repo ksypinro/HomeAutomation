@@ -47,6 +47,9 @@ struct PortfolioShadowModeTests {
         #expect(disabledResult.resolution.displaySummary == shadowResult.resolution.displaySummary)
         #expect(shadowMetrics?.portfolioDecision != nil)
         #expect(shadowMetrics?.portfolioDecision?.rolloutMode == .shadowStatic)
+        #expect(shadowMetrics?.portfolioMetrics?.preparationMs != nil)
+        #expect(shadowMetrics?.portfolioMetrics?.routerMs != nil)
+        #expect(shadowMetrics?.portfolioMetrics?.eligibleArms == shadowMetrics?.portfolioDecision?.eligibleArms.map(\.arm))
         #expect(disabledMetrics?.foundationModelUsageSnapshot?.summary.actualCallCount == shadowMetrics?.foundationModelUsageSnapshot?.summary.actualCallCount)
     }
 }
