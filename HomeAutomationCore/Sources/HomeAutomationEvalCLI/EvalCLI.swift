@@ -13,6 +13,16 @@ struct HomeAutomationEvalCLI {
             return
         }
 
+        if options.exportPortfolioTraining {
+            try await runExportPortfolioTraining(options: options)
+            return
+        }
+
+        if options.evaluatePortfolioRouter {
+            try runEvaluatePortfolioRouter(options: options)
+            return
+        }
+
         if options.shadowVerify {
             try await runShadowVerify(options: options)
             return
@@ -77,6 +87,49 @@ struct HomeAutomationEvalCLI {
     }
 
     private static func runCompareOrchestration(options: EvaluationCLIOptions) async throws {
+        let report = try await makeComparisonReport(options: options)
+        try OrchestrationComparisonRunner.writeReport(report, to: options.outputURL)
+
+        print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s) [\(options.requireLiveModel ? "live model" : "deterministic")]")
+        for summary in report.armSummaries {
+            print("  \(summary.arm.rawValue): accuracy=\(String(format: "%.1f%%", summary.accuracy * 100)), meanFM=\(String(format: "%.2f", summary.meanFMCalls)), p95=\(String(format: "%.1fms", summary.p95DurationMs))")
+        }
+        let passCount = report.exitCriteriaResults.filter(\.passed).count
+        let totalCount = report.exitCriteriaResults.count
+        print("Exit criteria: \(passCount)/\(totalCount) passed")
+        print("Report: \(options.outputURL.appendingPathComponent("orchestration-comparison.md").path)")
+
+        if passCount < totalCount {
+            throw EvaluationCLIError.failedCases(totalCount - passCount)
+        }
+    }
+
+    private static func runExportPortfolioTraining(options: EvaluationCLIOptions) async throws {
+        let report = try await makeComparisonReport(options: options)
+        let dataset = PortfolioTrainingDataset.make(from: report)
+        let target = options.portfolioTrainingURL ?? options.outputURL.appendingPathComponent("portfolio-training-dataset.json")
+        try PortfolioTrainingDataset.write(dataset, to: target)
+
+        print("Portfolio training dataset: \(dataset.rows.count) row(s), \(dataset.datasetID)")
+        print("Dataset: \(target.path)")
+    }
+
+    private static func runEvaluatePortfolioRouter(options: EvaluationCLIOptions) throws {
+        guard let artifactURL = options.modelArtifactURL else {
+            throw EvaluationCLIError.missingRequiredArgument("--model-artifact-path")
+        }
+        let datasetURL = options.portfolioTrainingURL ?? options.outputURL.appendingPathComponent("portfolio-training-dataset.json")
+        let artifact = try PortfolioRouterEvaluator.loadArtifact(from: artifactURL)
+        let dataset = try PortfolioTrainingDataset.load(from: datasetURL)
+        let report = PortfolioRouterEvaluator(artifact: artifact).evaluate(dataset)
+        let target = options.outputURL.appendingPathComponent("portfolio-router-evaluation.json")
+        try PortfolioRouterEvaluator.write(report, to: target)
+
+        print("Portfolio router evaluation: \(report.caseCount) case(s), mean regret=\(String(format: "%.4f", report.meanRegret)), max regret=\(String(format: "%.4f", report.maxRegret))")
+        print("Report: \(target.path)")
+    }
+
+    private static func makeComparisonReport(options: EvaluationCLIOptions) async throws -> OrchestrationComparisonReport {
         let runner = OrchestrationComparisonRunner(
             caseLimit: options.caseLimit,
             requireLiveModel: options.requireLiveModel,
@@ -92,21 +145,7 @@ struct HomeAutomationEvalCLI {
         } else {
             cases = EvaluationCorpus.defaultCases
         }
-        let report = await runner.run(cases: cases)
-        try OrchestrationComparisonRunner.writeReport(report, to: options.outputURL)
-
-        print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s) [\(options.requireLiveModel ? "live model" : "deterministic")]")
-        for summary in report.armSummaries {
-            print("  \(summary.arm.rawValue): accuracy=\(String(format: "%.1f%%", summary.accuracy * 100)), meanFM=\(String(format: "%.2f", summary.meanFMCalls)), p95=\(String(format: "%.1fms", summary.p95DurationMs))")
-        }
-        let passCount = report.exitCriteriaResults.filter(\.passed).count
-        let totalCount = report.exitCriteriaResults.count
-        print("Exit criteria: \(passCount)/\(totalCount) passed")
-        print("Report: \(options.outputURL.appendingPathComponent("orchestration-comparison.md").path)")
-
-        if passCount < totalCount {
-            throw EvaluationCLIError.failedCases(totalCount - passCount)
-        }
+        return await runner.run(cases: cases)
     }
 
     private static func runShadowVerify(options: EvaluationCLIOptions) async throws {
@@ -181,6 +220,10 @@ private struct EvaluationCLIOptions {
     let generationMode: EvaluationCommandGenerationMode
     let shadowVerify: Bool
     let compareOrchestration: Bool
+    let exportPortfolioTraining: Bool
+    let evaluatePortfolioRouter: Bool
+    let modelArtifactPath: String?
+    let portfolioTrainingPath: String?
     let seed: UInt64
     let repetitions: Int
     let warmups: Int
@@ -202,6 +245,10 @@ private struct EvaluationCLIOptions {
         var generationMode: EvaluationCommandGenerationMode = .codex
         var shadowVerify = false
         var compareOrchestration = false
+        var exportPortfolioTraining = false
+        var evaluatePortfolioRouter = false
+        var modelArtifactPath: String?
+        var portfolioTrainingPath: String?
         var seed: UInt64 = 0
         var repetitions = 1
         var warmups = 0
@@ -275,6 +322,20 @@ private struct EvaluationCLIOptions {
                 shadowVerify = true
             case "--compare-orchestration":
                 compareOrchestration = true
+            case "--export-portfolio-training":
+                exportPortfolioTraining = true
+            case "--evaluate-portfolio-router":
+                evaluatePortfolioRouter = true
+            case "--model-artifact-path":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--model-artifact-path")
+                }
+                modelArtifactPath = value
+            case "--portfolio-training-path":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--portfolio-training-path")
+                }
+                portfolioTrainingPath = value
             case "--seed":
                 guard let value = iterator.next(), let parsed = UInt64(value) else {
                     throw EvaluationCLIError.invalidArgument("--seed")
@@ -323,6 +384,10 @@ private struct EvaluationCLIOptions {
             generationMode: generationMode,
             shadowVerify: shadowVerify,
             compareOrchestration: compareOrchestration,
+            exportPortfolioTraining: exportPortfolioTraining,
+            evaluatePortfolioRouter: evaluatePortfolioRouter,
+            modelArtifactPath: modelArtifactPath,
+            portfolioTrainingPath: portfolioTrainingPath,
             seed: seed,
             repetitions: repetitions,
             warmups: warmups,
@@ -340,6 +405,14 @@ private struct EvaluationCLIOptions {
             return try loader.loadBuiltInDataset(named: dataset)
         }
         return nil
+    }
+
+    var modelArtifactURL: URL? {
+        modelArtifactPath.map { URL(fileURLWithPath: $0) }
+    }
+
+    var portfolioTrainingURL: URL? {
+        portfolioTrainingPath.map { URL(fileURLWithPath: $0) }
     }
 
     private static func parseBool(_ value: String) -> Bool {
@@ -370,12 +443,15 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
       swift run home-automation-eval --compare-orchestration --dataset seed-v1 --seed 20260713 --warmups 1 --repetitions 3 --output .build/evaluation-comparison --case-limit 50
       HOME_AUTOMATION_EVAL_LIVE=1 swift run home-automation-eval --compare-orchestration --require-live-model true --output .build/evaluation-comparison-live
+      swift run home-automation-eval --export-portfolio-training --dataset seed-v1 --output .build/portfolio-training
+      swift run home-automation-eval --evaluate-portfolio-router --portfolio-training-path .build/portfolio-training/portfolio-training-dataset.json --model-artifact-path .build/portfolio-model.json --output .build/portfolio-router-eval
     """
 }
 
 private enum EvaluationCLIError: Error, CustomStringConvertible {
     case invalidArgument(String)
     case failedCases(Int)
+    case missingRequiredArgument(String)
 
     var description: String {
         switch self {
@@ -383,6 +459,8 @@ private enum EvaluationCLIError: Error, CustomStringConvertible {
             return "Invalid evaluation CLI argument: \(argument)"
         case .failedCases(let count):
             return "\(count) evaluation case(s) failed"
+        case .missingRequiredArgument(let argument):
+            return "Missing required evaluation CLI argument: \(argument)"
         }
     }
 }

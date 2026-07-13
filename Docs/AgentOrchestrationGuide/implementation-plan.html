@@ -350,7 +350,7 @@ tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
           </article>
 
           <article class="plan-phase" id="phase-9">
-            <div class="phase-heading"><div class="phase-index">09</div><div><h3>Train an offline, uncertainty-aware utility router</h3><p>Learn only after static routing, finalization, and measurement are stable.</p></div><div class="phase-meta"><span class="status-chip">offline only</span><span class="status-chip">effort L</span></div></div>
+            <div class="phase-heading"><div class="phase-index">09</div><div><h3>Train an offline, uncertainty-aware utility router</h3><p>Implemented offline artifact loading, conservative learned routing, counterfactual training export, and regret evaluation while keeping static graph-safe fallback.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">offline only</span><span class="status-chip">no production exploration</span></div></div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Generate counterfactual training rows.</strong> For each case, run every eligible arm under counterbalanced conditions and persist features, eligibility, output correctness, duration distribution, actual calls, queue wait, escalation, clarification, confirmation, and failure.</li>
@@ -362,6 +362,7 @@ tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
               </ol>
               <p><b>New files:</b> <code>Adaptive/LearnedPortfolioRouter.swift</code>, <code>Adaptive/PortfolioModelArtifact.swift</code>; evaluation-side <code>PortfolioTrainingDataset.swift</code> and <code>PortfolioRouterEvaluator.swift</code>.</p>
               <p><b>CLI additions:</b> <code>--export-portfolio-training</code>, <code>--evaluate-portfolio-router</code>, model artifact path/version flags.</p>
+              <p><b>Verification status:</b> focused Phase 9 tests cover artifact scoring/schema rejection, learned router OOD and low-margin fallback, eligible-arm selection, safety-ineligible evaluation rows, regret calculation, and coordinator type inventory coverage. Active learned rollout remains a later release-gated phase.</p>
             </div><aside class="phase-aside"><h4>Model gates</h4><ul><li>Static router remains fallback.</li><li>Artifact schema/hash verified.</li><li>Calibration and regret reported.</li><li>No safety-ineligible prediction accepted.</li><li>Shadow learned decision before active use.</li></ul></aside></div>
           </article>
 
