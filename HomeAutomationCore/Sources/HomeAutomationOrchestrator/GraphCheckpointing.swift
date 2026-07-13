@@ -1,4 +1,5 @@
 import Foundation
+import HomeAutomationCore
 
 public enum GraphInterruptKind: String, Sendable, Hashable, Codable {
     case confirmation
@@ -117,21 +118,26 @@ public struct GraphSchedulerExecutionOptions: Sendable {
     public let resumeFromCheckpoint: GraphCheckpointRecord?
     public let pauseAtInterrupts: Bool
     public let interruptBeforeNodeIDs: Set<String>
+    public let criticalPath: GraphCriticalPathMetadata?
+    public let foundationModelSchedulerMode: FoundationModelSchedulerMode
 
     public init(
         checkpointStore: (any GraphCheckpointPersisting)? = nil,
         resumeFromCheckpoint: GraphCheckpointRecord? = nil,
         pauseAtInterrupts: Bool = false,
-        interruptBeforeNodeIDs: Set<String> = []
+        interruptBeforeNodeIDs: Set<String> = [],
+        criticalPath: GraphCriticalPathMetadata? = nil,
+        foundationModelSchedulerMode: FoundationModelSchedulerMode = .legacy
     ) {
         self.checkpointStore = checkpointStore
         self.resumeFromCheckpoint = resumeFromCheckpoint
         self.pauseAtInterrupts = pauseAtInterrupts
         self.interruptBeforeNodeIDs = interruptBeforeNodeIDs
+        self.criticalPath = criticalPath
+        self.foundationModelSchedulerMode = foundationModelSchedulerMode
     }
 
     func shouldInterrupt(before node: GraphNode) -> Bool {
         interruptBeforeNodeIDs.contains(node.id) || (pauseAtInterrupts && node.interrupt != nil)
     }
 }
-

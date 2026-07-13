@@ -29,6 +29,16 @@ public struct FoundationModelCallRecorder: Sendable {
         let effectiveJobID = jobID ?? parent?.foundationModelJobID ?? modelCallID
         let effectiveJobKind = jobKind ?? parent?.foundationModelJobKind ?? defaultJobKind(agentID: agentID)
         let effectiveEscalationChain = escalationChain ?? parent?.foundationModelEscalationChain ?? []
+        let admissionContext = (FMAdmissionContextScope.current ?? FMAdmissionContext())
+            .merging(
+                runID: parent?.runID,
+                graphID: parent?.graphID,
+                nodeID: parent?.graphNodeID,
+                agentID: agentID,
+                jobKind: effectiveJobKind,
+                deadlineClass: priority == .interactive ? .interactive : .pipeline,
+                cancellationClass: .normal
+            )
         let request = FoundationModelCallRequest(
             modelCallID: modelCallID,
             arm: effectiveArm,
@@ -51,7 +61,24 @@ public struct FoundationModelCallRecorder: Sendable {
             }
         }
 
-        let admission = await admissionController.admitRequest(priority: priority)
+        let admissionRequest = FMAdmissionRequest(
+            modelCallID: modelCallID,
+            priority: priority,
+            schedulerMode: admissionContext.schedulerMode ?? .legacy,
+            enqueuedAtNanoseconds: enqueuedAtNanoseconds,
+            runID: admissionContext.runID,
+            graphID: admissionContext.graphID,
+            nodeID: admissionContext.nodeID,
+            agentID: admissionContext.agentID,
+            jobKind: admissionContext.jobKind,
+            criticalPathRemainingMs: admissionContext.criticalPathRemainingMs,
+            estimatedServiceMs: admissionContext.estimatedServiceMs,
+            deadlineClass: admissionContext.deadlineClass,
+            cancellationClass: admissionContext.cancellationClass,
+            prefixAffinityKey: admissionContext.prefixAffinityKey,
+            workflowScopeID: admissionContext.workflowScopeID
+        )
+        let admission = await admissionController.admit(admissionRequest)
         switch admission {
         case .cancelled(let queueWaitMs):
             let cancelledAt = clock.nowNanoseconds()
@@ -74,9 +101,9 @@ public struct FoundationModelCallRecorder: Sendable {
             )
             throw CancellationError()
 
-        case .admitted(let queueWaitMs):
+        case .admitted(let lease, let queueWaitMs, let fallbackReason, let shadowRank):
             if Task.isCancelled {
-                await admissionController.release()
+                await admissionController.release(leaseID: lease.leaseID)
                 let cancelledAt = clock.nowNanoseconds()
                 if let ledger {
                     await measureLedgerOverhead(ledger: ledger, clock: clock) {
@@ -126,6 +153,10 @@ public struct FoundationModelCallRecorder: Sendable {
                     "estimatedToolOutputCharacterCount": .int(estimatedToolOutputCharacterCount),
                     "fmQueueWaitMs": .double(queueWaitMs),
                     "fmPriority": .string(priority.rawValue),
+                    "fmAdmissionLeaseID": .string(lease.leaseID.uuidString),
+                    "fmSchedulerMode": .string(lease.schedulerMode.rawValue),
+                    "fmAdmissionFallbackReason": .string(fallbackReason.rawValue),
+                    "fmFrontierShadowRank": .string(shadowRank.joined(separator: ",")),
                     "sessionReuse": .string(sessionReuse.rawValue)
                 ], privacy: [
                     "modelCallID": .internalID,
@@ -150,8 +181,15 @@ public struct FoundationModelCallRecorder: Sendable {
                     try await operation()
                 }
                 let serviceCompletedAtNanoseconds = clock.nowNanoseconds()
-                await admissionController.release()
+                await admissionController.release(leaseID: lease.leaseID)
                 let outputCount = outputCharacterCount(value)
+                await recordServiceEstimate(
+                    agentID: agentID,
+                    jobKind: effectiveJobKind,
+                    priority: priority,
+                    startedAt: serviceStartedAtNanoseconds,
+                    completedAt: serviceCompletedAtNanoseconds
+                )
                 if let ledger {
                     await measureLedgerOverhead(ledger: ledger, clock: clock) {
                         try? await ledger.complete(
@@ -181,7 +219,14 @@ public struct FoundationModelCallRecorder: Sendable {
                 return value
             } catch {
                 let serviceCompletedAtNanoseconds = clock.nowNanoseconds()
-                await admissionController.release()
+                await admissionController.release(leaseID: lease.leaseID)
+                await recordServiceEstimate(
+                    agentID: agentID,
+                    jobKind: effectiveJobKind,
+                    priority: priority,
+                    startedAt: serviceStartedAtNanoseconds,
+                    completedAt: serviceCompletedAtNanoseconds
+                )
                 let completedAt = Date()
                 if error is CancellationError || Task.isCancelled {
                     if let ledger {
@@ -307,6 +352,20 @@ public struct FoundationModelCallRecorder: Sendable {
         await operation()
         let completed = clock.nowNanoseconds()
         await ledger.recordTelemetryOverhead(milliseconds: milliseconds(from: started, to: completed))
+    }
+
+    private static func recordServiceEstimate(
+        agentID: String,
+        jobKind: FoundationModelJobKind,
+        priority: FMPriority,
+        startedAt: UInt64,
+        completedAt: UInt64
+    ) async {
+        let duration = milliseconds(from: startedAt, to: completedAt)
+        await FMServiceTimeEstimator.shared.recordServiceTime(
+            milliseconds: duration,
+            key: FMServiceTimeEstimatorKey(agentID: agentID, jobKind: jobKind, priority: priority)
+        )
     }
 
     private static func milliseconds(from start: UInt64, to end: UInt64) -> Double {

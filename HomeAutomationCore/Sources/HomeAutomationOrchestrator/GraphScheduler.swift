@@ -215,6 +215,7 @@ public struct GraphScheduler: Sendable {
                                 policy: policy,
                                 circuitBreakers: circuitBreakers,
                                 runID: runID,
+                                schedulerOptions: options,
                                 metrics: metrics
                             )
                         }
@@ -301,6 +302,21 @@ public struct GraphScheduler: Sendable {
                 )
                 if firstExit == nil, let exit = outcome.exit {
                     firstExit = exit
+                    if !runningNodeIDs.isEmpty || dependencies.hasPendingNodes {
+                        group.cancelAll()
+                        await markPendingSkipped(
+                            runningNodeIDs.union(dependencies.pendingNodeIDs),
+                            nodesByID: dependencies.nodesByID,
+                            agentSelector: agentSelector,
+                            registry: registry,
+                            graph: graph,
+                            eventBus: eventBus,
+                            runID: runID,
+                            metrics: metrics,
+                            reason: "Terminal graph exit"
+                        )
+                        return firstExit
+                    }
                 }
             }
 

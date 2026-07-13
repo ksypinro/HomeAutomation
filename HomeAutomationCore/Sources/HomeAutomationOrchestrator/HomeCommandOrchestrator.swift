@@ -902,7 +902,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             eventBus: eventBus,
             policy: policy,
             circuitBreakers: circuitBreakers,
-            runID: runID
+            runID: runID,
+            options: GraphSchedulerExecutionOptions(criticalPath: plan.criticalPath)
         )
         let graphRun = Self.annotatedGraphRun(schedulerResult.metrics, plan: plan)
         let finalContext = await contextStore.snapshot()
@@ -956,7 +957,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             eventBus: eventBus,
             policy: policy,
             circuitBreakers: circuitBreakers,
-            runID: runID
+            runID: runID,
+            options: GraphSchedulerExecutionOptions(criticalPath: plan.criticalPath)
         )
         let context = await contextStore.snapshot()
         let graphRun = Self.automationFanOutGraphRun(
@@ -1011,7 +1013,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             eventBus: eventBus,
             policy: policy,
             circuitBreakers: circuitBreakers,
-            runID: runID
+            runID: runID,
+            options: GraphSchedulerExecutionOptions(criticalPath: plan.criticalPath)
         )
         let finalContext = await contextStore.snapshot()
         let resolution = finalContext.resolution ?? Self.resolution(from: schedulerResult.exit)
@@ -1084,7 +1087,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             eventBus: eventBus,
             policy: policy,
             circuitBreakers: circuitBreakers,
-            runID: runID
+            runID: runID,
+            options: GraphSchedulerExecutionOptions(criticalPath: plan.criticalPath)
         )
         let context = await contextStore.snapshot()
         let graphRun = Self.annotatedGraphRun(result.metrics, plan: plan)
@@ -1103,7 +1107,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 eventBus: eventBus,
                 policy: policy,
                 circuitBreakers: circuitBreakers,
-                runID: runID
+                runID: runID,
+                options: GraphSchedulerExecutionOptions(
+                    criticalPath: CriticalPathAnalyzer().analyze(finalizationGraph)
+                )
             )
             return DirectCommandExecutionResult(
                 exit: finalizationResult.exit,

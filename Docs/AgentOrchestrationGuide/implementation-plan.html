@@ -306,7 +306,7 @@ public protocol PortfolioArmExecuting: Sendable {
           </article>
 
           <article class="plan-phase" id="phase-7">
-            <div class="phase-heading"><div class="phase-index">07</div><div><h3>Implement the frontier Foundation Model scheduler</h3><p>Replace inert two-lane defaults with a run-aware, cancellation-correct scored frontier.</p></div><div class="phase-meta"><span class="status-chip">effort XL</span><span class="status-chip">hardware benchmark required</span></div></div>
+            <div class="phase-heading"><div class="phase-index">07</div><div><h3>Implement the frontier Foundation Model scheduler</h3><p>Implemented lease-based legacy admission plus shadow/active frontier scheduling with run-aware metadata and cancellation-correct graph behavior.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">simulated benchmark added</span><span class="status-chip">real hardware benchmark recommended</span></div></div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Replace priority-only admission.</strong> <code>FMAdmissionRequest</code> carries run/call/node IDs, enqueue time, estimated service, downstream critical path, deadline class, prefix key, batch key, cancellation value, and stable sequence number.</li>
@@ -326,8 +326,9 @@ public protocol PortfolioArmExecuting: Sendable {
   - cancellationRiskPenalty
 
 tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
-              <p><b>New files:</b> <code>Telemetry/FoundationModelFrontierScheduler.swift</code>, <code>Telemetry/FMServiceTimeEstimator.swift</code>, <code>Telemetry/FMAdmissionContext.swift</code>.</p>
-              <p><b>Modified:</b> <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelGate.swift">FoundationModelGate.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelCallRecorder.swift">FoundationModelCallRecorder.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphScheduler.swift">GraphScheduler.swift</a>, node execution telemetry.</p>
+              <p><b>New files:</b> <code>Telemetry/FoundationModelFrontierScheduler.swift</code>, <code>Telemetry/FMServiceTimeEstimator.swift</code>, <code>Telemetry/FMAdmissionContext.swift</code>, <code>Benchmarks/FoundationModelGateCapacityBenchmark.swift</code>.</p>
+              <p><b>Modified:</b> <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelGate.swift">FoundationModelGate.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelCallRecorder.swift">FoundationModelCallRecorder.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphScheduler.swift">GraphScheduler.swift</a>, node execution telemetry, package benchmark target, and type inventory.</p>
+              <p><b>Verification status:</b> focused Phase 7 gate/lease/frontier/estimator tests pass; runtime wiring preserves admission TaskLocal through detached execution; the benchmark executable compares configured capacity 1/2 with simulated service work. Release rollout should repeat the benchmark with real on-device Foundation Model calls for TTFT, accuracy, and safety metrics.</p>
             </div><aside class="phase-aside"><h4>Deterministic scheduler tests</h4><ul><li>Injected clock and estimator.</li><li>Critical short job outranks long non-critical job.</li><li>Aging eventually serves long job.</li><li>Cancelled waiter never runs.</li><li>Every lease releases once.</li><li>Terminal exit cancels eligible siblings.</li><li>Finalizer jobs cannot be starved.</li><li>Capacity 1/2 traces stay within bound.</li></ul></aside></div>
           </article>
 

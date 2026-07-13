@@ -68,15 +68,18 @@ public struct DetachedAgentExecutor: Sendable {
         operation: @Sendable @escaping () async -> AgentRunResult
     ) async -> AgentRunResult {
         let ledger = FoundationModelUsageLedgerScope.current
+        let admissionContext = FMAdmissionContextScope.current
         let invocationActor = AgentInvocationActor(
             invocationID: telemetryContext.agentInvocationID ?? UUID().uuidString
         )
         let task = Task.detached(priority: priority) {
             await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
-                await invocationActor.runOperation(
-                    operation,
-                    telemetryContext: telemetryContext
-                )
+                await FMAdmissionContextScope.$current.withValue(admissionContext) {
+                    await invocationActor.runOperation(
+                        operation,
+                        telemetryContext: telemetryContext
+                    )
+                }
             }
         }
 
@@ -93,15 +96,18 @@ public struct DetachedAgentExecutor: Sendable {
         operation: @Sendable @escaping () async -> Value
     ) async -> Value {
         let ledger = FoundationModelUsageLedgerScope.current
+        let admissionContext = FMAdmissionContextScope.current
         let invocationActor = AgentInvocationActor(
             invocationID: telemetryContext.agentInvocationID ?? UUID().uuidString
         )
         let task = Task.detached(priority: priority) {
             await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
-                await invocationActor.runValue(
-                    operation,
-                    telemetryContext: telemetryContext
-                )
+                await FMAdmissionContextScope.$current.withValue(admissionContext) {
+                    await invocationActor.runValue(
+                        operation,
+                        telemetryContext: telemetryContext
+                    )
+                }
             }
         }
 

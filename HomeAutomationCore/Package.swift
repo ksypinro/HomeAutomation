@@ -32,6 +32,10 @@ let package = Package(
         .executable(
             name: "home-automation-eval",
             targets: ["HomeAutomationEvalCLI"]
+        ),
+        .executable(
+            name: "FoundationModelGateCapacityBenchmark",
+            targets: ["FoundationModelGateCapacityBenchmark"]
         )
     ],
     targets: [
@@ -79,6 +83,11 @@ let package = Package(
                 "HomeAutomationOrchestrator",
                 "HomeAutomationEvaluation"
             ]
+        ),
+        .executableTarget(
+            name: "FoundationModelGateCapacityBenchmark",
+            dependencies: ["HomeAutomationCore"],
+            path: "Benchmarks"
         ),
         .testTarget(
             name: "HomeAutomationRAGTests",

@@ -70,6 +70,34 @@ struct RuntimeDependencyWiringTests {
         #expect(inheritedRunID == "detached-run")
     }
 
+    @Test("detached executor preserves Foundation Model admission context")
+    func detachedExecutorPreservesAdmissionContextScope() async {
+        let executor = DetachedAgentExecutor()
+        let telemetry = HomeAutomationTelemetryContext(runID: "detached-run")
+        let context = FMAdmissionContext(
+            schedulerMode: .shadow,
+            runID: "detached-run",
+            graphID: "graph",
+            nodeID: "node",
+            agentID: "agent",
+            jobKind: .automationResolution,
+            criticalPathRemainingMs: 250,
+            estimatedServiceMs: 50,
+            deadlineClass: .pipeline,
+            cancellationClass: .normal,
+            prefixAffinityKey: "agent",
+            workflowScopeID: "graph"
+        )
+
+        let inherited = await FMAdmissionContextScope.$current.withValue(context) {
+            await executor.runDetachedValue(telemetryContext: telemetry) {
+                FMAdmissionContextScope.current
+            }
+        }
+
+        #expect(inherited == context)
+    }
+
     @Test("withMiniPipeline(true) produces a mini-pipeline-backed action resolver")
     func withMiniPipelineEnablesTier1Resolver() {
         let coordinator = makeCoordinator()
