@@ -168,7 +168,23 @@ public enum DraftVerdictSchema {
 
 public extension DraftVerdict {
 
-    func constrained(allowedFieldIDs: Set<String>, maxDisputes: Int = 6) -> DraftVerdict {
+    func constrained(
+        allowedFieldIDs: Set<String>,
+        maxDisputes: Int = 6,
+        clearsAcceptedDisputes: Bool = true
+    ) -> DraftVerdict {
+        if clearsAcceptedDisputes,
+           accepted,
+           !needsClarification,
+           !riskUnderstated {
+            return DraftVerdict(
+                accepted: true,
+                disputes: [],
+                needsClarification: false,
+                riskUnderstated: false
+            )
+        }
+
         var seen = Set<String>()
         var filtered = disputes
             .filter { allowedFieldIDs.contains($0.fieldID) }

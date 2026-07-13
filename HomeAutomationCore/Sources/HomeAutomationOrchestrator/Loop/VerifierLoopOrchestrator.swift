@@ -106,7 +106,12 @@ public struct VerifierLoopOrchestrator: Sendable {
 
             let verdict: DraftVerdict
             do {
-                verdict = try await verifier.verify(envelope: currentEnvelope, prompt: prompt, session: verifierSession)
+                verdict = try await verifier.verify(
+                    envelope: currentEnvelope,
+                    prompt: prompt,
+                    session: verifierSession,
+                    clearsAcceptedDisputes: false
+                )
                 verifierCallCount += 1
             } catch is VerifierUnavailable {
                 logger.info("Verifier unavailable, escalating with deterministic envelope.")
