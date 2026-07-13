@@ -530,6 +530,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
     public let orchestrationMode: OrchestrationMode
     public let loopOrchestrator: VerifierLoopOrchestrator?
+    public let foundationModelArm: FoundationModelCallArm
 
     public init(
         agentRegistry: AgentRegistry,
@@ -542,7 +543,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         deviceRegistry: any DeviceRegistryProtocol,
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
         orchestrationMode: OrchestrationMode = .graph,
-        loopOrchestrator: VerifierLoopOrchestrator? = nil
+        loopOrchestrator: VerifierLoopOrchestrator? = nil,
+        foundationModelArm: FoundationModelCallArm = .graph
     ) {
         self.agentRegistry = agentRegistry
         self.graphPlanner = graphPlanner
@@ -555,6 +557,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.smartThingsRuleCreator = smartThingsRuleCreator
         self.orchestrationMode = orchestrationMode
         self.loopOrchestrator = loopOrchestrator
+        self.foundationModelArm = foundationModelArm
     }
 }
 
@@ -699,7 +702,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
             orchestrationMode: orchestrationMode,
             loopOrchestrator: orchestrationMode == .verifierLoop
                 ? makeVerifierLoopOrchestrator()
-                : nil
+                : nil,
+            foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm
         )
     }
 

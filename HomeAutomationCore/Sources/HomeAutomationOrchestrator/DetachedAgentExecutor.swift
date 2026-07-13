@@ -67,14 +67,17 @@ public struct DetachedAgentExecutor: Sendable {
         priority: TaskPriority = .userInitiated,
         operation: @Sendable @escaping () async -> AgentRunResult
     ) async -> AgentRunResult {
+        let ledger = FoundationModelUsageLedgerScope.current
         let invocationActor = AgentInvocationActor(
             invocationID: telemetryContext.agentInvocationID ?? UUID().uuidString
         )
         let task = Task.detached(priority: priority) {
-            await invocationActor.runOperation(
-                operation,
-                telemetryContext: telemetryContext
-            )
+            await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
+                await invocationActor.runOperation(
+                    operation,
+                    telemetryContext: telemetryContext
+                )
+            }
         }
 
         return await withTaskCancellationHandler {
@@ -89,14 +92,17 @@ public struct DetachedAgentExecutor: Sendable {
         priority: TaskPriority = .userInitiated,
         operation: @Sendable @escaping () async -> Value
     ) async -> Value {
+        let ledger = FoundationModelUsageLedgerScope.current
         let invocationActor = AgentInvocationActor(
             invocationID: telemetryContext.agentInvocationID ?? UUID().uuidString
         )
         let task = Task.detached(priority: priority) {
-            await invocationActor.runValue(
-                operation,
-                telemetryContext: telemetryContext
-            )
+            await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
+                await invocationActor.runValue(
+                    operation,
+                    telemetryContext: telemetryContext
+                )
+            }
         }
 
         return await withTaskCancellationHandler {

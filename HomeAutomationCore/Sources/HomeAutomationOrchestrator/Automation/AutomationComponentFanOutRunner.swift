@@ -554,8 +554,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
                 componentKind: kind,
                 componentID: componentID,
                 actionID: actionID,
-                conditionID: conditionID,
-                runtimeMode: "graph"
+                conditionID: conditionID
             )
     }
 

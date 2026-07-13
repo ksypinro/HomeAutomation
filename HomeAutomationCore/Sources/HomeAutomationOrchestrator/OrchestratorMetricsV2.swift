@@ -14,6 +14,15 @@ public struct AgentAttemptMetrics: Sendable, Codable, Equatable, Hashable {
 public struct ModelCallMetrics: Sendable, Codable, Equatable, Hashable {
     public let modelCallCount: Int
     public let skippedModelCallCount: Int
+    public let completedModelCallCount: Int
+    public let failedModelCallCount: Int
+    public let cancelledModelCallCount: Int
+    public let cancelledBeforeInferenceCount: Int
+    public let queueWaitTotalMs: Double
+    public let serviceTotalMs: Double
+    public let promptCharacterCount: Int
+    public let outputCharacterCount: Int
+    public let telemetryOverheadMs: Double
     public let contextWindowFailuresByAgent: [String: Int]
 }
 
@@ -104,6 +113,15 @@ public struct RunMetricsV2: Sendable, Codable, Equatable, Hashable {
             modelCalls: ModelCallMetrics(
                 modelCallCount: metrics.foundationModelUsage.modelCallCount,
                 skippedModelCallCount: metrics.foundationModelUsage.skippedModelCallCount,
+                completedModelCallCount: metrics.foundationModelUsage.completedModelCallCount,
+                failedModelCallCount: metrics.foundationModelUsage.failedModelCallCount,
+                cancelledModelCallCount: metrics.foundationModelUsage.cancelledModelCallCount,
+                cancelledBeforeInferenceCount: metrics.foundationModelUsage.cancelledBeforeInferenceCount,
+                queueWaitTotalMs: metrics.foundationModelUsage.queueWaitTotalMs,
+                serviceTotalMs: metrics.foundationModelUsage.serviceTotalMs,
+                promptCharacterCount: metrics.foundationModelUsage.promptCharacterCount,
+                outputCharacterCount: metrics.foundationModelUsage.outputCharacterCount,
+                telemetryOverheadMs: metrics.foundationModelUsage.telemetryOverheadMs,
                 contextWindowFailuresByAgent: metrics.foundationModelUsage.contextWindowFailures == 0 ? [:] : ["unknown": metrics.foundationModelUsage.contextWindowFailures]
             ),
             toolCalls: ToolCallMetrics(

@@ -81,6 +81,10 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
     public let conditionID: String?
     public let attempt: Int?
     public let runtimeMode: String?
+    public let foundationModelArm: FoundationModelCallArm?
+    public let foundationModelJobID: String?
+    public let foundationModelJobKind: FoundationModelJobKind?
+    public let foundationModelEscalationChain: [FoundationModelEscalationStep]
 
     public init(
         traceID: String? = nil,
@@ -104,7 +108,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
         actionID: String? = nil,
         conditionID: String? = nil,
         attempt: Int? = nil,
-        runtimeMode: String? = nil
+        runtimeMode: String? = nil,
+        foundationModelArm: FoundationModelCallArm? = nil,
+        foundationModelJobID: String? = nil,
+        foundationModelJobKind: FoundationModelJobKind? = nil,
+        foundationModelEscalationChain: [FoundationModelEscalationStep] = []
     ) {
         self.traceID = traceID
         self.spanID = spanID
@@ -128,6 +136,10 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
         self.conditionID = conditionID
         self.attempt = attempt
         self.runtimeMode = runtimeMode
+        self.foundationModelArm = foundationModelArm
+        self.foundationModelJobID = foundationModelJobID
+        self.foundationModelJobKind = foundationModelJobKind
+        self.foundationModelEscalationChain = foundationModelEscalationChain
     }
 
     public func merging(
@@ -152,7 +164,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
         actionID: String? = nil,
         conditionID: String? = nil,
         attempt: Int? = nil,
-        runtimeMode: String? = nil
+        runtimeMode: String? = nil,
+        foundationModelArm: FoundationModelCallArm? = nil,
+        foundationModelJobID: String? = nil,
+        foundationModelJobKind: FoundationModelJobKind? = nil,
+        foundationModelEscalationChain: [FoundationModelEscalationStep]? = nil
     ) -> HomeAutomationTelemetryContext {
         HomeAutomationTelemetryContext(
             traceID: traceID ?? self.traceID,
@@ -176,7 +192,11 @@ public struct HomeAutomationTelemetryContext: Sendable, Codable, Hashable {
             actionID: actionID ?? self.actionID,
             conditionID: conditionID ?? self.conditionID,
             attempt: attempt ?? self.attempt,
-            runtimeMode: runtimeMode ?? self.runtimeMode
+            runtimeMode: runtimeMode ?? self.runtimeMode,
+            foundationModelArm: foundationModelArm ?? self.foundationModelArm,
+            foundationModelJobID: foundationModelJobID ?? self.foundationModelJobID,
+            foundationModelJobKind: foundationModelJobKind ?? self.foundationModelJobKind,
+            foundationModelEscalationChain: foundationModelEscalationChain ?? self.foundationModelEscalationChain
         )
     }
 }

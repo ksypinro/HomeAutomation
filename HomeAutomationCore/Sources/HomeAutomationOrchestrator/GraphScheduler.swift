@@ -31,7 +31,7 @@ public struct GraphScheduler: Sendable {
                 operation: graph.goal.rawValue,
                 graphID: graph.id,
                 stage: graph.id,
-                runtimeMode: "graph"
+                runtimeMode: inheritedTelemetry?.runtimeMode
             )
         await HomeAutomationTelemetry.shared.log(
             "graph.started",
@@ -175,8 +175,7 @@ public struct GraphScheduler: Sendable {
                                         operation: graph.goal.rawValue,
                                         graphID: graph.id,
                                         stage: node.id,
-                                        graphNodeID: node.id,
-                                        runtimeMode: "graph"
+                                        graphNodeID: node.id
                                     ),
                                     status: "paused",
                                     payload: [

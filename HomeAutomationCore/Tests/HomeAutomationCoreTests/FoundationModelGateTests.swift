@@ -46,6 +46,23 @@ struct FoundationModelGateTests {
         #expect(await gate.admittedCount == 0)
     }
 
+    @Test("Injected monotonic clock reports exact queue milliseconds")
+    func injectedClockReportsExactQueueMilliseconds() async {
+        let clock = GateManualClock(initialNanoseconds: 1_000_000_000)
+        let gate = FoundationModelGate(maxConcurrent: 1, clock: clock)
+        _ = await gate.admitRequest()
+
+        let waiter = Task { await gate.admitRequest() }
+        while await gate.queuedCount == 0 { await Task.yield() }
+        clock.advance(milliseconds: 9)
+        await gate.release()
+
+        let result = await waiter.value
+        #expect(result == .admitted(queueWaitMs: 9))
+        await gate.release()
+        #expect(await gate.admittedCount == 0)
+    }
+
     @Test("Releases resume waiters in FIFO order")
     func releasesResumeWaitersInOrder() async {
         let gate = FoundationModelGate(maxConcurrent: 1)
@@ -75,22 +92,22 @@ struct FoundationModelGateTests {
         #expect(await order.entries == ["first", "second"])
     }
 
-    @Test("A cancelled waiter does not block subsequent admissions")
+    @Test("A cancelled waiter does not acquire a permit or block subsequent admissions")
     func cancelledWaiterDoesNotBlock() async {
         let gate = FoundationModelGate(maxConcurrent: 1)
         _ = await gate.admit()
 
         let waiter = Task {
-            await gate.admit()
+            await gate.admitRequest()
         }
         while await gate.queuedCount == 0 {
             await Task.yield()
         }
 
         waiter.cancel()
-        _ = await waiter.value
-        // The cancelled waiter is admitted for release-pairing; release both.
-        await gate.release()
+        let result = await waiter.value
+        #expect(!result.wasAdmitted)
+        #expect(await gate.admittedCount == 1)
         await gate.release()
 
         let wait = await gate.admit()
@@ -105,5 +122,24 @@ private actor OrderRecorder {
 
     func record(_ entry: String) {
         entries.append(entry)
+    }
+}
+
+private final class GateManualClock: FoundationModelMonotonicClock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var nanoseconds: UInt64
+
+    init(initialNanoseconds: UInt64) {
+        nanoseconds = initialNanoseconds
+    }
+
+    func nowNanoseconds() -> UInt64 {
+        lock.withLock { nanoseconds }
+    }
+
+    func advance(milliseconds: UInt64) {
+        lock.withLock {
+            nanoseconds += milliseconds * 1_000_000
+        }
     }
 }

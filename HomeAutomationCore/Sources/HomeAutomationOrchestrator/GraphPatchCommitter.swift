@@ -23,8 +23,7 @@ extension GraphScheduler {
                 graphID: graph.id,
                 stage: stage,
                 graphNodeID: stage,
-                agentID: patch.agentID.rawValue,
-                runtimeMode: "graph"
+                agentID: patch.agentID.rawValue
             ),
             status: "completed",
             durationMs: duration * 1_000,

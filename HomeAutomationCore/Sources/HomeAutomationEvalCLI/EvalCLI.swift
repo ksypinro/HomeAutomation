@@ -79,9 +79,20 @@ struct HomeAutomationEvalCLI {
     private static func runCompareOrchestration(options: EvaluationCLIOptions) async throws {
         let runner = OrchestrationComparisonRunner(
             caseLimit: options.caseLimit,
-            requireLiveModel: options.requireLiveModel
+            requireLiveModel: options.requireLiveModel,
+            seed: options.seed,
+            repetitions: options.repetitions,
+            warmups: options.warmups,
+            gateConcurrency: options.gateConcurrency,
+            prewarmMode: options.prewarmMode
         )
-        let report = await runner.run()
+        let cases: [EvaluationCase]
+        if let dataset = try options.loadDatasetIfRequested() {
+            cases = Self.comparisonCases(from: dataset)
+        } else {
+            cases = EvaluationCorpus.defaultCases
+        }
+        let report = await runner.run(cases: cases)
         try OrchestrationComparisonRunner.writeReport(report, to: options.outputURL)
 
         print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s) [\(options.requireLiveModel ? "live model" : "deterministic")]")
@@ -115,6 +126,32 @@ struct HomeAutomationEvalCLI {
         print("Report: \(options.outputURL.appendingPathComponent("verifier-shadow-report.json").path)")
     }
 
+    private static func comparisonCases(from dataset: GeneratedEvaluationDataset) -> [EvaluationCase] {
+        let fixturesByID = Dictionary(uniqueKeysWithValues: dataset.fixtures.map { ($0.id, $0) })
+        return dataset.cases.map { generated in
+            let fixture = fixturesByID[generated.fixtureID]
+            return EvaluationCase(
+                id: generated.id,
+                suite: generated.suite,
+                tags: generated.tags,
+                input: generated.input,
+                fixture: EvaluationFixture(devices: fixture?.devices ?? []),
+                expected: EvaluationExpectedOutput(
+                    operation: generated.expected.operation,
+                    domain: generated.expected.domain,
+                    languageCode: generated.expected.languageCode,
+                    expectedDeviceIDs: generated.expected.expectedDeviceIDs,
+                    capability: generated.expected.capability,
+                    command: generated.expected.command,
+                    actionCount: generated.expected.actionCount,
+                    conditionCount: generated.expected.conditionCount,
+                    smartThingsJSONContains: generated.expected.smartThingsJSONContains,
+                    allowedOutcome: generated.expected.allowedOutcome
+                )
+            )
+        }
+    }
+
     private static func makeParaphraseProvider(
         for mode: EvaluationCommandGenerationMode
     ) -> any CommandParaphraseProvider {
@@ -144,6 +181,11 @@ private struct EvaluationCLIOptions {
     let generationMode: EvaluationCommandGenerationMode
     let shadowVerify: Bool
     let compareOrchestration: Bool
+    let seed: UInt64
+    let repetitions: Int
+    let warmups: Int
+    let gateConcurrency: Int
+    let prewarmMode: String
 
     static func parse(_ arguments: ArraySlice<String>) throws -> EvaluationCLIOptions {
         var mode: EvaluationMode = .deterministic
@@ -160,6 +202,11 @@ private struct EvaluationCLIOptions {
         var generationMode: EvaluationCommandGenerationMode = .codex
         var shadowVerify = false
         var compareOrchestration = false
+        var seed: UInt64 = 0
+        var repetitions = 1
+        var warmups = 0
+        var gateConcurrency = 2
+        var prewarmMode = "default"
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -228,6 +275,31 @@ private struct EvaluationCLIOptions {
                 shadowVerify = true
             case "--compare-orchestration":
                 compareOrchestration = true
+            case "--seed":
+                guard let value = iterator.next(), let parsed = UInt64(value) else {
+                    throw EvaluationCLIError.invalidArgument("--seed")
+                }
+                seed = parsed
+            case "--repetitions":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    throw EvaluationCLIError.invalidArgument("--repetitions")
+                }
+                repetitions = parsed
+            case "--warmups":
+                guard let value = iterator.next(), let parsed = Int(value), parsed >= 0 else {
+                    throw EvaluationCLIError.invalidArgument("--warmups")
+                }
+                warmups = parsed
+            case "--gate-concurrency":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    throw EvaluationCLIError.invalidArgument("--gate-concurrency")
+                }
+                gateConcurrency = parsed
+            case "--prewarm-mode":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--prewarm-mode")
+                }
+                prewarmMode = value
             case "--help", "-h":
                 print(Self.help)
                 Foundation.exit(0)
@@ -250,7 +322,12 @@ private struct EvaluationCLIOptions {
             generateDataset: generateDataset,
             generationMode: generationMode,
             shadowVerify: shadowVerify,
-            compareOrchestration: compareOrchestration
+            compareOrchestration: compareOrchestration,
+            seed: seed,
+            repetitions: repetitions,
+            warmups: warmups,
+            gateConcurrency: gateConcurrency,
+            prewarmMode: prewarmMode
         )
     }
 
@@ -291,7 +368,7 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --generate-dataset true --generation-mode template --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-template
       swift run home-automation-eval --generate-dataset true --generation-mode foundation-model --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-live
       swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
-      swift run home-automation-eval --compare-orchestration --output .build/evaluation-comparison --case-limit 50
+      swift run home-automation-eval --compare-orchestration --dataset seed-v1 --seed 20260713 --warmups 1 --repetitions 3 --output .build/evaluation-comparison --case-limit 50
       HOME_AUTOMATION_EVAL_LIVE=1 swift run home-automation-eval --compare-orchestration --require-live-model true --output .build/evaluation-comparison-live
     """
 }

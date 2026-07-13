@@ -30,6 +30,33 @@ struct RuntimeDependencyWiringTests {
         #expect(deps.loopOrchestrator == nil)
     }
 
+    @Test("runtime dependencies expose bounded Foundation Model arm")
+    func runtimeDependenciesExposeFoundationModelArm() {
+        let coordinator = makeCoordinator()
+        let graph = coordinator.makeRuntimeDependencies(orchestrationMode: .graph)
+        let tier1 = coordinator.makeRuntimeDependencies(orchestrationMode: .graph, useMiniPipeline: true)
+        let loop = coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+
+        #expect(graph.foundationModelArm == .graph)
+        #expect(tier1.foundationModelArm == .graphWithTier1)
+        #expect(loop.foundationModelArm == .verifierLoop)
+    }
+
+    @Test("detached executor preserves Foundation Model usage ledger scope")
+    func detachedExecutorPreservesUsageLedgerScope() async {
+        let ledger = FoundationModelUsageLedger(runID: "detached-run")
+        let executor = DetachedAgentExecutor()
+        let context = HomeAutomationTelemetryContext(runID: "detached-run")
+
+        let inheritedRunID = await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
+            await executor.runDetachedValue(telemetryContext: context) {
+                FoundationModelUsageLedgerScope.current?.runID
+            }
+        }
+
+        #expect(inheritedRunID == "detached-run")
+    }
+
     @Test("withMiniPipeline(true) produces a mini-pipeline-backed action resolver")
     func withMiniPipelineEnablesTier1Resolver() {
         let coordinator = makeCoordinator()

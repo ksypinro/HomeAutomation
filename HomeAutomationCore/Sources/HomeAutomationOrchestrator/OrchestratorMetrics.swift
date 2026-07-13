@@ -206,6 +206,15 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
     public var modelAvailabilityStatus: String
     public var modelCallCount: Int
     public var skippedModelCallCount: Int
+    public var completedModelCallCount: Int
+    public var failedModelCallCount: Int
+    public var cancelledModelCallCount: Int
+    public var cancelledBeforeInferenceCount: Int
+    public var queueWaitTotalMs: Double
+    public var serviceTotalMs: Double
+    public var promptCharacterCount: Int
+    public var outputCharacterCount: Int
+    public var telemetryOverheadMs: Double
     public var contextWindowFailures: Int
     public var guardrailFailures: Int
     public var selectedDraftAttempt: String?
@@ -220,6 +229,15 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
         modelAvailabilityStatus: String = "unknown",
         modelCallCount: Int = 0,
         skippedModelCallCount: Int = 0,
+        completedModelCallCount: Int = 0,
+        failedModelCallCount: Int = 0,
+        cancelledModelCallCount: Int = 0,
+        cancelledBeforeInferenceCount: Int = 0,
+        queueWaitTotalMs: Double = 0,
+        serviceTotalMs: Double = 0,
+        promptCharacterCount: Int = 0,
+        outputCharacterCount: Int = 0,
+        telemetryOverheadMs: Double = 0,
         contextWindowFailures: Int = 0,
         guardrailFailures: Int = 0,
         selectedDraftAttempt: String? = nil,
@@ -233,6 +251,15 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
         self.modelAvailabilityStatus = modelAvailabilityStatus
         self.modelCallCount = modelCallCount
         self.skippedModelCallCount = skippedModelCallCount
+        self.completedModelCallCount = completedModelCallCount
+        self.failedModelCallCount = failedModelCallCount
+        self.cancelledModelCallCount = cancelledModelCallCount
+        self.cancelledBeforeInferenceCount = cancelledBeforeInferenceCount
+        self.queueWaitTotalMs = queueWaitTotalMs
+        self.serviceTotalMs = serviceTotalMs
+        self.promptCharacterCount = promptCharacterCount
+        self.outputCharacterCount = outputCharacterCount
+        self.telemetryOverheadMs = telemetryOverheadMs
         self.contextWindowFailures = contextWindowFailures
         self.guardrailFailures = guardrailFailures
         self.selectedDraftAttempt = selectedDraftAttempt
@@ -264,6 +291,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var candidateMetrics: OrchestratorCandidateMetrics
     public var automationMetrics: OrchestratorAutomationMetrics
     public var foundationModelUsage: FoundationModelUsageMetrics
+    public var foundationModelUsageSnapshot: FoundationModelUsageSnapshot?
     public var retrievalQuality: RetrievalQualityMetrics
     public var metricsV2: RunMetricsV2?
     public var loop: LoopRunMetrics?
@@ -284,6 +312,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.candidateMetrics = OrchestratorCandidateMetrics()
         self.automationMetrics = OrchestratorAutomationMetrics()
         self.foundationModelUsage = FoundationModelUsageMetrics()
+        self.foundationModelUsageSnapshot = nil
         self.retrievalQuality = RetrievalQualityMetrics()
         self.metricsV2 = nil
         self.loop = nil
@@ -346,7 +375,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
             } ?? false
         )
         retrievalQuality = Self.retrievalQualityMetrics(context: context, agentStatuses: agentStatuses)
-        captureFoundationModelFields(context: context)
+        captureFoundationModelEligibilityFields(context: context)
         metricsV2 = RunMetricsV2.derive(from: self)
     }
 
@@ -393,6 +422,26 @@ public struct OrchestratorMetrics: Sendable, Codable {
             graphRun: self.graphRun,
             resolution: result.resolution
         )
+        metricsV2 = RunMetricsV2.derive(from: self)
+    }
+
+    public mutating func captureFoundationModelUsage(snapshot: FoundationModelUsageSnapshot) {
+        foundationModelUsageSnapshot = snapshot
+        foundationModelUsage.modelCallCount = snapshot.summary.actualCallCount
+        foundationModelUsage.completedModelCallCount = snapshot.summary.completedCallCount
+        foundationModelUsage.failedModelCallCount = snapshot.summary.failedCallCount
+        foundationModelUsage.cancelledModelCallCount = snapshot.summary.cancelledCallCount
+        foundationModelUsage.cancelledBeforeInferenceCount = snapshot.summary.cancelledBeforeInferenceCount
+        foundationModelUsage.queueWaitTotalMs = snapshot.summary.queueWaitTotalMs
+        foundationModelUsage.serviceTotalMs = snapshot.summary.serviceTotalMs
+        foundationModelUsage.promptCharacterCount = snapshot.summary.promptCharacterCount
+        foundationModelUsage.outputCharacterCount = snapshot.summary.outputCharacterCount
+        foundationModelUsage.telemetryOverheadMs = snapshot.summary.telemetryOverheadMs
+        foundationModelUsage.selectedToolNames = Array(Set(snapshot.entries.flatMap(\.request.selectedToolNames))).sorted()
+        foundationModelUsage.toolCount = foundationModelUsage.selectedToolNames.count
+        let failures = snapshot.entries.compactMap(\.failureKind)
+        foundationModelUsage.contextWindowFailures = failures.filter { $0 == .contextWindowExceeded }.count
+        foundationModelUsage.guardrailFailures = failures.filter { $0 == .guardrailRefusal }.count
         metricsV2 = RunMetricsV2.derive(from: self)
     }
 
@@ -526,7 +575,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         )
     }
 
-    private mutating func captureFoundationModelFields(context: ResolutionContext) {
+    private mutating func captureFoundationModelEligibilityFields(context: ResolutionContext) {
         let modelStages: [AgentID] = [
             .operationDetection,
             .semanticNLU,
@@ -539,7 +588,6 @@ public struct OrchestratorMetrics: Sendable, Codable {
             .draftRepair
         ]
         let statuses = Set(agentStatuses.keys)
-        let executedModelStages = modelStages.filter { statuses.contains($0.rawValue) }
         var stageUsage = foundationModelUsage.perStageModelUsage
         for stage in modelStages {
             if fallbackUsed {
@@ -554,12 +602,13 @@ public struct OrchestratorMetrics: Sendable, Codable {
         let selectedToolNames = budgetReport?.selectedToolNames ?? context.instructionPackage?.tools.map(\.name) ?? []
 
         foundationModelUsage.perStageModelUsage = stageUsage
-        foundationModelUsage.modelCallCount = fallbackUsed ? 0 : executedModelStages.count
         foundationModelUsage.skippedModelCallCount = fallbackUsed
             ? modelStages.count
             : Self.estimatedSkippedNLUCount(context: context)
-        foundationModelUsage.contextWindowFailures = errorKinds.filter { $0 == .contextWindowExceeded }.count
-        foundationModelUsage.guardrailFailures = errorKinds.filter { $0 == .guardrailRefusal }.count
+        if foundationModelUsageSnapshot == nil {
+            foundationModelUsage.contextWindowFailures = errorKinds.filter { $0 == .contextWindowExceeded }.count
+            foundationModelUsage.guardrailFailures = errorKinds.filter { $0 == .guardrailRefusal }.count
+        }
         foundationModelUsage.selectedToolNames = selectedToolNames
         foundationModelUsage.toolCount = selectedToolNames.count
         foundationModelUsage.estimatedToolOutputCharacterCount = budgetReport?.estimatedToolOutputCharacterCount ?? 0

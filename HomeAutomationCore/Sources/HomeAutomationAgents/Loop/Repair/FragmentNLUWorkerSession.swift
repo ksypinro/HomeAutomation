@@ -87,29 +87,41 @@ public struct FragmentNLUWorkerSession: Sendable {
                 agentID: .fragmentNLU,
                 timeoutNanoseconds: softTimeoutNanoseconds
             ) {
-                try await FoundationModelCallRecorder.record(
+                let nluResult = try await FoundationModelCallRecorder.record(
                     agentID: AgentID.fragmentNLU.rawValue,
                     policyMode: "repair",
                     modelAvailability: "available",
-                    promptCharacterCount: instructions.count + text.count
+                    promptCharacterCount: instructions.count + text.count,
+                    jobID: "fragmentNLU.semantic",
+                    jobKind: .semanticNLU
                 ) {
-                    let nluResult = try await session.respond(
+                    try await session.respond(
                         to: Prompt(text),
                         generating: HomeSemanticNLUResult.self
                     ).content
-                    let slotResult = try await session.respond(
-                        to: Prompt("Extract slots: \(text)"),
+                }
+                let slotPrompt = "Extract slots: \(text)"
+                let slotResult = try await FoundationModelCallRecorder.record(
+                    agentID: AgentID.fragmentNLU.rawValue,
+                    policyMode: "repair",
+                    modelAvailability: "available",
+                    promptCharacterCount: instructions.count + slotPrompt.count,
+                    jobID: "fragmentNLU.slots",
+                    jobKind: .slotExtraction
+                ) {
+                    try await session.respond(
+                        to: Prompt(slotPrompt),
                         generating: HomeSlotExtractionResult.self
                     ).content
-                    return FragmentNLUOutput(
-                        intentFamilies: nluResult.intent.topFamilies,
-                        deviceTypes: nluResult.deviceType.deviceTypes,
-                        rooms: slotResult.rooms,
-                        deviceNicknames: slotResult.deviceNicknames,
-                        values: slotResult.values,
-                        confidence: min(nluResult.intent.confidence, slotResult.confidence)
-                    )
                 }
+                return FragmentNLUOutput(
+                    intentFamilies: nluResult.intent.topFamilies,
+                    deviceTypes: nluResult.deviceType.deviceTypes,
+                    rooms: slotResult.rooms,
+                    deviceNicknames: slotResult.deviceNicknames,
+                    values: slotResult.values,
+                    confidence: min(nluResult.intent.confidence, slotResult.confidence)
+                )
             }
             logger.debug("[FoundationModelOutput] confidence: \(modelResult.confidence)")
             return modelResult

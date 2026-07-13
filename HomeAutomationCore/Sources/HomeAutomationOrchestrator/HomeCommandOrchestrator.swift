@@ -54,6 +54,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
     private let orchestrationMode: OrchestrationMode
     private let loopOrchestrator: VerifierLoopOrchestrator?
+    private let foundationModelArm: FoundationModelCallArm
 
     public init(
         dependencies: HomeAutomationRuntimeDependencies
@@ -69,6 +70,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.smartThingsRuleCreator = dependencies.smartThingsRuleCreator
         self.orchestrationMode = dependencies.orchestrationMode
         self.loopOrchestrator = dependencies.loopOrchestrator
+        self.foundationModelArm = dependencies.foundationModelArm
     }
 
     public convenience init(
@@ -289,13 +291,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 let runID = UUID()
                 let traceID = runID.uuidString
                 let runSpanID = TelemetryTraceContext.makeSpanID()
+                let usageLedger = FoundationModelUsageLedger(runID: runID.uuidString)
                 let runTelemetryContext = HomeAutomationTelemetryContext(
                     traceID: traceID,
                     spanID: runSpanID,
                     spanKind: .run,
                     runID: runID.uuidString,
                     stage: "input",
-                    runtimeMode: "graph"
+                    runtimeMode: foundationModelArm.rawValue,
+                    foundationModelArm: foundationModelArm
                 )
                 let eventForwarder = Task {
                     for await event in await eventBus.stream() {
@@ -325,14 +329,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
 
                 let rootRouting = await HomeAutomationTelemetryScope.$current.withValue(
-                    runTelemetryContext.merging(operation: OrchestrationGoal.rootRouting.rawValue)
-                ) {
-                    await executeRootRoutingPipeline(
-                        text: trimmedText,
-                        contextStore: contextStore,
-                        eventBus: eventBus,
-                        runID: runID
+                    runTelemetryContext.merging(
+                        operation: OrchestrationGoal.rootRouting.rawValue,
+                        foundationModelJobKind: .rootRouting
                     )
+                ) {
+                    await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                        await executeRootRoutingPipeline(
+                            text: trimmedText,
+                            contextStore: contextStore,
+                            eventBus: eventBus,
+                            runID: runID
+                        )
+                    }
                 }
                 let detectedOperation = rootRouting.detectedOperation
                 let operation = rootRouting.routedOperation
@@ -342,7 +351,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     spanKind: .run,
                     runID: runID.uuidString,
                     operation: operation.operation.rawValue,
-                    runtimeMode: "graph"
+                    runtimeMode: foundationModelArm.rawValue,
+                    foundationModelArm: foundationModelArm
                 )
                 let operationEvent = OrchestratorPipelineEvent(
                     runID: runID,
@@ -371,20 +381,24 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     ]
                 )
 
+                var graphEscalationChain: [FoundationModelEscalationStep] = []
                 if orchestrationMode == .verifierLoop, let loopOrchestrator {
                     let loopStarted = Date()
-                    let loopOutput = await loopOrchestrator.run(
-                        request: request,
-                        operationHint: operation,
-                        eventBus: eventBus,
-                        runID: runID
-                    )
+                    let loopOutput = await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                        await loopOrchestrator.run(
+                            request: request,
+                            operationHint: operation,
+                            eventBus: eventBus,
+                            runID: runID
+                        )
+                    }
                     metrics.loop = loopOutput.metrics
 
                     switch loopOutput.exit {
                     case .escalated(let envelope, let reason) where reason == .verifierUnavailable || reason == .iterationCap || reason == .noProgress || reason == .repairLatch:
                         if policy.shouldUseModels() {
                             logger.info("Loop escalated (\(reason.rawValue)), falling through to graph path.")
+                            graphEscalationChain = [.verifierLoop, .graph]
                             break
                         }
                         let finalizer = ResolutionFinalizer(
@@ -395,15 +409,21 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             deviceRegistry: deviceRegistry
                         )
                         let finalized = await HomeAutomationTelemetryScope.$current.withValue(
-                            pipelineTelemetryContext.merging(stage: "resolutionFinalizer")
-                        ) {
-                            await finalizer.finalize(
-                                envelope: envelope,
-                                request: request,
-                                operationHint: operation,
-                                eventBus: eventBus,
-                                runID: runID
+                            pipelineTelemetryContext.merging(
+                                stage: "resolutionFinalizer",
+                                foundationModelJobKind: .finalization,
+                                foundationModelEscalationChain: [.verifierLoop, .finalization]
                             )
+                        ) {
+                            await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                                await finalizer.finalize(
+                                    envelope: envelope,
+                                    request: request,
+                                    operationHint: operation,
+                                    eventBus: eventBus,
+                                    runID: runID
+                                )
+                            }
                         }
                         let result = finalized.result
                         metrics.finishedAt = Date()
@@ -423,6 +443,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             metrics.captureEvaluationFields(context: finalized.context, result: result)
                         }
                         metrics.safetyMetrics.finalizationReceipt = finalized.receipt
+                        metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
                         await metricsCollector.store(metrics)
                         await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
                         await eventBus.publish(OrchestratorPipelineEvent(
@@ -444,15 +465,21 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             deviceRegistry: deviceRegistry
                         )
                         let finalized = await HomeAutomationTelemetryScope.$current.withValue(
-                            pipelineTelemetryContext.merging(stage: "resolutionFinalizer")
-                        ) {
-                            await finalizer.finalize(
-                                envelope: envelope,
-                                request: request,
-                                operationHint: operation,
-                                eventBus: eventBus,
-                                runID: runID
+                            pipelineTelemetryContext.merging(
+                                stage: "resolutionFinalizer",
+                                foundationModelJobKind: .finalization,
+                                foundationModelEscalationChain: [.verifierLoop, .finalization]
                             )
+                        ) {
+                            await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                                await finalizer.finalize(
+                                    envelope: envelope,
+                                    request: request,
+                                    operationHint: operation,
+                                    eventBus: eventBus,
+                                    runID: runID
+                                )
+                            }
                         }
                         let result = finalized.result
                         metrics.finishedAt = Date()
@@ -472,6 +499,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             metrics.captureEvaluationFields(context: finalized.context, result: result)
                         }
                         metrics.safetyMetrics.finalizationReceipt = finalized.receipt
+                        metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
                         await metricsCollector.store(metrics)
                         await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
                         await eventBus.publish(OrchestratorPipelineEvent(
@@ -492,6 +520,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         metrics.finishedAt = Date()
                         metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
                         metrics.outcome = Self.outcomeName(for: result.resolution)
+                        metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
                         await metricsCollector.store(metrics)
                         await eventBus.publish(OrchestratorPipelineEvent(
                             runID: runID, stage: "outcome", status: .completed,
@@ -505,16 +534,22 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     }
                 }
 
+                let graphExecutionTelemetryContext = pipelineTelemetryContext.merging(
+                    foundationModelEscalationChain: graphEscalationChain
+                )
+
                 if operation.operation == .automationCreation {
                     let started = Date()
-                    let execution = await HomeAutomationTelemetryScope.$current.withValue(pipelineTelemetryContext) {
-                        await executeAutomationCreationPipeline(
-                            text: trimmedText,
-                            operation: operation,
-                            contextStore: contextStore,
-                            eventBus: eventBus,
-                            runID: runID
-                        )
+                    let execution = await HomeAutomationTelemetryScope.$current.withValue(graphExecutionTelemetryContext) {
+                        await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                            await executeAutomationCreationPipeline(
+                                text: trimmedText,
+                                operation: operation,
+                                contextStore: contextStore,
+                                eventBus: eventBus,
+                                runID: runID
+                            )
+                        }
                     }
                     let result = execution.result
                     metrics.finishedAt = Date()
@@ -528,6 +563,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         result: result,
                         graphRun: execution.graphRun
                     )
+                    metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
                     await metricsCollector.store(metrics)
 
                     let outcomeEvent = OrchestratorPipelineEvent(
@@ -555,14 +591,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 }
 
                 if operation.operation != .executeDeviceCommand {
-                    let execution = await HomeAutomationTelemetryScope.$current.withValue(pipelineTelemetryContext) {
-                        await executeUnsupportedPipeline(
-                            text: trimmedText,
-                            operation: operation,
-                            contextStore: contextStore,
-                            eventBus: eventBus,
-                            runID: runID
-                        )
+                    let execution = await HomeAutomationTelemetryScope.$current.withValue(graphExecutionTelemetryContext) {
+                        await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                            await executeUnsupportedPipeline(
+                                text: trimmedText,
+                                operation: operation,
+                                contextStore: contextStore,
+                                eventBus: eventBus,
+                                runID: runID
+                            )
+                        }
                     }
                     let result = execution.result
                     metrics.finishedAt = Date()
@@ -571,6 +609,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(metrics.startedAt)
                     metrics.graphRun = execution.graphRun
                     metrics.circuitStates = await circuitBreakers.allStatusStrings()
+                    metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
                     await metricsCollector.store(metrics)
 
                     let outcomeEvent = OrchestratorPipelineEvent(
@@ -597,13 +636,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     return
                 }
 
-                let execution = await HomeAutomationTelemetryScope.$current.withValue(pipelineTelemetryContext) {
-                    await executeDirectCommandPipeline(
-                        text: trimmedText,
-                        contextStore: contextStore,
-                        eventBus: eventBus,
-                        runID: runID
-                    )
+                let execution = await HomeAutomationTelemetryScope.$current.withValue(graphExecutionTelemetryContext) {
+                    await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                        await executeDirectCommandPipeline(
+                            text: trimmedText,
+                            contextStore: contextStore,
+                            eventBus: eventBus,
+                            runID: runID
+                        )
+                    }
                 }
                 let exit = execution.exit
 
@@ -630,6 +671,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(metrics.startedAt)
                 metrics.circuitStates = await circuitBreakers.allStatusStrings()
                 metrics.captureEvaluationFields(context: ctx, result: result)
+                metrics.captureFoundationModelUsage(snapshot: await usageLedger.snapshot())
                 await metricsCollector.store(metrics)
                 await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
 

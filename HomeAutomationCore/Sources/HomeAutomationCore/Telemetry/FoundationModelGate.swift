@@ -6,9 +6,30 @@ import Foundation
 /// and latency-sensitive. `pipeline` jobs (multi-call action subgraphs) are
 /// long-running. SJF scheduling drains interactive first, minimizing mean
 /// completion time without meaningfully delaying pipelines.
-public enum FMPriority: String, Sendable, Hashable {
+public enum FMPriority: String, Sendable, Codable, Hashable {
     case interactive
     case pipeline
+}
+
+public enum FMAdmissionResult: Sendable, Equatable {
+    case admitted(queueWaitMs: Double)
+    case cancelled(queueWaitMs: Double)
+
+    public var queueWaitMs: Double {
+        switch self {
+        case .admitted(let value), .cancelled(let value): value
+        }
+    }
+
+    public var wasAdmitted: Bool {
+        if case .admitted = self { return true }
+        return false
+    }
+}
+
+public protocol FoundationModelAdmissionControlling: Sendable {
+    func admitRequest(priority: FMPriority) async -> FMAdmissionResult
+    func release() async
 }
 
 /// Global admission gate for Foundation Model calls.
@@ -26,54 +47,66 @@ public enum FMPriority: String, Sendable, Hashable {
 /// `interactive` so a 1-call condition can't sit behind 12 queued action calls.
 ///
 /// Invariants:
-/// - Every `admit()` must be paired with exactly one `release()`
-///   (`FoundationModelCallRecorder.record` does this in a `defer`).
+/// - Every admitted request must be paired with exactly one `release()`.
 /// - Gated operations must not recursively start another gated operation,
 ///   otherwise slots can be exhausted by parents waiting on children.
-/// - Within each priority band, waiting is FIFO. If a waiting task is
-///   cancelled, it is admitted immediately (over-admitting by one) so the
-///   caller's paired `release()` stays balanced.
+/// - Within each priority band, waiting is FIFO. A cancelled queued request is
+///   removed without acquiring a permit or crossing the inference boundary.
 ///
 /// Note: NLU-class soft timeouts (`withNLUModelSoftTimeout`) wrap the gated
 /// call, so their budget includes queue wait. Under heavy contention NLU
 /// workers therefore degrade quickly to their deterministic fallbacks instead
 /// of stacking behind slower calls — this is intentional.
-public actor FoundationModelGate {
+public actor FoundationModelGate: FoundationModelAdmissionControlling {
     public static let shared = FoundationModelGate(maxConcurrent: 2)
 
     private let maxConcurrent: Int
+    private let clock: any FoundationModelMonotonicClock
     private var activeCount = 0
 
-    private var interactiveWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var interactiveWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var interactiveOrder: [UUID] = []
-    private var pipelineWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var pipelineWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var pipelineOrder: [UUID] = []
 
     private var activeInteractiveCount = 0
 
-    public init(maxConcurrent: Int) {
+    public init(
+        maxConcurrent: Int,
+        clock: any FoundationModelMonotonicClock = SystemFoundationModelMonotonicClock()
+    ) {
         self.maxConcurrent = max(1, maxConcurrent)
+        self.clock = clock
     }
 
     /// Waits for an admission slot and returns the time spent queued.
     /// Defaults to `.interactive` for backward compatibility.
     public func admit(priority: FMPriority = .interactive) async -> TimeInterval {
+        let result = await admitRequest(priority: priority)
+        return result.queueWaitMs / 1_000
+    }
+
+    /// Waits for a slot and explicitly reports whether cancellation won before
+    /// admission. A cancelled result does not own a permit and must not be
+    /// paired with `release()`.
+    public func admitRequest(priority: FMPriority = .interactive) async -> FMAdmissionResult {
         if canAdmit(priority: priority) {
             activeCount += 1
             if priority == .interactive { activeInteractiveCount += 1 }
-            return 0
+            return .admitted(queueWaitMs: 0)
         }
 
         let id = UUID()
-        let enqueuedAt = Date()
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        let enqueuedAt = clock.nowNanoseconds()
+        let admitted = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
                 enqueue(id: id, priority: priority, continuation: continuation)
             }
         } onCancel: {
             Task { await self.cancelWait(id: id, priority: priority) }
         }
-        return Date().timeIntervalSince(enqueuedAt)
+        let waitMs = Self.milliseconds(from: enqueuedAt, to: clock.nowNanoseconds())
+        return admitted ? .admitted(queueWaitMs: waitMs) : .cancelled(queueWaitMs: waitMs)
     }
 
     public func release() {
@@ -84,7 +117,7 @@ public actor FoundationModelGate {
            let continuation = interactiveWaiters.removeValue(forKey: id) {
             interactiveOrder.removeFirst()
             activeInteractiveCount += 1
-            continuation.resume()
+            continuation.resume(returning: true)
             return
         }
 
@@ -94,7 +127,7 @@ public actor FoundationModelGate {
                 pipelineWaiters[id] = continuation
             } else {
                 pipelineOrder.removeFirst()
-                continuation.resume()
+                continuation.resume(returning: true)
                 return
             }
         }
@@ -144,12 +177,12 @@ public actor FoundationModelGate {
     private func enqueue(
         id: UUID,
         priority: FMPriority,
-        continuation: CheckedContinuation<Void, Never>
+        continuation: CheckedContinuation<Bool, Never>
     ) {
         if canAdmit(priority: priority) {
             activeCount += 1
             if priority == .interactive { activeInteractiveCount += 1 }
-            continuation.resume()
+            continuation.resume(returning: true)
             return
         }
         switch priority {
@@ -163,7 +196,7 @@ public actor FoundationModelGate {
     }
 
     private func cancelWait(id: UUID, priority: FMPriority) {
-        let continuation: CheckedContinuation<Void, Never>?
+        let continuation: CheckedContinuation<Bool, Never>?
         switch priority {
         case .interactive:
             continuation = interactiveWaiters.removeValue(forKey: id)
@@ -173,17 +206,20 @@ public actor FoundationModelGate {
             pipelineOrder.removeAll { $0 == id }
         }
         guard let continuation else { return }
-        activeCount += 1
-        if priority == .interactive { activeInteractiveCount += 1 }
-        continuation.resume()
+        continuation.resume(returning: false)
     }
 
     private func removeStaleEntries(
-        waiters: inout [UUID: CheckedContinuation<Void, Never>],
+        waiters: inout [UUID: CheckedContinuation<Bool, Never>],
         order: inout [UUID]
     ) {
         while let id = order.first, waiters[id] == nil {
             order.removeFirst()
         }
+    }
+
+    private static func milliseconds(from start: UInt64, to end: UInt64) -> Double {
+        guard end >= start else { return 0 }
+        return Double(end - start) / 1_000_000
     }
 }

@@ -345,6 +345,11 @@ struct OrchestratorInfrastructureTests {
         #expect(metrics.foundationModelUsage.modelAvailabilityStatus == "unavailable")
         #expect(metrics.foundationModelUsage.modelCallCount == 0)
         #expect(metrics.foundationModelUsage.skippedModelCallCount > 0)
+        #expect(metrics.foundationModelUsageSnapshot?.summary.actualCallCount == 0)
+        #expect(metrics.foundationModelUsage.queueWaitTotalMs == 0)
+        #expect(metrics.foundationModelUsage.serviceTotalMs == 0)
+        #expect(metrics.metricsV2?.modelCalls.modelCallCount == 0)
+        #expect(metrics.metricsV2?.modelCalls.queueWaitTotalMs == 0)
     }
 
     @Test

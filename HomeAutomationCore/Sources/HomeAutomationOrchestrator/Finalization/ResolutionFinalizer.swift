@@ -116,8 +116,7 @@ public struct ResolutionFinalizer: Sendable {
             "orchestration.finalizer.completed",
             context: HomeAutomationTelemetryScope.current?.merging(
                 graphID: graph.id,
-                stage: "resolutionFinalizer",
-                runtimeMode: "graph"
+                stage: "resolutionFinalizer"
             ),
             status: receipt?.status.rawValue ?? "not_required",
             payload: [
