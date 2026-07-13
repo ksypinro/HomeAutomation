@@ -60,6 +60,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let portfolioRolloutMode: PortfolioRolloutMode
     private let staticPortfolioRouter: StaticPortfolioRouter
     private let adaptivePortfolioController: AdaptivePortfolioController
+    private let graphCompilationMode: GraphCompilationMode
+    private let graphCompiler = DependencyMinimalGraphCompiler()
 
     public init(
         dependencies: HomeAutomationRuntimeDependencies
@@ -84,6 +86,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             rolloutMode: dependencies.portfolioRolloutMode,
             router: self.staticPortfolioRouter
         )
+        self.graphCompilationMode = dependencies.graphCompilationMode
     }
 
     public convenience init(
@@ -834,6 +837,46 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         await circuitBreakers.allStatusStrings()
     }
 
+    private func compilePlan(
+        _ staticPlan: GraphExecutionPlan,
+        template: GraphTemplate,
+        context: ResolutionContext,
+        registry: AgentRegistry
+    ) -> GraphExecutionPlan {
+        guard graphCompilationMode.computesCompiledGraph else {
+            return GraphExecutionPlan(
+                graph: staticPlan.graph,
+                isFallbackOnly: staticPlan.isFallbackOnly,
+                compilationReport: GraphCompilationReport.staticTemplate(template: template),
+                criticalPath: CriticalPathAnalyzer().analyze(staticPlan.graph)
+            )
+        }
+
+        let compiledPlan = graphCompiler.makePlan(
+            template: template,
+            registry: registry,
+            seed: GraphCompilationSeed.from(context: context),
+            mode: graphCompilationMode,
+            initialContext: context
+        )
+        return GraphExecutionPlan(
+            graph: compiledPlan.graph,
+            isFallbackOnly: staticPlan.isFallbackOnly,
+            compilationReport: compiledPlan.compilationReport,
+            criticalPath: compiledPlan.criticalPath
+        )
+    }
+
+    private static func annotatedGraphRun(
+        _ graphRun: GraphRunMetrics,
+        plan: GraphExecutionPlan
+    ) -> GraphRunMetrics {
+        var output = graphRun
+        output.compilationReport = plan.compilationReport
+        output.criticalPath = plan.criticalPath
+        return output
+    }
+
     private func executeRootRoutingPipeline(
         text: String,
         contextStore: ResolutionContextStore,
@@ -841,9 +884,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         runID: UUID,
         registry: AgentRegistry
     ) async -> RootRoutingExecutionResult {
-        let plan = graphPlanner.planRootRouting(
+        let initialContext = await contextStore.snapshot()
+        let staticPlan = graphPlanner.planRootRouting(
             for: text,
-            context: await contextStore.snapshot()
+            context: initialContext
+        )
+        let plan = compilePlan(
+            staticPlan,
+            template: GraphTemplateCatalog.rootRouting(),
+            context: initialContext,
+            registry: registry
         )
         let schedulerResult = await scheduler.execute(
             plan.graph,
@@ -854,8 +904,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             circuitBreakers: circuitBreakers,
             runID: runID
         )
-        let context = await contextStore.snapshot()
-        let detectedOperation = context.operation ?? HomeOperationDetectionResult(
+        let graphRun = Self.annotatedGraphRun(schedulerResult.metrics, plan: plan)
+        let finalContext = await contextStore.snapshot()
+        let detectedOperation = finalContext.operation ?? HomeOperationDetectionResult(
             domain: .unsupported,
             operation: .unsupported,
             confidence: 0,
@@ -868,7 +919,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         return RootRoutingExecutionResult(
             detectedOperation: detectedOperation,
             routedOperation: routedOperation,
-            graphRun: schedulerResult.metrics
+            graphRun: graphRun
         )
     }
 
@@ -880,11 +931,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         runID: UUID,
         registry: AgentRegistry
     ) async -> AutomationCreationExecutionResult {
-        let graph = graphPlanner.plan(
+        let initialContext = await contextStore.snapshot()
+        let staticPlan = graphPlanner.plan(
             for: text,
-            context: await contextStore.snapshot(),
+            context: initialContext,
             operation: operation.operation
-        ).graph
+        )
+        let plan = compilePlan(
+            staticPlan,
+            template: GraphTemplateCatalog.automationCreation(),
+            context: initialContext,
+            registry: registry
+        )
+        let graph = plan.graph
 
         await contextStore.setScopedValue(
             AutomationPipelineEventBridge(eventBus: eventBus, runID: runID),
@@ -901,7 +960,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         )
         let context = await contextStore.snapshot()
         let graphRun = Self.automationFanOutGraphRun(
-            from: schedulerResult.metrics,
+            from: Self.annotatedGraphRun(schedulerResult.metrics, plan: plan),
             context: context
         )
         let resolution = context.resolution ?? Self.resolution(from: schedulerResult.exit)
@@ -932,11 +991,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         runID: UUID,
         registry: AgentRegistry
     ) async -> UnsupportedExecutionResult {
-        let graph = graphPlanner.plan(
+        let initialContext = await contextStore.snapshot()
+        let staticPlan = graphPlanner.plan(
             for: text,
-            context: await contextStore.snapshot(),
+            context: initialContext,
             operation: .unsupported
-        ).graph
+        )
+        let plan = compilePlan(
+            staticPlan,
+            template: GraphTemplateCatalog.unsupported(),
+            context: initialContext,
+            registry: registry
+        )
+        let graph = plan.graph
         let schedulerResult = await scheduler.execute(
             graph,
             registry: registry,
@@ -946,24 +1013,24 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             circuitBreakers: circuitBreakers,
             runID: runID
         )
-        let context = await contextStore.snapshot()
-        let resolution = context.resolution ?? Self.resolution(from: schedulerResult.exit)
+        let finalContext = await contextStore.snapshot()
+        let resolution = finalContext.resolution ?? Self.resolution(from: schedulerResult.exit)
         let result = HomeAutomationResolverResult(
-            state: context.resolutionState ?? HomeResolutionState.forOperation(text: text, operation: operation),
-            retrievedCandidates: context.retrievedCandidates,
-            aggregation: context.aggregation ?? HomeCandidateAggregationResult(
-                finalCandidateIDs: context.selectedCandidateIDs,
+            state: finalContext.resolutionState ?? HomeResolutionState.forOperation(text: text, operation: operation),
+            retrievedCandidates: finalContext.retrievedCandidates,
+            aggregation: finalContext.aggregation ?? HomeCandidateAggregationResult(
+                finalCandidateIDs: finalContext.selectedCandidateIDs,
                 needsClarification: false,
                 confidence: operation.confidence
             ),
-            hydratedCandidates: context.hydratedCandidates,
-            draft: context.draft,
+            hydratedCandidates: finalContext.hydratedCandidates,
+            draft: finalContext.draft,
             resolution: resolution
         )
         return UnsupportedExecutionResult(
             result: result,
             graph: graph,
-            graphRun: schedulerResult.metrics
+            graphRun: Self.annotatedGraphRun(schedulerResult.metrics, plan: plan)
         )
     }
 
@@ -1001,7 +1068,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         registry: AgentRegistry
     ) async -> DirectCommandExecutionResult {
         logger.debug("Generating graph execution plan.")
-        let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
+        let initialContext = await contextStore.snapshot()
+        let staticPlan = graphPlanner.plan(for: text, context: initialContext)
+        let template = staticPlan.isFallbackOnly ? GraphTemplateCatalog.fallback() : GraphTemplateCatalog.directCommand()
+        let plan = compilePlan(
+            staticPlan,
+            template: template,
+            context: initialContext,
+            registry: registry
+        )
         let result = await scheduler.execute(
             plan.graph,
             registry: registry,
@@ -1012,9 +1087,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             runID: runID
         )
         let context = await contextStore.snapshot()
+        let graphRun = Self.annotatedGraphRun(result.metrics, plan: plan)
         let resolution = context.resolution ?? Self.resolution(from: result.exit)
         let receipt = ResolutionFinalizationReceipt.directCommand(
-            graphRun: result.metrics,
+            graphRun: graphRun,
             resolution: resolution
         )
         if Self.requiresCompletedFinalizationReceipt(resolution),
@@ -1039,7 +1115,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         return DirectCommandExecutionResult(
             exit: result.exit,
             fallbackUsed: plan.isFallbackOnly,
-            graphRun: result.metrics
+            graphRun: graphRun
         )
     }
 

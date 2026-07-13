@@ -533,6 +533,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let loopOrchestrator: VerifierLoopOrchestrator?
     public let foundationModelArm: FoundationModelCallArm
     public let portfolioRolloutMode: PortfolioRolloutMode
+    public let graphCompilationMode: GraphCompilationMode
 
     public init(
         agentRegistry: AgentRegistry,
@@ -548,7 +549,8 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         orchestrationMode: OrchestrationMode = .graph,
         loopOrchestrator: VerifierLoopOrchestrator? = nil,
         foundationModelArm: FoundationModelCallArm = .graph,
-        portfolioRolloutMode: PortfolioRolloutMode = .disabled
+        portfolioRolloutMode: PortfolioRolloutMode = .disabled,
+        graphCompilationMode: GraphCompilationMode = .disabled
     ) {
         self.agentRegistry = agentRegistry
         self.tier1AgentRegistry = tier1AgentRegistry
@@ -564,6 +566,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.loopOrchestrator = loopOrchestrator
         self.foundationModelArm = foundationModelArm
         self.portfolioRolloutMode = portfolioRolloutMode
+        self.graphCompilationMode = graphCompilationMode
     }
 }
 
@@ -685,7 +688,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
     public func makeRuntimeDependencies(
         orchestrationMode: OrchestrationMode = .graph,
         useMiniPipeline: Bool = false,
-        portfolioRolloutMode: PortfolioRolloutMode = .disabled
+        portfolioRolloutMode: PortfolioRolloutMode = .disabled,
+        graphCompilationMode: GraphCompilationMode = .disabled
     ) -> HomeAutomationRuntimeDependencies {
         let baseAgentRegistry = makeAgentRegistry()
         let tier1AgentRegistry = agentCoordinator.makeAgentRegistry(
@@ -714,7 +718,8 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
                 ? makeVerifierLoopOrchestrator()
                 : nil,
             foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm,
-            portfolioRolloutMode: portfolioRolloutMode
+            portfolioRolloutMode: portfolioRolloutMode,
+            graphCompilationMode: graphCompilationMode
         )
     }
 

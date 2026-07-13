@@ -288,6 +288,10 @@ public protocol PortfolioArmExecuting: Sendable {
 
           <article class="plan-phase" id="phase-6">
             <div class="phase-heading"><div class="phase-index">06</div><div><h3>Compile dependency-minimal DAGs</h3><p>Remove false barriers and already-satisfied producers without permitting arbitrary runtime graph synthesis.</p></div><div class="phase-meta"><span class="status-chip">effort L</span><span class="status-chip parallel">can overlap phase 5 tests</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · compiler seam is safe-gated</strong>
+              <p>Phase 6 now has approved versioned templates for the current root, direct-command, fallback, automation-creation, unsupported, and finalization graphs; a manifest/seed-based <code>DependencyMinimalGraphCompiler</code>; privacy-safe compile reports; disabled/shadow/active compiler modes; validation fallback to known static graphs; non-prunable safety and mutation approval gates; and deterministic critical-path metadata carried outside graph identity. Default runtime behavior remains unchanged because <code>GraphCompilationMode.disabled</code> is the default. Loop-escalation template expansion remains staged until the remaining Phase 5 executor/escalation extraction is completed.</p>
+            </div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Define approved templates.</strong> Represent direct, automation, fallback, finalization, and escalation graphs as versioned templates with immutable mandatory-node sets.</li>
