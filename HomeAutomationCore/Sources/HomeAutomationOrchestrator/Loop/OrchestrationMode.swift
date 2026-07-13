@@ -4,6 +4,7 @@ import HomeAutomationCore
 public enum OrchestrationMode: String, Sendable {
     case graph
     case verifierLoop
+    case adaptivePortfolio
 
     public var foundationModelArm: FoundationModelCallArm {
         switch self {
@@ -11,6 +12,8 @@ public enum OrchestrationMode: String, Sendable {
             .graph
         case .verifierLoop:
             .verifierLoop
+        case .adaptivePortfolio:
+            .graph
         }
     }
 }

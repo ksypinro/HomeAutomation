@@ -297,6 +297,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var loop: LoopRunMetrics?
     public var portfolioMetrics: PortfolioMetrics?
     public var portfolioDecision: PortfolioDecision?
+    public var portfolioExecutionPlan: PortfolioArmExecutionPlan?
 
     public init(command: String) {
         self.command = command
@@ -320,6 +321,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.loop = nil
         self.portfolioMetrics = nil
         self.portfolioDecision = nil
+        self.portfolioExecutionPlan = nil
     }
 
     public mutating func captureEvaluationFields(

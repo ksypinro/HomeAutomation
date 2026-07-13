@@ -22,6 +22,19 @@ struct RuntimeDependencyWiringTests {
         #expect(deps.loopOrchestrator != nil)
     }
 
+    @Test("adaptivePortfolio mode wires rollback executors and Tier-1 registry")
+    func adaptivePortfolioModeWiresPortfolioDependencies() {
+        let deps = makeCoordinator().makeRuntimeDependencies(
+            orchestrationMode: .adaptivePortfolio,
+            portfolioRolloutMode: .activeStatic
+        )
+
+        #expect(deps.orchestrationMode == .adaptivePortfolio)
+        #expect(deps.loopOrchestrator != nil)
+        #expect(deps.tier1AgentRegistry != nil)
+        #expect(deps.portfolioRolloutMode == .activeStatic)
+    }
+
     @Test("graph mode carries no loop orchestrator")
     func graphModeHasNoLoopOrchestrator() {
         let deps = makeCoordinator().makeRuntimeDependencies(orchestrationMode: .graph)

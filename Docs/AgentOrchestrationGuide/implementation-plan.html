@@ -267,6 +267,10 @@ public protocol PortfolioArmExecuting: Sendable {
 
           <article class="plan-phase" id="phase-5">
             <div class="phase-heading"><div class="phase-index">05</div><div><h3>Refactor arm executors and activate static adaptive mode</h3><p>Execute a selected arm inside one orchestrator run without duplicated root work or nested metrics.</p></div><div class="phase-meta"><span class="status-chip blocker">activation blocker</span><span class="status-chip">effort XL</span></div></div>
+            <div class="callout warning">
+              <strong>Partial implementation · active static seam is available</strong>
+              <p>Phase 5 now has <code>PortfolioRolloutMode.activeStatic</code>, <code>OrchestrationMode.adaptivePortfolio</code>, an <code>AdaptivePortfolioController</code>, selected/executing arm metrics, fail-closed executor fallback, prebuilt Tier‑1 registry selection, and prepared-evidence root-routing skip for high-confidence active adaptive runs. The remaining Phase 5 work is the larger structural extraction: move run setup into <code>OrchestrationRunContext</code>, move graph/verifier branch bodies into concrete arm executors, introduce a typed automation action strategy, and add explicit loop-escalation prepared-artifact reuse tests.</p>
+            </div>
             <div class="phase-columns"><div>
               <ol class="task-list">
                 <li><strong>Introduce <code>OrchestrationRunContext</code>.</strong> Own run ID, trace, request, context store, event bus, metrics/ledger, checkpoint options, shared conversation memory, and finalizer for the complete request. Do not construct per-arm dependency packages that reset memory or metrics.</li>

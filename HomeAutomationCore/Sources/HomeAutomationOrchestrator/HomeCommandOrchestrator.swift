@@ -44,6 +44,7 @@ private struct RootRoutingExecutionResult: Sendable {
 public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let logger = Logger(subsystem: "com.homeautomation.orchestrator", category: "HomeCommandOrchestrator")
     private let registry: AgentRegistry
+    private let tier1Registry: AgentRegistry?
     private let graphPlanner: GraphPlanner
     private let policy: OrchestratorPolicyEngine
     private let scheduler: GraphScheduler
@@ -58,11 +59,13 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let featureExtractor: OrchestrationFeatureExtractor
     private let portfolioRolloutMode: PortfolioRolloutMode
     private let staticPortfolioRouter: StaticPortfolioRouter
+    private let adaptivePortfolioController: AdaptivePortfolioController
 
     public init(
         dependencies: HomeAutomationRuntimeDependencies
     ) {
         self.registry = dependencies.agentRegistry
+        self.tier1Registry = dependencies.tier1AgentRegistry
         self.graphPlanner = dependencies.graphPlanner
         self.policy = dependencies.policy
         self.scheduler = dependencies.scheduler
@@ -77,6 +80,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.featureExtractor = OrchestrationFeatureExtractor(registry: dependencies.deviceRegistry)
         self.portfolioRolloutMode = dependencies.portfolioRolloutMode
         self.staticPortfolioRouter = StaticPortfolioRouter(rolloutMode: dependencies.portfolioRolloutMode)
+        self.adaptivePortfolioController = AdaptivePortfolioController(
+            rolloutMode: dependencies.portfolioRolloutMode,
+            router: self.staticPortfolioRouter
+        )
     }
 
     public convenience init(
@@ -309,14 +316,42 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 let traceID = runID.uuidString
                 let runSpanID = TelemetryTraceContext.makeSpanID()
                 let usageLedger = FoundationModelUsageLedger(runID: runID.uuidString)
+                let portfolioDecisionResult: (decision: PortfolioDecision?, durationMs: Double?)
+                if portfolioRolloutMode.computesDecision {
+                    let routerStarted = DispatchTime.now().uptimeNanoseconds
+                    let decision = adaptivePortfolioController.decision(for: preparedRequest)
+                    let routerDurationMs = Self.milliseconds(from: routerStarted, to: DispatchTime.now().uptimeNanoseconds)
+                    portfolioDecisionResult = (decision, routerDurationMs)
+                } else {
+                    portfolioDecisionResult = (nil, nil)
+                }
+                let portfolioDecision = portfolioDecisionResult.decision
+                let portfolioExecutionPlan: PortfolioArmExecutionPlan
+                if orchestrationMode == .adaptivePortfolio {
+                    portfolioExecutionPlan = adaptivePortfolioController.executionPlan(
+                        decision: portfolioDecision,
+                        defaultArm: foundationModelArm,
+                        hasVerifierLoopExecutor: loopOrchestrator != nil,
+                        hasTier1Registry: tier1Registry != nil
+                    )
+                } else {
+                    portfolioExecutionPlan = PortfolioArmExecutionPlan(
+                        selectedArm: foundationModelArm,
+                        executingArm: foundationModelArm
+                    )
+                }
+                let executingFoundationModelArm = portfolioExecutionPlan.executingArm
+                let activeRegistry = executingFoundationModelArm == .graphWithTier1
+                    ? tier1Registry ?? registry
+                    : registry
                 let runTelemetryContext = HomeAutomationTelemetryContext(
                     traceID: traceID,
                     spanID: runSpanID,
                     spanKind: .run,
                     runID: runID.uuidString,
                     stage: "input",
-                    runtimeMode: foundationModelArm.rawValue,
-                    foundationModelArm: foundationModelArm
+                    runtimeMode: executingFoundationModelArm.rawValue,
+                    foundationModelArm: executingFoundationModelArm
                 )
                 let eventForwarder = Task {
                     for await event in await eventBus.stream() {
@@ -345,11 +380,10 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
                 metrics.stageDurations["adaptivePreparation"] = preparedRequest.featureSnapshot.extractionDurationMs / 1_000
+                metrics.portfolioExecutionPlan = portfolioExecutionPlan
 
-                if portfolioRolloutMode.computesShadowDecision {
-                    let routerStarted = DispatchTime.now().uptimeNanoseconds
-                    let decision = staticPortfolioRouter.decide(preparedRequest)
-                    let routerDurationMs = Self.milliseconds(from: routerStarted, to: DispatchTime.now().uptimeNanoseconds)
+                if let decision = portfolioDecision {
+                    let routerDurationMs = portfolioDecisionResult.durationMs ?? 0
                     await contextStore.setScopedValue(decision, for: AdaptiveContextKeys.portfolioDecision)
                     metrics.portfolioDecision = decision
                     metrics.stageDurations["portfolioRouter"] = routerDurationMs / 1_000
@@ -367,7 +401,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         payload: [
                             "rolloutMode": decision.rolloutMode.rawValue,
                             "selectedArm": decision.selectedArm.rawValue,
-                            "executingArm": foundationModelArm.rawValue,
+                            "executingArm": executingFoundationModelArm.rawValue,
+                            "fallbackReason": portfolioExecutionPlan.fallbackReason.rawValue,
                             "eligibleArms": decision.eligibleArmLabels.joined(separator: ","),
                             "rejectedArms": decision.rejectedArmLabels.joined(separator: ","),
                             "ruleID": decision.ruleID,
@@ -379,19 +414,32 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                 }
 
-                let rootRouting = await HomeAutomationTelemetryScope.$current.withValue(
-                    runTelemetryContext.merging(
-                        operation: OrchestrationGoal.rootRouting.rawValue,
-                        foundationModelJobKind: .rootRouting
+                let rootRouting: RootRoutingExecutionResult
+                if orchestrationMode == .adaptivePortfolio,
+                   let preparedOperation = Self.preparedRoutingOperation(from: preparedRequest) {
+                    let routedOperation = Self.supportedOperation(from: preparedOperation)
+                    await contextStore.setOperation(routedOperation)
+                    rootRouting = RootRoutingExecutionResult(
+                        detectedOperation: preparedOperation,
+                        routedOperation: routedOperation,
+                        graphRun: nil
                     )
-                ) {
-                    await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
-                        await executeRootRoutingPipeline(
-                            text: trimmedText,
-                            contextStore: contextStore,
-                            eventBus: eventBus,
-                            runID: runID
+                } else {
+                    rootRouting = await HomeAutomationTelemetryScope.$current.withValue(
+                        runTelemetryContext.merging(
+                            operation: OrchestrationGoal.rootRouting.rawValue,
+                            foundationModelJobKind: .rootRouting
                         )
+                    ) {
+                        await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
+                            await executeRootRoutingPipeline(
+                                text: trimmedText,
+                                contextStore: contextStore,
+                                eventBus: eventBus,
+                                runID: runID,
+                                registry: activeRegistry
+                            )
+                        }
                     }
                 }
                 let detectedOperation = rootRouting.detectedOperation
@@ -402,8 +450,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     spanKind: .run,
                     runID: runID.uuidString,
                     operation: operation.operation.rawValue,
-                    runtimeMode: foundationModelArm.rawValue,
-                    foundationModelArm: foundationModelArm
+                    runtimeMode: executingFoundationModelArm.rawValue,
+                    foundationModelArm: executingFoundationModelArm
                 )
                 let operationEvent = OrchestratorPipelineEvent(
                     runID: runID,
@@ -433,7 +481,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 )
 
                 var graphEscalationChain: [FoundationModelEscalationStep] = []
-                if orchestrationMode == .verifierLoop, let loopOrchestrator {
+                if (orchestrationMode == .verifierLoop || executingFoundationModelArm == .verifierLoop),
+                   let loopOrchestrator {
                     let loopStarted = Date()
                     let loopOutput = await FoundationModelUsageLedgerScope.$current.withValue(usageLedger) {
                         await loopOrchestrator.run(
@@ -496,7 +545,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         metrics.safetyMetrics.finalizationReceipt = finalized.receipt
                         metrics.captureFoundationModelUsage(
                             snapshot: await usageLedger.snapshot(),
-                            selectedArm: foundationModelArm
+                            selectedArm: executingFoundationModelArm
                         )
                         await metricsCollector.store(metrics)
                         await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
@@ -555,7 +604,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         metrics.safetyMetrics.finalizationReceipt = finalized.receipt
                         metrics.captureFoundationModelUsage(
                             snapshot: await usageLedger.snapshot(),
-                            selectedArm: foundationModelArm
+                            selectedArm: executingFoundationModelArm
                         )
                         await metricsCollector.store(metrics)
                         await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
@@ -579,7 +628,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         metrics.outcome = Self.outcomeName(for: result.resolution)
                         metrics.captureFoundationModelUsage(
                             snapshot: await usageLedger.snapshot(),
-                            selectedArm: foundationModelArm
+                            selectedArm: executingFoundationModelArm
                         )
                         await metricsCollector.store(metrics)
                         await eventBus.publish(OrchestratorPipelineEvent(
@@ -607,7 +656,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 operation: operation,
                                 contextStore: contextStore,
                                 eventBus: eventBus,
-                                runID: runID
+                                runID: runID,
+                                registry: activeRegistry
                             )
                         }
                     }
@@ -625,7 +675,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                     metrics.captureFoundationModelUsage(
                         snapshot: await usageLedger.snapshot(),
-                        selectedArm: foundationModelArm
+                        selectedArm: executingFoundationModelArm
                     )
                     await metricsCollector.store(metrics)
 
@@ -661,7 +711,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 operation: operation,
                                 contextStore: contextStore,
                                 eventBus: eventBus,
-                                runID: runID
+                                runID: runID,
+                                registry: activeRegistry
                             )
                         }
                     }
@@ -674,7 +725,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     metrics.circuitStates = await circuitBreakers.allStatusStrings()
                     metrics.captureFoundationModelUsage(
                         snapshot: await usageLedger.snapshot(),
-                        selectedArm: foundationModelArm
+                        selectedArm: executingFoundationModelArm
                     )
                     await metricsCollector.store(metrics)
 
@@ -708,7 +759,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             text: trimmedText,
                             contextStore: contextStore,
                             eventBus: eventBus,
-                            runID: runID
+                            runID: runID,
+                            registry: activeRegistry
                         )
                     }
                 }
@@ -739,7 +791,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 metrics.captureEvaluationFields(context: ctx, result: result)
                 metrics.captureFoundationModelUsage(
                     snapshot: await usageLedger.snapshot(),
-                    selectedArm: foundationModelArm
+                    selectedArm: executingFoundationModelArm
                 )
                 await metricsCollector.store(metrics)
                 await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
@@ -786,7 +838,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         text: String,
         contextStore: ResolutionContextStore,
         eventBus: AgentEventBus,
-        runID: UUID
+        runID: UUID,
+        registry: AgentRegistry
     ) async -> RootRoutingExecutionResult {
         let plan = graphPlanner.planRootRouting(
             for: text,
@@ -824,7 +877,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         operation: HomeOperationDetectionResult,
         contextStore: ResolutionContextStore,
         eventBus: AgentEventBus,
-        runID: UUID
+        runID: UUID,
+        registry: AgentRegistry
     ) async -> AutomationCreationExecutionResult {
         let graph = graphPlanner.plan(
             for: text,
@@ -875,7 +929,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         operation: HomeOperationDetectionResult,
         contextStore: ResolutionContextStore,
         eventBus: AgentEventBus,
-        runID: UUID
+        runID: UUID,
+        registry: AgentRegistry
     ) async -> UnsupportedExecutionResult {
         let graph = graphPlanner.plan(
             for: text,
@@ -942,7 +997,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         text: String,
         contextStore: ResolutionContextStore,
         eventBus: AgentEventBus,
-        runID: UUID
+        runID: UUID,
+        registry: AgentRegistry
     ) async -> DirectCommandExecutionResult {
         logger.debug("Generating graph execution plan.")
         let plan = graphPlanner.plan(for: text, context: await contextStore.snapshot())
@@ -1084,6 +1140,28 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             return "\(routed.operation.rawValue) confidence=\(confidence)"
         }
         return "\(routed.operation.rawValue) confidence=\(confidence) detected=\(detected.operation.rawValue)"
+    }
+
+    private static func preparedRoutingOperation(
+        from prepared: PreparedOrchestrationRequest
+    ) -> HomeOperationDetectionResult? {
+        let features = prepared.featureSnapshot
+        guard prepared.diagnostics.isEmpty,
+              prepared.registryFreshness(comparedTo: prepared.deviceSnapshot) == .fresh,
+              features.languageOODSignal.value == .inDomain,
+              let operation = features.operation.value,
+              operation == .executeDeviceCommand || operation == .automationCreation,
+              let confidence = features.operationConfidence.value,
+              confidence >= 0.80 else {
+            return nil
+        }
+
+        return HomeOperationDetectionResult(
+            domain: prepared.resolutionState.domain.domain,
+            operation: operation,
+            confidence: confidence,
+            reason: "Prepared deterministic routing evidence"
+        )
     }
 
     private static func milliseconds(from start: UInt64, to end: UInt64) -> Double {
