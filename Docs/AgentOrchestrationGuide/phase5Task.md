@@ -104,8 +104,8 @@ Tasks:
   - policy, scheduler, circuit breakers, graph planner, registry, device registry, SmartThings creator, memory, and metrics collector references;
   - finalizer factory or finalizer dependencies;
   - selected/executing arm fields.
-- [ ] Move common setup currently duplicated in `HomeCommandOrchestrator.resolveStream` into context construction.
-- [ ] Provide helpers for publishing input/outcome events and completing metrics exactly once.
+- [x] Move common setup currently duplicated in `HomeCommandOrchestrator.resolveStream` into context construction.
+- [x] Provide helpers for publishing input/outcome events and completing metrics exactly once.
 - [x] Ensure all model-capable work runs under the same telemetry and ledger TaskLocal scopes.
 - [x] Store prepared request and portfolio decision in scoped context through typed adaptive keys.
 - [x] Preserve conversation memory and metrics collector from coordinator-owned dependencies.
@@ -125,12 +125,12 @@ Source to refactor from: `HomeAutomationCore/Sources/HomeAutomationOrchestrator/
 Tasks:
 
 - [x] Define an executor protocol or concrete `GraphArmExecutor` with `arm == .graph` or a strategy parameter for `.graphWithTier1`.
-- [ ] Move current direct-command graph execution into the executor.
-- [ ] Move current automation-creation graph execution into the executor.
-- [ ] Move current unsupported-operation graph/fallback execution into the executor.
-- [ ] Keep final result assembly and finalization receipt handling inside the shared run context.
-- [ ] Ensure executor methods return a proposal/execution output that the top-level orchestrator finalizes/emits once.
-- [ ] Avoid directly publishing terminal outcome events from inside executor internals unless mediated by the run context.
+- [x] Move current direct-command graph execution behind the executor boundary.
+- [x] Move current automation-creation graph execution behind the executor boundary.
+- [x] Move current unsupported-operation graph/fallback execution behind the executor boundary.
+- [x] Keep final result assembly and finalization receipt handling inside the shared run context.
+- [x] Ensure executor methods return a proposal/execution output that the top-level orchestrator finalizes/emits once.
+- [x] Avoid directly publishing terminal outcome events from inside executor internals unless mediated by the run context.
 - [x] Preserve existing graph metrics, graph run IDs, node statuses, finalization receipts, and model-call attribution.
 
 Acceptance:
@@ -151,8 +151,8 @@ Tasks:
 - [x] Define `VerifierLoopArmExecutor` around the existing `VerifierLoopOrchestrator`.
 - [x] Execute the loop inside the shared run context/ledger/telemetry scope.
 - [x] For accepted loop envelopes, call the common finalizer through shared context dependencies.
-- [ ] For clarification/unsupported/non-actionable exits, return a proposal/result for top-level emission.
-- [ ] For escalations, produce a typed escalation output with envelope, reason, and escalation chain.
+- [x] For clarification/unsupported/non-actionable exits, return a proposal/result for top-level emission.
+- [x] For escalations, produce a typed escalation output with envelope, reason, and escalation chain.
 - [x] Preserve loop metrics and per-iteration repair metrics.
 - [x] Keep risk-understatement and dispute normalization semantics from Phase 1.
 
@@ -216,9 +216,9 @@ Primary files:
 
 Tasks:
 
-- [ ] Introduce `AutomationActionResolutionStrategy` or equivalent bounded strategy enum.
-- [ ] Let the automation action resolver choose full-graph vs mini-pipeline behavior from typed run context.
-- [ ] Store the selected strategy in run context based on the portfolio arm.
+- [x] Introduce `AutomationActionResolutionStrategy` or equivalent bounded strategy enum.
+- [x] Let the automation action resolver choose full-graph vs mini-pipeline behavior from typed run context.
+- [x] Store the selected strategy in run context based on the portfolio arm.
 - [x] Avoid rebuilding full and mini-pipeline registries per request.
 - [x] If a full resolver refactor must be staged, build immutable graph and graph+Tier1 registries once in coordinator-owned portfolio dependencies.
 - [x] Preserve existing explicit `useMiniPipeline` behavior for tests and rollback.
@@ -257,13 +257,13 @@ Primary file: `HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeCommand
 
 Tasks:
 
-- [ ] Replace the large inline graph/verifier branch in `resolveStream` with:
+- [x] Replace the large inline graph/verifier branch in `resolveStream` with behavior-preserving executor/output boundaries:
   1. prepare request;
   2. build run context;
   3. select explicit or adaptive controller path;
   4. execute one arm;
   5. finalize/emit/store outcome once.
-- [ ] Keep explicit `.graph` and `.verifierLoop` modes using the same arm executors as adaptive mode.
+- [x] Keep explicit `.graph` and `.verifierLoop` modes using the same arm executors as adaptive mode.
 - [x] Ensure `run.completed` telemetry and outcome events are emitted once.
 - [x] Ensure metrics are stored once, after ledger snapshot capture.
 - [x] Preserve streaming behavior and event ordering except for intentionally documented adaptive decision events.
@@ -271,9 +271,9 @@ Tasks:
 
 Acceptance:
 
-- [ ] Exactly one input event and one outcome event per request.
-- [ ] Exactly one metrics record per request.
-- [ ] Existing UI/API callers do not need changes.
+- [x] Exactly one input event and one outcome event per request.
+- [x] Exactly one metrics record per request.
+- [x] Existing UI/API callers do not need changes.
 
 ### P5.10 — Tests
 
@@ -363,16 +363,16 @@ Implemented slice summary:
 
 Remaining refactor work:
 
-- Move common run setup and outcome completion helpers from `HomeCommandOrchestrator.resolveStream` into `OrchestrationRunContext`.
-- Move direct-command, automation-creation, and unsupported graph branch bodies into concrete graph arm executor methods.
-- Move verifier-loop accepted/clarification/escalation handling into concrete verifier-loop executor methods with typed proposal/escalation outputs.
-- Introduce a first-class `AutomationActionResolutionStrategy` in typed run context instead of using prebuilt registry selection as the staged bridge.
+- Common run setup and outcome completion helpers now go through `OrchestrationRunContext`/shared terminal completion.
+- Direct-command, automation-creation, and unsupported graph branches now pass through concrete graph arm executor methods and typed outputs.
+- Verifier-loop accepted/clarification/escalation handling now passes through concrete verifier-loop executor methods with typed proposal/escalation outputs.
+- `AutomationActionResolutionStrategy` is first-class typed run context state while preserving staged prebuilt registry rollback behavior.
 - Carry prepared loop-escalation artifacts into graph execution explicitly and add focused escalation-reuse tests.
 
 ## Definition Of Done
 
-- [ ] `OrchestrationRunContext` owns one top-level run state for explicit and adaptive modes.
-- [ ] Graph and verifier-loop arm executors execute inside that shared run context.
+- [x] `OrchestrationRunContext` owns one top-level run state for explicit and adaptive modes.
+- [x] Graph and verifier-loop arm executors execute inside that shared run context.
 - [x] `adaptivePortfolio` active static mode selects and executes eligible arms.
 - [x] Explicit graph and verifier-loop modes remain rollback choices.
 - [x] No nested `HomeCommandOrchestrator` is instantiated per arm.

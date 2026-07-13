@@ -134,6 +134,49 @@ struct AdaptivePortfolioIntegrationTests {
         #expect(plan.fallbackReason == .missingVerifierLoopExecutor)
     }
 
+    @Test("active static high-risk request falls back to graph")
+    func activeStaticHighRiskFallsBackToGraph() async {
+        let prepared = await preparedRequest(
+            text: "unlock the front door",
+            foundationModelAvailability: .available
+        )
+        let controller = AdaptivePortfolioController(
+            rolloutMode: .activeStatic,
+            router: StaticPortfolioRouter(rolloutMode: .activeStatic)
+        )
+
+        let decision = controller.decision(for: prepared)
+        let plan = controller.executionPlan(
+            decision: decision,
+            defaultArm: .graph,
+            hasVerifierLoopExecutor: true,
+            hasTier1Registry: true
+        )
+
+        #expect(decision == nil)
+        #expect(plan.executingArm == .graph)
+    }
+
+    @Test("active static direct command retains finalization receipt")
+    func activeStaticDirectCommandHasFinalizationReceipt() async throws {
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: HomeAutomationCoordinator.makeMockDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        let orchestrator = HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies(
+                orchestrationMode: .adaptivePortfolio,
+                portfolioRolloutMode: .activeStatic
+            )
+        )
+
+        _ = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
+        let metrics = await orchestrator.lastMetrics()
+
+        #expect(metrics?.portfolioExecutionPlan?.executingArm == .graph)
+        #expect(metrics?.safetyMetrics.finalizationReceipt != nil)
+    }
+
     private func preparedRequest(
         text: String,
         foundationModelAvailability: PortfolioFeatureAvailability

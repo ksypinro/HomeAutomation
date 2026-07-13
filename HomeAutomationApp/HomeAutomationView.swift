@@ -13,6 +13,8 @@ struct HomeAutomationView: View {
                     sampleCommands
                     executionToggle
                     orchestratorPicker
+                    architectureControls
+                    architectureOverview
                     resolveButton
                     output
                     pipelineTimeline
@@ -124,16 +126,19 @@ struct HomeAutomationView: View {
 
     private var orchestratorPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Orchestrator")
+            Text("Architecture")
                 .font(.headline)
 
-            Picker("Orchestrator", selection: $viewModel.orchestratorChoice) {
+            Picker("Architecture", selection: $viewModel.orchestratorChoice) {
                 ForEach(OrchestratorChoice.allCases) { choice in
                     Text(choice.displayName).tag(choice)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .disabled(viewModel.isRunning)
+
+            Text(viewModel.orchestratorChoice.displayName)
+                .font(.callout.weight(.semibold))
 
             Text(viewModel.orchestratorChoice.summary)
                 .font(.caption)
@@ -142,6 +147,55 @@ struct HomeAutomationView: View {
         }
         .padding(14)
         .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var architectureControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Runtime Controls", systemImage: "switch.2")
+                .font(.headline)
+
+            Picker("Graph compiler", selection: $viewModel.graphCompilerChoice) {
+                ForEach(GraphCompilerChoice.allCases) { choice in
+                    Text(choice.displayName).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
+
+            Text(viewModel.graphCompilerChoice.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var architectureOverview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Architecture In Use", systemImage: "rectangle.3.group.bubble")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], spacing: 10) {
+                ForEach(viewModel.architectureCards) { item in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(item.value)
+                            .font(.callout.weight(.semibold))
+                            .lineLimit(2)
+                        Text(item.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
     }
 
     private var resolveButton: some View {

@@ -11,7 +11,7 @@ struct Phase7FanOutTests {
 
     @Test
     func automationActionResolutionHasAggregateTimeoutBudget() {
-        let agent = AutomationActionResolutionAgent(resolveActions: { _, _, _ in [] })
+        let agent = AutomationActionResolutionAgent(resolveActions: { _, _, _, _ in [] })
 
         #expect(agent.timeoutNanoseconds >= 240_000_000_000)
     }

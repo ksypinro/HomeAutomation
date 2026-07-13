@@ -326,11 +326,6 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                 )
                 await contextStore.setScopedValue(preparedRequest, for: AdaptiveContextKeys.preparedRequest)
-                let eventBus = AgentEventBus()
-                let runID = UUID()
-                let traceID = runID.uuidString
-                let runSpanID = TelemetryTraceContext.makeSpanID()
-                let usageLedger = FoundationModelUsageLedger(runID: runID.uuidString)
                 let portfolioDecisionResult: (decision: PortfolioDecision?, durationMs: Double?)
                 if portfolioRolloutMode.computesDecision {
                     let routerStarted = DispatchTime.now().uptimeNanoseconds
@@ -356,6 +351,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     )
                 }
                 let executingFoundationModelArm = portfolioExecutionPlan.executingArm
+                let runContext = OrchestrationRunContext.make(
+                    request: request,
+                    preparedRequest: preparedRequest,
+                    contextStore: contextStore,
+                    selectedArm: portfolioExecutionPlan.selectedArm,
+                    executingArm: executingFoundationModelArm
+                )
+                await runContext.setAutomationActionStrategy()
+                let eventBus = runContext.eventBus
+                let runID = runContext.runID
+                let traceID = runContext.traceID
+                let runSpanID = runContext.spanID
+                let usageLedger = runContext.usageLedger
                 let portfolioRolloutEvidence = adaptivePortfolioController.rolloutEvidence(
                     decision: portfolioDecision,
                     executionPlan: portfolioExecutionPlan,
@@ -379,13 +387,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     }
                 }
 
-                let inputEvent = OrchestratorPipelineEvent(
-                    runID: runID,
-                    stage: "input",
-                    status: .completed,
-                    detail: trimmedText
-                )
-                await eventBus.publish(inputEvent)
+                await runContext.publishInputEvent(detail: trimmedText)
                 await HomeAutomationTelemetry.shared.log(
                     "run.started",
                     context: runTelemetryContext,
@@ -502,6 +504,8 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                 )
 
                 var graphEscalationChain: [FoundationModelEscalationStep] = []
+                let graphArmExecutor = GraphArmExecutor(arm: executingFoundationModelArm)
+                let verifierLoopArmExecutor = VerifierLoopArmExecutor()
                 if (orchestrationMode == .verifierLoop || executingFoundationModelArm == .verifierLoop),
                    let loopOrchestrator {
                     let loopStarted = Date()
@@ -519,7 +523,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     case .escalated(let envelope, let reason) where reason == .verifierUnavailable || reason == .iterationCap || reason == .noProgress || reason == .repairLatch:
                         if policy.shouldUseModels() {
                             logger.info("Loop escalated (\(reason.rawValue)), falling through to graph path.")
-                            graphEscalationChain = [.verifierLoop, .graph]
+                            let loopArmOutput = await verifierLoopArmExecutor.execute {
+                                verifierLoopArmExecutor.escalated(
+                                    envelope,
+                                    reason: reason,
+                                    chain: [.verifierLoop, .graph]
+                                )
+                            }
+                            if case .escalated(_, _, let chain) = loopArmOutput {
+                                graphEscalationChain = chain
+                            }
                             break
                         }
                         let finalizer = ResolutionFinalizer(
@@ -547,6 +560,12 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             }
                         }
                         let result = finalized.result
+                        let loopArmOutput = await verifierLoopArmExecutor.execute {
+                            verifierLoopArmExecutor.finalized(
+                                result,
+                                receipt: finalized.receipt
+                            )
+                        }
                         metrics.finishedAt = Date()
                         metrics.agentTraces = finalized.context.trace
                         metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
@@ -568,16 +587,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             snapshot: await usageLedger.snapshot(),
                             selectedArm: executingFoundationModelArm
                         )
-                        await metricsCollector.store(metrics)
-                        await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
-                        await eventBus.publish(OrchestratorPipelineEvent(
-                            runID: runID, stage: "outcome", status: .completed,
-                            detail: result.resolution.displaySummary
-                        ))
-                        await eventBus.finish()
-                        await eventForwarder.value
-                        continuation.yield(.result(result))
-                        continuation.finish()
+                        if case .finalized(let finalizedResult, _) = loopArmOutput {
+                            await completeTerminalRun(
+                                result: finalizedResult,
+                                metrics: metrics,
+                                runContext: runContext,
+                                telemetryContext: pipelineTelemetryContext,
+                                eventForwarder: eventForwarder,
+                                continuation: continuation,
+                                appendConversationMemory: true,
+                                userText: trimmedText,
+                                logCompletion: false
+                            )
+                        }
                         return
 
                     case .accepted(let envelope, _):
@@ -606,6 +628,12 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             }
                         }
                         let result = finalized.result
+                        let loopArmOutput = await verifierLoopArmExecutor.execute {
+                            verifierLoopArmExecutor.finalized(
+                                result,
+                                receipt: finalized.receipt
+                            )
+                        }
                         metrics.finishedAt = Date()
                         metrics.agentTraces = finalized.context.trace
                         metrics.outcome = Self.outcomeName(for: result.resolution)
@@ -627,16 +655,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             snapshot: await usageLedger.snapshot(),
                             selectedArm: executingFoundationModelArm
                         )
-                        await metricsCollector.store(metrics)
-                        await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
-                        await eventBus.publish(OrchestratorPipelineEvent(
-                            runID: runID, stage: "outcome", status: .completed,
-                            detail: result.resolution.displaySummary
-                        ))
-                        await eventBus.finish()
-                        await eventForwarder.value
-                        continuation.yield(.result(result))
-                        continuation.finish()
+                        if case .finalized(let finalizedResult, _) = loopArmOutput {
+                            await completeTerminalRun(
+                                result: finalizedResult,
+                                metrics: metrics,
+                                runContext: runContext,
+                                telemetryContext: pipelineTelemetryContext,
+                                eventForwarder: eventForwarder,
+                                continuation: continuation,
+                                appendConversationMemory: true,
+                                userText: trimmedText,
+                                logCompletion: false
+                            )
+                        }
                         return
 
                     default:
@@ -644,6 +675,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             exit: loopOutput.exit,
                             operationHint: operation
                         )
+                        let loopArmOutput = await verifierLoopArmExecutor.execute {
+                            verifierLoopArmExecutor.nonActionable(result)
+                        }
                         metrics.finishedAt = Date()
                         metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
                         metrics.outcome = Self.outcomeName(for: result.resolution)
@@ -651,15 +685,19 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                             snapshot: await usageLedger.snapshot(),
                             selectedArm: executingFoundationModelArm
                         )
-                        await metricsCollector.store(metrics)
-                        await eventBus.publish(OrchestratorPipelineEvent(
-                            runID: runID, stage: "outcome", status: .completed,
-                            detail: result.resolution.displaySummary
-                        ))
-                        await eventBus.finish()
-                        await eventForwarder.value
-                        continuation.yield(.result(result))
-                        continuation.finish()
+                        if case .nonActionable(let nonActionableResult) = loopArmOutput {
+                            await completeTerminalRun(
+                                result: nonActionableResult,
+                                metrics: metrics,
+                                runContext: runContext,
+                                telemetryContext: pipelineTelemetryContext,
+                                eventForwarder: eventForwarder,
+                                continuation: continuation,
+                                appendConversationMemory: false,
+                                userText: trimmedText,
+                                logCompletion: false
+                            )
+                        }
                         return
                     }
                 }
@@ -698,29 +736,23 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         snapshot: await usageLedger.snapshot(),
                         selectedArm: executingFoundationModelArm
                     )
-                    await metricsCollector.store(metrics)
-
-                    let outcomeEvent = OrchestratorPipelineEvent(
-                        runID: runID,
-                        stage: "outcome",
-                        status: .completed,
-                        detail: result.resolution.displaySummary
+                    let graphOutput = await graphArmExecutor.executeAutomationCreation {
+                        graphArmExecutor.output(
+                            for: .automationCreation,
+                            result: result,
+                            graphRun: execution.graphRun
+                        )
+                    }
+                    await completeTerminalRun(
+                        result: graphOutput.result,
+                        metrics: metrics,
+                        runContext: runContext,
+                        telemetryContext: pipelineTelemetryContext,
+                        eventForwarder: eventForwarder,
+                        continuation: continuation,
+                        appendConversationMemory: false,
+                        userText: trimmedText
                     )
-                    await eventBus.publish(outcomeEvent)
-                    await HomeAutomationTelemetry.shared.log(
-                        "run.completed",
-                        context: pipelineTelemetryContext.merging(stage: "outcome"),
-                        status: "completed",
-                        durationMs: metrics.totalDuration.map { $0 * 1_000 },
-                        payload: [
-                            "outcome": metrics.outcome,
-                            "resolution": result.resolution.displaySummary
-                        ]
-                    )
-                    await eventBus.finish()
-                    await eventForwarder.value
-                    continuation.yield(.result(result))
-                    continuation.finish()
                     return
                 }
 
@@ -748,29 +780,23 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         snapshot: await usageLedger.snapshot(),
                         selectedArm: executingFoundationModelArm
                     )
-                    await metricsCollector.store(metrics)
-
-                    let outcomeEvent = OrchestratorPipelineEvent(
-                        runID: runID,
-                        stage: "outcome",
-                        status: .completed,
-                        detail: result.resolution.displaySummary
+                    let graphOutput = await graphArmExecutor.executeUnsupported {
+                        graphArmExecutor.output(
+                            for: .unsupported,
+                            result: result,
+                            graphRun: execution.graphRun
+                        )
+                    }
+                    await completeTerminalRun(
+                        result: graphOutput.result,
+                        metrics: metrics,
+                        runContext: runContext,
+                        telemetryContext: pipelineTelemetryContext,
+                        eventForwarder: eventForwarder,
+                        continuation: continuation,
+                        appendConversationMemory: false,
+                        userText: trimmedText
                     )
-                    await eventBus.publish(outcomeEvent)
-                    await HomeAutomationTelemetry.shared.log(
-                        "run.completed",
-                        context: pipelineTelemetryContext.merging(stage: "outcome"),
-                        status: "completed",
-                        durationMs: metrics.totalDuration.map { $0 * 1_000 },
-                        payload: [
-                            "outcome": metrics.outcome,
-                            "resolution": result.resolution.displaySummary
-                        ]
-                    )
-                    await eventBus.finish()
-                    await eventForwarder.value
-                    continuation.yield(.result(result))
-                    continuation.finish()
                     return
                 }
 
@@ -814,31 +840,25 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     snapshot: await usageLedger.snapshot(),
                     selectedArm: executingFoundationModelArm
                 )
-                await metricsCollector.store(metrics)
-                await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
-
-                let outcomeEvent = OrchestratorPipelineEvent(
-                    runID: runID,
-                    stage: "outcome",
-                    status: .completed,
-                    detail: result.resolution.displaySummary
+                let graphOutput = await graphArmExecutor.executeDirectCommand {
+                    graphArmExecutor.output(
+                        for: .directCommand,
+                        result: result,
+                        graphRun: execution.graphRun,
+                        fallbackUsed: execution.fallbackUsed
+                    )
+                }
+                await completeTerminalRun(
+                    result: graphOutput.result,
+                    metrics: metrics,
+                    runContext: runContext,
+                    telemetryContext: pipelineTelemetryContext,
+                    eventForwarder: eventForwarder,
+                    continuation: continuation,
+                    appendConversationMemory: true,
+                    userText: trimmedText
                 )
-                await eventBus.publish(outcomeEvent)
-                await HomeAutomationTelemetry.shared.log(
-                    "run.completed",
-                    context: pipelineTelemetryContext.merging(stage: "outcome"),
-                    status: "completed",
-                    durationMs: metrics.totalDuration.map { $0 * 1_000 },
-                    payload: [
-                        "outcome": metrics.outcome,
-                        "resolution": result.resolution.displaySummary
-                    ]
-                )
-                await eventBus.finish()
-                await eventForwarder.value
-                continuation.yield(.result(result))
                 logger.info("Stream resolution completed successfully.")
-                continuation.finish()
             }
         }
     }
@@ -853,6 +873,40 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
     public func circuitBreakerStatuses() async -> [String: String] {
         await circuitBreakers.allStatusStrings()
+    }
+
+    private func completeTerminalRun(
+        result: HomeAutomationResolverResult,
+        metrics: OrchestratorMetrics,
+        runContext: OrchestrationRunContext,
+        telemetryContext: HomeAutomationTelemetryContext,
+        eventForwarder: Task<Void, Never>,
+        continuation: AsyncThrowingStream<OrchestratorUpdate, Error>.Continuation,
+        appendConversationMemory: Bool,
+        userText: String,
+        logCompletion: Bool = true
+    ) async {
+        await metricsCollector.store(metrics)
+        if appendConversationMemory {
+            await conversationMemory.append(Self.memoryTurn(for: result, userText: userText))
+        }
+        await runContext.publishOutcomeEvent(result: result)
+        if logCompletion {
+            await HomeAutomationTelemetry.shared.log(
+                "run.completed",
+                context: telemetryContext.merging(stage: "outcome"),
+                status: "completed",
+                durationMs: metrics.totalDuration.map { $0 * 1_000 },
+                payload: [
+                    "outcome": metrics.outcome,
+                    "resolution": result.resolution.displaySummary
+                ]
+            )
+        }
+        await runContext.eventBus.finish()
+        await eventForwarder.value
+        continuation.yield(.result(result))
+        continuation.finish()
     }
 
     private func compilePlan(

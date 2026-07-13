@@ -133,7 +133,7 @@ public struct FoundationHomeCommandDraftResolver: HomeCommandDraftResolving {
     public static func generationOptions(for mode: HomeGenerationMode) -> GenerationOptions {
         switch mode {
         case .greedy:
-            return GenerationOptions(sampling: .greedy)
+            return GenerationOptions(samplingMode: .greedy)
         case .defaultSampling:
             return GenerationOptions()
         }

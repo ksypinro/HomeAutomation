@@ -51,6 +51,13 @@ struct PortfolioEvidenceItem: Identifiable, Hashable {
     let value: String
 }
 
+struct ArchitectureCardItem: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let value: String
+    let detail: String
+}
+
 /// User-facing orchestrator strategies. Mirrors the three arms in
 /// `OrchestrationArm` — the mode is baked into the runtime dependencies at
 /// construction, so switching rebuilds the orchestrator from the retained
@@ -59,6 +66,8 @@ enum OrchestratorChoice: String, CaseIterable, Identifiable {
     case graph
     case graphTier1
     case verifierLoop
+    case adaptiveStatic
+    case adaptiveShadow
 
     var id: String { rawValue }
 
@@ -67,6 +76,8 @@ enum OrchestratorChoice: String, CaseIterable, Identifiable {
         case .graph: return "Graph"
         case .graphTier1: return "Graph + Tier 1"
         case .verifierLoop: return "Verifier Loop"
+        case .adaptiveStatic: return "Adaptive Static"
+        case .adaptiveShadow: return "Adaptive Shadow"
         }
     }
 
@@ -78,6 +89,10 @@ enum OrchestratorChoice: String, CaseIterable, Identifiable {
             return "Graph runtime with the deterministic Tier 1 mini-pipeline for automation actions (0–1 FM calls per action)."
         case .verifierLoop:
             return "Deterministic draft → FM verifier → targeted repairs (max 3 iterations); escalates to the graph on failure."
+        case .adaptiveStatic:
+            return "Static portfolio router actively chooses Graph, Graph + Tier 1, or Verifier Loop inside one shared run."
+        case .adaptiveShadow:
+            return "Computes the static portfolio decision and rollout evidence, but executes the graph as a safe holdback path."
         }
     }
 
@@ -86,6 +101,84 @@ enum OrchestratorChoice: String, CaseIterable, Identifiable {
         case .graph: return "Multi-Agent Orchestrator (Graph)"
         case .graphTier1: return "Multi-Agent Orchestrator (Graph + Tier 1)"
         case .verifierLoop: return "Verifier-Loop Orchestrator"
+        case .adaptiveStatic: return "Adaptive Portfolio Orchestrator (Active Static)"
+        case .adaptiveShadow: return "Adaptive Portfolio Orchestrator (Shadow Static)"
+        }
+    }
+
+    var architectureLabel: String {
+        switch self {
+        case .graph:
+            return "Reference graph"
+        case .graphTier1:
+            return "Graph with Tier‑1 action strategy"
+        case .verifierLoop:
+            return "Verifier-loop first"
+        case .adaptiveStatic:
+            return "Portfolio-selected arm"
+        case .adaptiveShadow:
+            return "Graph execution + shadow decision"
+        }
+    }
+
+    var rolloutMode: PortfolioRolloutMode {
+        switch self {
+        case .adaptiveStatic:
+            return .activeStatic
+        case .adaptiveShadow:
+            return .shadowStatic
+        case .graph, .graphTier1, .verifierLoop:
+            return .disabled
+        }
+    }
+
+    var orchestrationMode: OrchestrationMode {
+        switch self {
+        case .verifierLoop:
+            return .verifierLoop
+        case .adaptiveStatic, .adaptiveShadow:
+            return .adaptivePortfolio
+        case .graph, .graphTier1:
+            return .graph
+        }
+    }
+
+    var usesMiniPipeline: Bool {
+        self == .graphTier1
+    }
+}
+
+enum GraphCompilerChoice: String, CaseIterable, Identifiable {
+    case disabled
+    case shadow
+    case active
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .disabled: return "Compiler Off"
+        case .shadow: return "Compiler Shadow"
+        case .active: return "Compiler Active"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .disabled:
+            return "Use approved static graph templates exactly as authored."
+        case .shadow:
+            return "Build dependency-minimal graph plans for telemetry while executing static plans."
+        case .active:
+            return "Execute dependency-minimal graph plans when validation succeeds; fall back safely otherwise."
+        }
+    }
+
+    var mode: GraphCompilationMode {
+        switch self {
+        case .disabled: return .disabled
+        case .shadow: return .shadow
+        case .active: return .active
         }
     }
 }
@@ -101,6 +194,12 @@ final class HomeAutomationViewModel {
             rebuildOrchestrator()
         }
     }
+    var graphCompilerChoice: GraphCompilerChoice = .disabled {
+        didSet {
+            guard graphCompilerChoice != oldValue else { return }
+            rebuildOrchestrator()
+        }
+    }
     var isRunning = false
     var resultText = ""
     var metricsText = ""
@@ -110,6 +209,7 @@ final class HomeAutomationViewModel {
     var commandHistory: [HomeCommandHistoryItem] = []
     var pipelineEvents: [HomePipelineEventItem] = []
     var portfolioEvidence: [PortfolioEvidenceItem] = []
+    var architectureCards: [ArchitectureCardItem] = []
     var currentPipelineStage: String?
 
     private let registry = MockHomeDeviceRegistry()
@@ -140,6 +240,8 @@ final class HomeAutomationViewModel {
         Task.detached {
             HomeFoundationModelPrewarmer.prewarmDefaultSession()
         }
+
+        refreshArchitectureCards()
     }
 
     func initializeRAG() async {
@@ -151,16 +253,14 @@ final class HomeAutomationViewModel {
     /// selected mode. The RAG index and device registry are reused; only the
     /// runtime dependencies (agent registry, loop orchestrator) are rebuilt.
     private func rebuildOrchestrator() {
-        let dependencies: HomeAutomationRuntimeDependencies
-        switch orchestratorChoice {
-        case .graph:
-            dependencies = coordinator.makeRuntimeDependencies()
-        case .graphTier1:
-            dependencies = coordinator.makeRuntimeDependencies(useMiniPipeline: true)
-        case .verifierLoop:
-            dependencies = coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
-        }
+        let dependencies = coordinator.makeRuntimeDependencies(
+            orchestrationMode: orchestratorChoice.orchestrationMode,
+            useMiniPipeline: orchestratorChoice.usesMiniPipeline,
+            portfolioRolloutMode: orchestratorChoice.rolloutMode,
+            graphCompilationMode: graphCompilerChoice.mode
+        )
         orchestrator = HomeCommandOrchestrator(dependencies: dependencies)
+        refreshArchitectureCards()
     }
 
     func resolveCommand() {
@@ -174,6 +274,7 @@ final class HomeAutomationViewModel {
         pipelineEvents = []
         agentDashboard = []
         portfolioEvidence = []
+        refreshArchitectureCards()
         currentPipelineStage = nil
 
         Task {
@@ -201,6 +302,7 @@ final class HomeAutomationViewModel {
                 metricsText = await orchestrator.lastMetricsJSON() ?? ""
                 await refreshAgentDashboardFromMetrics()
                 await refreshPortfolioEvidenceFromMetrics()
+                await refreshArchitectureCardsFromMetrics()
                 currentPipelineStage = nil
                 commandHistory.insert(
                     HomeCommandHistoryItem(
@@ -319,6 +421,86 @@ final class HomeAutomationViewModel {
             PortfolioEvidenceItem(id: "config", title: "Config", value: evidence.configVersion),
             PortfolioEvidenceItem(id: "rollback", title: "Rollback", value: evidence.rollbackReasons.map(\.rawValue).joined(separator: ", ").ifEmpty("none"))
         ]
+    }
+
+    private func refreshArchitectureCards() {
+        architectureCards = [
+            ArchitectureCardItem(
+                id: "strategy",
+                title: "Execution Strategy",
+                value: orchestratorChoice.architectureLabel,
+                detail: orchestratorChoice.summary
+            ),
+            ArchitectureCardItem(
+                id: "runContext",
+                title: "Run Context",
+                value: "One run / event bus / ledger",
+                detail: "Input, arm execution, metrics, and terminal outcome share a single orchestration run."
+            ),
+            ArchitectureCardItem(
+                id: "automationAction",
+                title: "Automation Actions",
+                value: actionStrategyLabel,
+                detail: "Action resolution is selected from typed run context, with explicit Tier‑1 rollback preserved."
+            ),
+            ArchitectureCardItem(
+                id: "compiler",
+                title: "Graph Compiler",
+                value: graphCompilerChoice.displayName,
+                detail: graphCompilerChoice.summary
+            )
+        ]
+    }
+
+    private func refreshArchitectureCardsFromMetrics() async {
+        guard let metrics = await orchestrator.lastMetrics() else {
+            refreshArchitectureCards()
+            return
+        }
+        let executingArm = metrics.portfolioExecutionPlan?.executingArm.rawValue ??
+            metrics.portfolioRolloutEvidence?.executingArm.rawValue ??
+            orchestratorChoice.orchestrationMode.foundationModelArm.rawValue
+        let selectedArm = metrics.portfolioExecutionPlan?.selectedArm.rawValue ??
+            metrics.portfolioRolloutEvidence?.selectedArm?.rawValue ??
+            executingArm
+        let fallbackReason = metrics.portfolioExecutionPlan?.fallbackReason.rawValue ??
+            metrics.portfolioRolloutEvidence?.fallbackReason.rawValue ??
+            "none"
+        let compilerFallback = metrics.graphRun?.compilationReport?.fallbackReason.rawValue ?? "none"
+        architectureCards = [
+            ArchitectureCardItem(
+                id: "strategy",
+                title: "Execution Strategy",
+                value: "\(selectedArm) → \(executingArm)",
+                detail: "Fallback: \(fallbackReason)"
+            ),
+            ArchitectureCardItem(
+                id: "runContext",
+                title: "Run Context",
+                value: "Completed once",
+                detail: "Outcome: \(metrics.outcome); metrics stored after ledger capture."
+            ),
+            ArchitectureCardItem(
+                id: "automationAction",
+                title: "Automation Actions",
+                value: actionStrategyLabel(for: executingArm),
+                detail: "Selected by the active arm and scoped to this run."
+            ),
+            ArchitectureCardItem(
+                id: "compiler",
+                title: "Graph Compiler",
+                value: graphCompilerChoice.displayName,
+                detail: "Fallback: \(compilerFallback)"
+            )
+        ]
+    }
+
+    private var actionStrategyLabel: String {
+        actionStrategyLabel(for: orchestratorChoice == .graphTier1 ? "graphWithTier1" : orchestratorChoice.orchestrationMode.foundationModelArm.rawValue)
+    }
+
+    private func actionStrategyLabel(for arm: String) -> String {
+        arm == "graphWithTier1" ? "Tier‑1 mini-pipeline" : "Graph action subgraphs"
     }
 
     private static func status(from status: OrchestratorPipelineEvent.EventStatus) -> HomePipelineEventStatus {

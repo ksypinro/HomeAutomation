@@ -37,4 +37,51 @@ public struct OrchestrationRunContext: Sendable {
         self.selectedArm = selectedArm
         self.executingArm = executingArm
     }
+
+    public static func make(
+        request: CommandRequest,
+        preparedRequest: PreparedOrchestrationRequest,
+        contextStore: ResolutionContextStore,
+        selectedArm: FoundationModelCallArm,
+        executingArm: FoundationModelCallArm
+    ) -> OrchestrationRunContext {
+        let runID = UUID()
+        return OrchestrationRunContext(
+            request: request,
+            preparedRequest: preparedRequest,
+            runID: runID,
+            traceID: runID.uuidString,
+            spanID: TelemetryTraceContext.makeSpanID(),
+            eventBus: AgentEventBus(),
+            contextStore: contextStore,
+            usageLedger: FoundationModelUsageLedger(runID: runID.uuidString),
+            selectedArm: selectedArm,
+            executingArm: executingArm
+        )
+    }
+
+    public func publishInputEvent(detail: String) async {
+        await eventBus.publish(OrchestratorPipelineEvent(
+            runID: runID,
+            stage: "input",
+            status: .completed,
+            detail: detail
+        ))
+    }
+
+    public func publishOutcomeEvent(result: HomeAutomationResolverResult) async {
+        await eventBus.publish(OrchestratorPipelineEvent(
+            runID: runID,
+            stage: "outcome",
+            status: .completed,
+            detail: result.resolution.displaySummary
+        ))
+    }
+
+    public func setAutomationActionStrategy() async {
+        await contextStore.setScopedValue(
+            AutomationActionResolutionStrategy(executingArm: executingArm),
+            for: AutomationRuntimeContextKeys.actionResolutionStrategy
+        )
+    }
 }
