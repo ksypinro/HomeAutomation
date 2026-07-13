@@ -55,6 +55,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private let orchestrationMode: OrchestrationMode
     private let loopOrchestrator: VerifierLoopOrchestrator?
     private let foundationModelArm: FoundationModelCallArm
+    private let featureExtractor: OrchestrationFeatureExtractor
 
     public init(
         dependencies: HomeAutomationRuntimeDependencies
@@ -71,6 +72,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.orchestrationMode = dependencies.orchestrationMode
         self.loopOrchestrator = dependencies.loopOrchestrator
         self.foundationModelArm = dependencies.foundationModelArm
+        self.featureExtractor = OrchestrationFeatureExtractor(registry: dependencies.deviceRegistry)
     }
 
     public convenience init(
@@ -287,6 +289,17 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     logger.debug("Injecting conversational memory hint.")
                     await contextStore.appendMemoryHint(hint)
                 }
+                let preparedRequest = await featureExtractor.prepare(
+                    OrchestrationFeatureExtractor.Input(
+                        request: request,
+                        memoryHints: await contextStore.snapshot().memoryHints,
+                        foundationModelAvailability: Self.featureAvailability(from: policy.modelAvailabilityStatus()),
+                        ragAvailability: .unknown,
+                        gateDepth: .unknown,
+                        warmStateHint: .unknown
+                    )
+                )
+                await contextStore.setScopedValue(preparedRequest, for: AdaptiveContextKeys.preparedRequest)
                 let eventBus = AgentEventBus()
                 let runID = UUID()
                 let traceID = runID.uuidString
@@ -327,6 +340,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
 
                 var metrics = OrchestratorMetrics(command: trimmedText)
                 metrics.foundationModelUsage.modelAvailabilityStatus = policy.modelAvailabilityStatus()
+                metrics.stageDurations["adaptivePreparation"] = preparedRequest.featureSnapshot.extractionDurationMs / 1_000
 
                 let rootRouting = await HomeAutomationTelemetryScope.$current.withValue(
                     runTelemetryContext.merging(
@@ -1015,6 +1029,17 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             return "\(routed.operation.rawValue) confidence=\(confidence)"
         }
         return "\(routed.operation.rawValue) confidence=\(confidence) detected=\(detected.operation.rawValue)"
+    }
+
+    private static func featureAvailability(from status: String) -> PortfolioFeatureAvailability {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "available" {
+            return .available
+        }
+        if normalized.hasPrefix("unavailable") {
+            return .unavailable
+        }
+        return .unknown
     }
 
     private static func makeFallbackState(for text: String) -> HomeResolutionState {
