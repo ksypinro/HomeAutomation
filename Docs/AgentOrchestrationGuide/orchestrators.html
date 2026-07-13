@@ -21,6 +21,7 @@
         <a href="agents-automation.html"><span>03</span><span>Automation agents</span></a>
         <a href="orchestrators.html"><span>04</span><span>Three orchestrators</span></a>
         <a href="orchestrator.html"><span>05</span><span>Latency playbook</span></a>
+        <a href="implementation-plan.html"><span>06</span><span>Implementation plan</span></a>
       </nav>
       <div class="sidebar-note"><strong>Analysis scope</strong>This page describes live code, including gaps where design documents and runtime behavior diverge.</div>
     </aside>
@@ -100,7 +101,7 @@
               <p><b>Calls.</b> The verifier has no tools. Target/risk/operation repairs are deterministic; capability repair can use two canonical tools; fragment NLU performs two model responses. Escalation makes the full graph tool set reachable.</p>
               <ul>
                 <li><b>Best qualities:</b> low expected model-call count, typed provenance/confidence, constrained verdicts, targeted parallel repairs, delta prompts, and a safe legacy escalation concept.</li>
-                <li><b>Coverage gap:</b> trigger, condition, segmentation, and holistic repair dispatch currently return <code>nil</code>.</li>
+                <li><b>Coverage status:</b> trigger, condition, and segmentation repairs are wired; holistic repair intentionally escalates to the graph for whole-draft regeneration.</li>
                 <li><b>Safety gap:</b> accepted loop outputs return through <code>LoopResultBridge</code> before the graph’s mandatory direct-command/automation finalization gates.</li>
               </ul>
             </div>
@@ -134,7 +135,7 @@
             <article class="recommendation"><span class="rank">P0.1 · shared finalizer</span><h3>Run one mandatory post-draft gate chain for every arm</h3><p>Loop acceptance currently bypasses safety validation, parameter validation, confirmation policy, execution planning, automation validation, and requested SmartThings creation. Create a common finalization subgraph and never let an arm return a mutation-capable result before it.</p><footer>Evidence: HomeCommandOrchestrator.swift:408–425; LoopResultBridge.swift:47–136.</footer></article>
             <article class="recommendation"><span class="rank">P0.2 · verdict invariants</span><h3>Normalize acceptance, clarification, and risk</h3><p>Accept only when there are no disputes, no clarification request, and no understated risk. Convert <code>riskUnderstated</code> to a risk dispute and check it before the accepted fast path.</p><footer>Evidence: DraftVerdict.swift:171–178; VerifierLoopOrchestrator.swift:141–166.</footer></article>
             <article class="recommendation"><span class="rank">P0.3 · repair truth</span><h3>Latch only fields that were actually repaired</h3><p>Group repair steps by specialist and component scope, return written field IDs from each specialist, and latch only successful writes. Today one multi-action specialist result can repair one field while the loop latches several.</p><footer>Evidence: RepairPlanner.swift:55–89; RepairSpecialistRegistry.swift:28–68.</footer></article>
-            <article class="recommendation"><span class="rank">P0.4 · specialist completeness</span><h3>Make scheduled repairs real</h3><p>Implement fragment-NLU merge, hydrate capability-repair candidates, and add trigger/condition/segmentation specialists—or stop scheduling those paths. Rebuild the envelope when operation repair changes command versus automation shape.</p><footer>Evidence: EnvelopeMerger.swift:55–74,238–246; RepairSpecialistRegistry.swift:87–123.</footer></article>
+            <article class="recommendation"><span class="rank">P0.4 · repair receipts</span><h3>Prove scheduled repairs wrote the intended fields</h3><p>Trigger, condition, segmentation, capability, target, risk, operation, and fragment repairs are now represented in code. The remaining hardening is to return written field IDs from each specialist and latch only successful writes, with holistic repair documented as graph escalation.</p><footer>Evidence: RepairSpecialistRegistry.swift; AutomationRepairSpecialistTests.swift.</footer></article>
           </div>
 
           <h3 style="margin-top:38px">P0 · Measurement integrity</h3>
@@ -161,7 +162,7 @@
           <div class="timeline">
             <article class="timeline-item"><h3>Keep graph as the reference</h3><p>Repair required-node, retry, cancellation, priority, and telemetry semantics while preserving it as the broadest-coverage escalation path.</p></article>
             <article class="timeline-item"><h3>Promote Tier‑1 first</h3><p>After field-specific escalation and specialist timeout/circuit integration, it offers the lowest-risk large reduction for multi-action automations.</p></article>
-            <article class="timeline-item"><h3>Shadow the verifier loop</h3><p>Do not make it default until the common final safety chain, complete automation specialists, correct repair merging/latching, seeded escalation, memory handling, and live call telemetry all pass.</p></article>
+            <article class="timeline-item"><h3>Shadow the verifier loop</h3><p>Do not make it default until the common final safety chain, repair receipt/latching hardening, seeded escalation, memory handling, and live call telemetry all pass.</p></article>
             <article class="timeline-item"><h3>Add adaptive selection only after measurement</h3><p>The next page proposes a fourth orchestrator that routes among the three existing arms and schedules their frontier more intelligently.</p></article>
           </div>
         </section>

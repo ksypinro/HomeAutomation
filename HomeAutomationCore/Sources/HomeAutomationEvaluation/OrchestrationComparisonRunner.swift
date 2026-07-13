@@ -42,6 +42,9 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
     public let selectedDeviceIDs: [String]
     public let capability: String?
     public let command: String?
+    public let requiresFinalizationReceipt: Bool
+    public let finalizationReceiptStatus: String?
+    public let finalizationReceiptGraphID: String?
 
     public init(
         arm: OrchestrationArm,
@@ -59,7 +62,10 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         confirmation: Bool,
         selectedDeviceIDs: [String],
         capability: String?,
-        command: String?
+        command: String?,
+        requiresFinalizationReceipt: Bool = false,
+        finalizationReceiptStatus: String? = nil,
+        finalizationReceiptGraphID: String? = nil
     ) {
         self.arm = arm
         self.caseID = caseID
@@ -77,6 +83,9 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         self.selectedDeviceIDs = selectedDeviceIDs
         self.capability = capability
         self.command = command
+        self.requiresFinalizationReceipt = requiresFinalizationReceipt
+        self.finalizationReceiptStatus = finalizationReceiptStatus
+        self.finalizationReceiptGraphID = finalizationReceiptGraphID
     }
 }
 
@@ -119,6 +128,12 @@ public struct OrchestrationArmSummary: Sendable, Codable {
     public let clarificationRate: Double
     public let confirmationRate: Double
     public let escalationRate: Double
+    public let finalizationReceiptRequiredCases: Int
+    public let finalizationReceiptPresentCases: Int
+    public let finalizationReceiptCompletedCases: Int
+    public let actionableWithoutCompletedReceiptCases: Int
+    public let finalizationReceiptCoverageRate: Double
+    public let finalizationReceiptCompletedRate: Double
     public let loopIterationHistogram: [Int: Int]
 
     public static func make(
@@ -132,6 +147,12 @@ public struct OrchestrationArmSummary: Sendable, Codable {
                 meanFMCalls: 0, maxFMCalls: 0, meanDurationMs: 0,
                 p50DurationMs: 0, p95DurationMs: 0, fmQueueWaitMsMean: 0,
                 clarificationRate: 0, confirmationRate: 0, escalationRate: 0,
+                finalizationReceiptRequiredCases: 0,
+                finalizationReceiptPresentCases: 0,
+                finalizationReceiptCompletedCases: 0,
+                actionableWithoutCompletedReceiptCases: 0,
+                finalizationReceiptCoverageRate: 0,
+                finalizationReceiptCompletedRate: 0,
                 loopIterationHistogram: [:]
             )
         }
@@ -139,6 +160,9 @@ public struct OrchestrationArmSummary: Sendable, Codable {
         let durations = results.map(\.durationMs).sorted()
         let fmCalls = results.map(\.modelCallCount)
         let iterationCounts = results.compactMap(\.loopIterations)
+        let receiptRequired = results.filter(\.requiresFinalizationReceipt)
+        let receiptPresent = receiptRequired.filter { $0.finalizationReceiptStatus != nil }
+        let receiptCompleted = receiptRequired.filter { $0.finalizationReceiptStatus == FinalizationReceiptStatus.completed.rawValue }
         var histogram: [Int: Int] = [:]
         for iter in iterationCounts {
             histogram[iter, default: 0] += 1
@@ -158,6 +182,12 @@ public struct OrchestrationArmSummary: Sendable, Codable {
             clarificationRate: Double(results.filter(\.clarification).count) / Double(total),
             confirmationRate: Double(results.filter(\.confirmation).count) / Double(total),
             escalationRate: Double(results.filter(\.escalated).count) / Double(total),
+            finalizationReceiptRequiredCases: receiptRequired.count,
+            finalizationReceiptPresentCases: receiptPresent.count,
+            finalizationReceiptCompletedCases: receiptCompleted.count,
+            actionableWithoutCompletedReceiptCases: receiptRequired.count - receiptCompleted.count,
+            finalizationReceiptCoverageRate: receiptRequired.isEmpty ? 0 : Double(receiptPresent.count) / Double(receiptRequired.count),
+            finalizationReceiptCompletedRate: receiptRequired.isEmpty ? 0 : Double(receiptCompleted.count) / Double(receiptRequired.count),
             loopIterationHistogram: histogram
         )
     }
@@ -262,6 +292,8 @@ public struct OrchestrationComparisonRunner: Sendable {
             let metrics = await orchestrator.lastMetrics()
             let durationMs = Date().timeIntervalSince(startedAt) * 1_000
             let outcome = allowedOutcome(for: result.resolution)
+            let receipt = metrics?.safetyMetrics.finalizationReceipt
+            let requiresReceipt = requiresFinalizationReceipt(result.resolution)
 
             return OrchestrationArmResult(
                 arm: arm,
@@ -279,7 +311,10 @@ public struct OrchestrationComparisonRunner: Sendable {
                 confirmation: outcome == .confirmation,
                 selectedDeviceIDs: selectedDeviceIDs(from: result),
                 capability: result.draft?.capability,
-                command: result.draft?.command
+                command: result.draft?.command,
+                requiresFinalizationReceipt: requiresReceipt,
+                finalizationReceiptStatus: receipt?.status.rawValue,
+                finalizationReceiptGraphID: receipt?.graphID
             )
         } catch {
             let durationMs = Date().timeIntervalSince(startedAt) * 1_000
@@ -299,8 +334,24 @@ public struct OrchestrationComparisonRunner: Sendable {
                 confirmation: false,
                 selectedDeviceIDs: [],
                 capability: nil,
-                command: nil
+                command: nil,
+                requiresFinalizationReceipt: false,
+                finalizationReceiptStatus: nil,
+                finalizationReceiptGraphID: nil
             )
+        }
+    }
+
+    private func requiresFinalizationReceipt(_ resolution: HomeCommandResolution) -> Bool {
+        switch resolution {
+        case .readyToExecute,
+             .executed,
+             .requiresConfirmation,
+             .automationDrafted,
+             .automationRequiresConfirmation:
+            return true
+        case .needsClarification, .unsupported:
+            return false
         }
     }
 
@@ -392,6 +443,10 @@ public struct OrchestrationComparisonRunner: Sendable {
         lines.append("| Clarification rate | \(arms.map { cell($0) { String(format: "%.1f%%", $0.clarificationRate * 100) } }.joined(separator: " | ")) |")
         lines.append("| Confirmation rate | \(arms.map { cell($0) { String(format: "%.1f%%", $0.confirmationRate * 100) } }.joined(separator: " | ")) |")
         lines.append("| Escalation rate | \(arms.map { cell($0) { String(format: "%.1f%%", $0.escalationRate * 100) } }.joined(separator: " | ")) |")
+        lines.append("| Finalization receipt required cases | \(arms.map { cell($0) { "\($0.finalizationReceiptRequiredCases)" } }.joined(separator: " | ")) |")
+        lines.append("| Finalization receipt coverage | \(arms.map { cell($0) { String(format: "%.1f%%", $0.finalizationReceiptCoverageRate * 100) } }.joined(separator: " | ")) |")
+        lines.append("| Finalization receipt completed | \(arms.map { cell($0) { String(format: "%.1f%%", $0.finalizationReceiptCompletedRate * 100) } }.joined(separator: " | ")) |")
+        lines.append("| Actionable without completed receipt | \(arms.map { cell($0) { "\($0.actionableWithoutCompletedReceiptCases)" } }.joined(separator: " | ")) |")
 
         if !report.armCategorySummaries.isEmpty {
             lines.append("")

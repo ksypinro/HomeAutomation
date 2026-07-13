@@ -38,6 +38,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
     public var parameterValidationRan: Bool
     public var confirmationPolicyRan: Bool
     public var executionPlanningRan: Bool
+    public var finalizationReceipt: ResolutionFinalizationReceipt?
     public var requiresConfirmation: Bool
     public var readyOrExecuted: Bool
     public var unsupported: Bool
@@ -49,6 +50,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
         parameterValidationRan: Bool = false,
         confirmationPolicyRan: Bool = false,
         executionPlanningRan: Bool = false,
+        finalizationReceipt: ResolutionFinalizationReceipt? = nil,
         requiresConfirmation: Bool = false,
         readyOrExecuted: Bool = false,
         unsupported: Bool = false,
@@ -59,6 +61,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
         self.parameterValidationRan = parameterValidationRan
         self.confirmationPolicyRan = confirmationPolicyRan
         self.executionPlanningRan = executionPlanningRan
+        self.finalizationReceipt = finalizationReceipt
         self.requiresConfirmation = requiresConfirmation
         self.readyOrExecuted = readyOrExecuted
         self.unsupported = unsupported
@@ -320,6 +323,10 @@ public struct OrchestratorMetrics: Sendable, Codable {
             parameterValidationRan: agentStatuses[AgentID.parameterValidation.rawValue] != nil,
             confirmationPolicyRan: agentStatuses[AgentID.confirmationPolicy.rawValue] != nil,
             executionPlanningRan: agentStatuses[AgentID.executionPlanning.rawValue] != nil,
+            finalizationReceipt: ResolutionFinalizationReceipt.directCommand(
+                graphRun: graphRun,
+                resolution: result.resolution
+            ),
             requiresConfirmation: {
                 if case .requiresConfirmation = result.resolution { return true }
                 return false
@@ -381,6 +388,10 @@ public struct OrchestratorMetrics: Sendable, Codable {
             selectedAgents: selectedAgents,
             skippedNodeIDs: statuses.filter { $0.value == .skipped }.map(\.key).sorted(),
             nodeDurations: [:]
+        )
+        safetyMetrics.finalizationReceipt = ResolutionFinalizationReceipt.automationCreation(
+            graphRun: self.graphRun,
+            resolution: result.resolution
         )
         metricsV2 = RunMetricsV2.derive(from: self)
     }

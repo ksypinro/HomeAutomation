@@ -9,7 +9,7 @@ Audit basis: [AutomationCreationRedesign.md](AutomationCreationRedesign.md) + [A
 ## Audit summary (2026-07-11)
 
 - **AutomationParallelismStrategy.md Phases I–IV: fully implemented** ✅ (verified in code; see ParallelismTask.md)
-- **AutomationCreationRedesign.md: implemented except** G-1 (H6 repair specialists), G-2 (loop-path device triggers), G-3 (A-4 confirmation rendering)
+- **AutomationCreationRedesign.md: fully implemented for the audited G-1/G-2/G-3 gap set** ✅
 
 ---
 
@@ -43,7 +43,7 @@ Audit basis: [AutomationCreationRedesign.md](AutomationCreationRedesign.md) + [A
 
 ## Phase 5 — Bookkeeping
 
-- [x] 5.1: The pending fixes (Tier-1 mini-pipeline bugfix + `AutomationTier1Tests`, UI orchestrator picker in `HomeAutomationView`/`ViewModel`, `HomeCommandOrchestrator`) were transplanted from the main checkout into this worktree so everything is based here. All still uncommitted — committing is left to the user.
+- [x] 5.1: The pending fixes (Tier-1 mini-pipeline bugfix + `AutomationTier1Tests`, UI orchestrator picker in `HomeAutomationView`/`ViewModel`, `HomeCommandOrchestrator`) were consolidated and later merged with the gap-closure work in PR #22 (`80989c8`).
 - [x] 5.2: No new public/coordinator types were added (only fields, an enum case, extension methods, and init params), so `CoordinatorTypeInventory.md` needs no entries; the inventory metatest stays green.
 
 ---

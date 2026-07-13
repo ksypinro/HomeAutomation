@@ -169,24 +169,34 @@ public enum DraftVerdictSchema {
 public extension DraftVerdict {
 
     func constrained(allowedFieldIDs: Set<String>, maxDisputes: Int = 6) -> DraftVerdict {
-        if accepted {
-            return DraftVerdict(
-                accepted: true,
-                disputes: [],
-                needsClarification: needsClarification,
-                riskUnderstated: riskUnderstated
-            )
-        }
-
         var seen = Set<String>()
-        let filtered = disputes
+        var filtered = disputes
             .filter { allowedFieldIDs.contains($0.fieldID) }
             .filter { seen.insert($0.fieldID).inserted }
             .prefix(maxDisputes)
+            .map { $0 }
+
+        if riskUnderstated,
+           allowedFieldIDs.contains(FieldID.riskLevel.rawValue),
+           !seen.contains(FieldID.riskLevel.rawValue),
+           filtered.count < maxDisputes {
+            filtered.append(
+                DraftDispute(
+                    fieldID: FieldID.riskLevel.rawValue,
+                    kind: .wrongValue,
+                    evidence: "Verifier reported understated risk."
+                )
+            )
+        }
+
+        let normalizedAccepted = accepted &&
+            filtered.isEmpty &&
+            !needsClarification &&
+            !riskUnderstated
 
         return DraftVerdict(
-            accepted: false,
-            disputes: Array(filtered),
+            accepted: normalizedAccepted,
+            disputes: normalizedAccepted ? [] : filtered,
             needsClarification: needsClarification,
             riskUnderstated: riskUnderstated
         )

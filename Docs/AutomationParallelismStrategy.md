@@ -123,9 +123,10 @@ on the AC and the fan"* — trigger + 2 conditions + 2 actions.
 
 ### Case D — device trigger
 *"When the front door opens after 10 PM, turn on the porch light"*. Same shape as C on the
-graph path. On the loop path this currently exits `.unsupported` (H6 — envelope lacks a
-structured device-trigger condition), so the graph path is the only full server for this case —
-which makes graph-path latency work still worthwhile, not just the loop.
+graph path. The loop path now carries a structured device-trigger condition and can draft this
+case as well, so future latency work should compare all three arms rather than treating graph
+as the only full server. Graph-path latency work still matters because graph remains the
+broadest coverage and escalation reference.
 
 **Reading of the cases:** the dominant term is always `N_actions × subgraph_cost`. Tier 1
 removes that term (L1) — it is the single biggest lever and it is already implemented and

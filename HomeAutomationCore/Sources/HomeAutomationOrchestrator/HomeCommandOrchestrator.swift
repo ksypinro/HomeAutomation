@@ -382,22 +382,101 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     metrics.loop = loopOutput.metrics
 
                     switch loopOutput.exit {
-                    case .escalated(_, let reason) where reason == .verifierUnavailable || reason == .iterationCap || reason == .noProgress || reason == .repairLatch:
+                    case .escalated(let envelope, let reason) where reason == .verifierUnavailable || reason == .iterationCap || reason == .noProgress || reason == .repairLatch:
                         if policy.shouldUseModels() {
                             logger.info("Loop escalated (\(reason.rawValue)), falling through to graph path.")
                             break
                         }
-                        let result = LoopResultBridge.bridgeToResult(
-                            exit: loopOutput.exit,
-                            operationHint: operation
+                        let finalizer = ResolutionFinalizer(
+                            registry: registry,
+                            scheduler: scheduler,
+                            policy: policy,
+                            circuitBreakers: circuitBreakers,
+                            deviceRegistry: deviceRegistry
                         )
+                        let finalized = await HomeAutomationTelemetryScope.$current.withValue(
+                            pipelineTelemetryContext.merging(stage: "resolutionFinalizer")
+                        ) {
+                            await finalizer.finalize(
+                                envelope: envelope,
+                                request: request,
+                                operationHint: operation,
+                                eventBus: eventBus,
+                                runID: runID
+                            )
+                        }
+                        let result = finalized.result
                         metrics.finishedAt = Date()
+                        metrics.agentTraces = finalized.context.trace
                         metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
-                        metrics.outcome = "loopEscalated"
+                        metrics.outcome = Self.outcomeName(for: result.resolution)
+                        metrics.circuitStates = await circuitBreakers.allStatusStrings()
+                        if envelope.operation == .automationCreation {
+                            metrics.captureAutomationFields(
+                                operation: operation,
+                                graph: finalized.graph,
+                                result: result,
+                                graphRun: finalized.graphRun
+                            )
+                        } else {
+                            metrics.graphRun = finalized.graphRun
+                            metrics.captureEvaluationFields(context: finalized.context, result: result)
+                        }
+                        metrics.safetyMetrics.finalizationReceipt = finalized.receipt
                         await metricsCollector.store(metrics)
+                        await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
                         await eventBus.publish(OrchestratorPipelineEvent(
                             runID: runID, stage: "outcome", status: .completed,
-                            detail: "Loop escalated: \(reason.rawValue)"
+                            detail: result.resolution.displaySummary
+                        ))
+                        await eventBus.finish()
+                        await eventForwarder.value
+                        continuation.yield(.result(result))
+                        continuation.finish()
+                        return
+
+                    case .accepted(let envelope, _):
+                        let finalizer = ResolutionFinalizer(
+                            registry: registry,
+                            scheduler: scheduler,
+                            policy: policy,
+                            circuitBreakers: circuitBreakers,
+                            deviceRegistry: deviceRegistry
+                        )
+                        let finalized = await HomeAutomationTelemetryScope.$current.withValue(
+                            pipelineTelemetryContext.merging(stage: "resolutionFinalizer")
+                        ) {
+                            await finalizer.finalize(
+                                envelope: envelope,
+                                request: request,
+                                operationHint: operation,
+                                eventBus: eventBus,
+                                runID: runID
+                            )
+                        }
+                        let result = finalized.result
+                        metrics.finishedAt = Date()
+                        metrics.agentTraces = finalized.context.trace
+                        metrics.outcome = Self.outcomeName(for: result.resolution)
+                        metrics.totalDuration = metrics.finishedAt?.timeIntervalSince(loopStarted)
+                        metrics.circuitStates = await circuitBreakers.allStatusStrings()
+                        if envelope.operation == .automationCreation {
+                            metrics.captureAutomationFields(
+                                operation: operation,
+                                graph: finalized.graph,
+                                result: result,
+                                graphRun: finalized.graphRun
+                            )
+                        } else {
+                            metrics.graphRun = finalized.graphRun
+                            metrics.captureEvaluationFields(context: finalized.context, result: result)
+                        }
+                        metrics.safetyMetrics.finalizationReceipt = finalized.receipt
+                        await metricsCollector.store(metrics)
+                        await conversationMemory.append(Self.memoryTurn(for: result, userText: trimmedText))
+                        await eventBus.publish(OrchestratorPipelineEvent(
+                            runID: runID, stage: "outcome", status: .completed,
+                            detail: result.resolution.displaySummary
                         ))
                         await eventBus.finish()
                         await eventForwarder.value
@@ -765,11 +844,49 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             circuitBreakers: circuitBreakers,
             runID: runID
         )
+        let context = await contextStore.snapshot()
+        let resolution = context.resolution ?? Self.resolution(from: result.exit)
+        let receipt = ResolutionFinalizationReceipt.directCommand(
+            graphRun: result.metrics,
+            resolution: resolution
+        )
+        if Self.requiresCompletedFinalizationReceipt(resolution),
+           receipt?.status != .completed {
+            let finalizationGraph = FinalizationGraphFactory.directCommandFinalizationGraph()
+            let finalizationResult = await scheduler.execute(
+                finalizationGraph,
+                registry: registry,
+                contextStore: contextStore,
+                eventBus: eventBus,
+                policy: policy,
+                circuitBreakers: circuitBreakers,
+                runID: runID
+            )
+            return DirectCommandExecutionResult(
+                exit: finalizationResult.exit,
+                fallbackUsed: plan.isFallbackOnly,
+                graphRun: finalizationResult.metrics
+            )
+        }
+
         return DirectCommandExecutionResult(
             exit: result.exit,
             fallbackUsed: plan.isFallbackOnly,
             graphRun: result.metrics
         )
+    }
+
+    private static func requiresCompletedFinalizationReceipt(_ resolution: HomeCommandResolution) -> Bool {
+        switch resolution {
+        case .readyToExecute,
+             .executed,
+             .requiresConfirmation,
+             .automationDrafted,
+             .automationRequiresConfirmation:
+            return true
+        case .needsClarification, .unsupported:
+            return false
+        }
     }
 
     private static func resolution(from exit: AgentRunResult?) -> HomeCommandResolution {
