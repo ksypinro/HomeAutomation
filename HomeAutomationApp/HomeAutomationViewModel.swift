@@ -51,6 +51,57 @@ struct PortfolioEvidenceItem: Identifiable, Hashable {
     let value: String
 }
 
+struct ResultCoreDisplay: Hashable {
+    let title: String
+    let summary: String
+    let engine: String
+    let statusSystemImage: String
+}
+
+struct ResultDetailSection: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let content: String
+}
+
+struct AutomationResultDisplay: Hashable {
+    let name: String
+    let summary: String
+    let iconSystemName: String
+    let triggerTitle: String
+    let triggerSubtitle: String
+    let conditionTree: AutomationConditionDisplayNode?
+    let actionItems: [AutomationCardItem]
+    let smartThingsStatus: String
+    let json: String?
+}
+
+struct AutomationConditionDisplayNode: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case all
+        case any
+        case negated
+        case changes
+        case condition
+    }
+
+    let id: String
+    let kind: Kind
+    let title: String
+    let subtitle: String
+    let detail: String
+    let systemImage: String
+    let children: [AutomationConditionDisplayNode]
+}
+
+struct AutomationCardItem: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let detail: String
+    let systemImage: String
+}
+
 struct ArchitectureCardItem: Identifiable, Hashable {
     let id: String
     let title: String
@@ -204,6 +255,9 @@ final class HomeAutomationViewModel {
     var resultText = ""
     var metricsText = ""
     var errorMessage: String?
+    var resultCore: ResultCoreDisplay?
+    var resultDetailSections: [ResultDetailSection] = []
+    var automationResult: AutomationResultDisplay?
     var deviceItems: [HomeDeviceDashboardItem] = []
     var agentDashboard: [AgentDashboardItem] = []
     var commandHistory: [HomeCommandHistoryItem] = []
@@ -271,6 +325,9 @@ final class HomeAutomationViewModel {
         errorMessage = nil
         resultText = ""
         metricsText = ""
+        resultCore = nil
+        resultDetailSections = []
+        automationResult = nil
         pipelineEvents = []
         agentDashboard = []
         portfolioEvidence = []
@@ -299,6 +356,9 @@ final class HomeAutomationViewModel {
 
                 let engineName = orchestratorChoice.engineName
                 resultText = Self.format(output, engineName: engineName)
+                resultCore = Self.makeResultCore(output, engineName: engineName)
+                resultDetailSections = Self.makeResultDetailSections(from: resultText)
+                automationResult = Self.makeAutomationResult(output)
                 metricsText = await orchestrator.lastMetricsJSON() ?? ""
                 await refreshAgentDashboardFromMetrics()
                 await refreshPortfolioEvidenceFromMetrics()
@@ -323,6 +383,16 @@ final class HomeAutomationViewModel {
                 )
             } catch {
                 errorMessage = error.localizedDescription
+                resultCore = ResultCoreDisplay(
+                    title: "Could not resolve command",
+                    summary: error.localizedDescription,
+                    engine: orchestratorChoice.engineName,
+                    statusSystemImage: "exclamationmark.triangle.fill"
+                )
+                resultDetailSections = [
+                    ResultDetailSection(id: "error", title: "Error", content: error.localizedDescription)
+                ]
+                automationResult = nil
                 currentPipelineStage = nil
                 commandHistory.insert(
                     HomeCommandHistoryItem(
@@ -623,6 +693,234 @@ final class HomeAutomationViewModel {
         }
 
         return sections.joined(separator: "\n\n")
+    }
+
+    private static func makeResultCore(_ result: HomeAutomationResolverResult, engineName: String) -> ResultCoreDisplay {
+        let title: String
+        let icon: String
+        switch result.resolution {
+        case .readyToExecute, .executed:
+            title = "Command ready"
+            icon = "checkmark.circle.fill"
+        case .requiresConfirmation, .automationRequiresConfirmation:
+            title = "Confirmation needed"
+            icon = "exclamationmark.shield.fill"
+        case .automationDrafted:
+            title = "Automation drafted"
+            icon = "calendar.badge.clock"
+        case .needsClarification:
+            title = "Need a little more detail"
+            icon = "questionmark.circle.fill"
+        case .unsupported:
+            title = "Unsupported command"
+            icon = "xmark.octagon.fill"
+        }
+
+        return ResultCoreDisplay(
+            title: title,
+            summary: result.resolution.displaySummary,
+            engine: engineName,
+            statusSystemImage: icon
+        )
+    }
+
+    private static func makeResultDetailSections(from text: String) -> [ResultDetailSection] {
+        text.components(separatedBy: "\n\n")
+            .enumerated()
+            .compactMap { index, rawSection in
+                let section = rawSection.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !section.isEmpty else { return nil }
+                let lines = section.components(separatedBy: .newlines)
+                let firstLine = lines.first ?? "Details"
+                let title = firstLine.replacingOccurrences(of: ":", with: "")
+                let content = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                return ResultDetailSection(
+                    id: "\(index)-\(title)",
+                    title: title.isEmpty ? "Details" : title,
+                    content: content.isEmpty ? section : content
+                )
+            }
+    }
+
+    private static func makeAutomationResult(_ result: HomeAutomationResolverResult) -> AutomationResultDisplay? {
+        let plan: HomeAutomationCreationPlan
+        switch result.resolution {
+        case .automationDrafted(let draftPlan), .automationRequiresConfirmation(let draftPlan):
+            plan = draftPlan
+        default:
+            return nil
+        }
+
+        let deviceNames = Dictionary(
+            (result.hydratedCandidates + result.retrievedCandidates + plan.resolvedActions.compactMap(\.device))
+                .map { ($0.id, $0.displayName) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        let trigger = automationTriggerDisplay(plan.ruleDraft.trigger)
+        let conditionTree = plan.ruleDraft.condition.map {
+            automationConditionTree($0, path: "condition", deviceNames: deviceNames)
+        }
+        let actionItems = plan.resolvedActions.enumerated().map { index, action in
+            AutomationCardItem(
+                id: "action-\(index)-\(action.device?.id ?? action.draft.targetDeviceID ?? UUID().uuidString)",
+                title: action.device?.displayName ?? action.draft.targetDeviceID ?? "Unresolved device",
+                subtitle: action.device?.room ?? "No room",
+                detail: actionDisplayText(action),
+                systemImage: iconName(forDeviceType: action.device?.deviceType)
+            )
+        }
+
+        return AutomationResultDisplay(
+            name: plan.name,
+            summary: result.resolution.displaySummary,
+            iconSystemName: "sun.max.fill",
+            triggerTitle: trigger.title,
+            triggerSubtitle: trigger.subtitle,
+            conditionTree: conditionTree,
+            actionItems: actionItems,
+            smartThingsStatus: smartThingsStatus(plan),
+            json: plan.smartThingsRuleJSON
+        )
+    }
+
+    private static func automationTriggerDisplay(_ trigger: HomeAutomationTrigger?) -> (title: String, subtitle: String) {
+        guard let trigger else { return ("No trigger", "Manual or unresolved trigger") }
+        switch trigger {
+        case .schedule(let schedule):
+            return (
+                schedule.timeOfDay?.displayString ?? "Unspecified time",
+                schedule.repeatRule.displayString.capitalized
+            )
+        case .device(let deviceTrigger):
+            return (deviceTrigger.description, "Device trigger")
+        }
+    }
+
+    private static func automationConditionTree(
+        _ condition: HomeAutomationCondition,
+        path: String,
+        deviceNames: [String: String]
+    ) -> AutomationConditionDisplayNode {
+        switch condition {
+        case .and(let children):
+            return AutomationConditionDisplayNode(
+                id: path,
+                kind: .all,
+                title: "All of these",
+                subtitle: "AND group",
+                detail: "Every condition in this group must be met.",
+                systemImage: "checkmark.circle.badge.questionmark",
+                children: children.enumerated().map {
+                    automationConditionTree($0.element, path: "\(path)-\($0.offset)", deviceNames: deviceNames)
+                }
+            )
+        case .or(let children):
+            return AutomationConditionDisplayNode(
+                id: path,
+                kind: .any,
+                title: "Any of these",
+                subtitle: "OR group",
+                detail: "At least one condition in this group must be met.",
+                systemImage: "arrow.triangle.branch",
+                children: children.enumerated().map {
+                    automationConditionTree($0.element, path: "\(path)-\($0.offset)", deviceNames: deviceNames)
+                }
+            )
+        case .not(let child):
+            return AutomationConditionDisplayNode(
+                id: path,
+                kind: .negated,
+                title: "Not",
+                subtitle: "Negated condition",
+                detail: "This condition must not be met.",
+                systemImage: "exclamationmark.circle",
+                children: [automationConditionTree(child, path: "\(path)-not", deviceNames: deviceNames)]
+            )
+        case .changes(let child):
+            return AutomationConditionDisplayNode(
+                id: path,
+                kind: .changes,
+                title: "When this changes",
+                subtitle: "Change trigger",
+                detail: "The condition is evaluated when this value changes.",
+                systemImage: "arrow.triangle.2.circlepath",
+                children: [automationConditionTree(child, path: "\(path)-changes", deviceNames: deviceNames)]
+            )
+        case .comparison(let comparison):
+            return AutomationConditionDisplayNode(
+                id: path,
+                kind: .condition,
+                title: conditionDeviceTitle(comparison.left, deviceNames: deviceNames),
+                subtitle: conditionDeviceSubtitle(comparison.left),
+                detail: comparison.readableDescription(deviceNames: deviceNames),
+                systemImage: iconName(forConditionOperand: comparison.left),
+                children: []
+            )
+        }
+    }
+
+    private static func conditionDeviceTitle(
+        _ operand: HomeAutomationConditionOperand,
+        deviceNames: [String: String]
+    ) -> String {
+        if case .deviceAttribute(let description, let deviceID, _, _) = operand {
+            if let deviceID, let name = deviceNames[deviceID] { return name }
+            let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "Condition" : trimmed
+        }
+        return "Condition"
+    }
+
+    private static func conditionDeviceSubtitle(_ operand: HomeAutomationConditionOperand) -> String {
+        guard case .deviceAttribute(_, _, let capability, let attribute) = operand else {
+            return "Rule condition"
+        }
+        return [capability, attribute].compactMap { $0 }.joined(separator: " · ").ifEmpty("Device state")
+    }
+
+    private static func actionDisplayText(_ action: HomeAutomationResolvedAction) -> String {
+        let command = action.draft.command ?? action.originalText
+        if let capability = action.draft.capability {
+            return "\(capability): \(command)"
+        }
+        return command
+    }
+
+    private static func smartThingsStatus(_ plan: HomeAutomationCreationPlan) -> String {
+        if let reason = plan.unsupportedCompilationReason {
+            return "Unsupported: \(reason)"
+        }
+        if plan.backendResponse?.status == .created {
+            return "Created in SmartThings"
+        }
+        if plan.smartThingsRuleJSON != nil {
+            return "SmartThings JSON compiled"
+        }
+        return "Not compiled yet"
+    }
+
+    private static func iconName(forConditionOperand operand: HomeAutomationConditionOperand) -> String {
+        guard case .deviceAttribute(_, _, let capability, let attribute) = operand else {
+            return "checkmark.circle.fill"
+        }
+        let text = [capability, attribute].compactMap { $0 }.joined(separator: " ").lowercased()
+        if text.contains("motion") { return "figure.walk.motion" }
+        if text.contains("contact") || text.contains("lock") { return "lock.fill" }
+        if text.contains("switch") { return "lightbulb.fill" }
+        if text.contains("temperature") || text.contains("thermostat") { return "thermometer.medium" }
+        return "sensor.tag.radiowaves.forward.fill"
+    }
+
+    private static func iconName(forDeviceType deviceType: String?) -> String {
+        let value = (deviceType ?? "").lowercased()
+        if value.contains("television") || value.contains("tv") { return "tv.fill" }
+        if value.contains("light") || value.contains("lamp") { return "lightbulb.fill" }
+        if value.contains("camera") { return "video.fill" }
+        if value.contains("lock") { return "lock.fill" }
+        if value.contains("thermostat") || value.contains("ac") { return "thermometer.medium" }
+        if value.contains("shade") || value.contains("blind") { return "blinds.horizontal.closed" }
+        return "switch.2"
     }
 
     private static func describeExecutionStep(_ step: HomeAutomationExecutionStep) -> String {

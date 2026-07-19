@@ -3,66 +3,75 @@ import SwiftUI
 struct HomeAutomationView: View {
     @State private var viewModel = HomeAutomationViewModel()
     @State private var catalogText = ""
+    @State private var isShowingCatalog = false
+    @State private var isShowingResultDetails = false
+    @State private var isShowingRuntimeDetails = false
+    @State private var isShowingAutomationJSON = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 20) {
                     header
                     commandInput
                     sampleCommands
-                    executionToggle
-                    orchestratorPicker
-                    architectureControls
-                    architectureOverview
+                    quickControls
                     resolveButton
-                    output
-                    pipelineTimeline
-                    portfolioEvidence
-                    agentPerformanceDashboard
-                    metricsOutput
-                    deviceDashboard
+                    agentBoard
+                    resultSummary
                     commandHistory
-                    catalogPreview
                 }
                 .padding()
-                .frame(maxWidth: 980, alignment: .leading)
+                .frame(maxWidth: 920, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .navigationTitle("Home Automation")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        isShowingCatalog = true
+                    } label: {
+                        Label("Catalog & Registry", systemImage: "list.bullet.rectangle")
+                    }
+
+                    Button {
+                        isShowingRuntimeDetails = true
+                    } label: {
+                        Label("Runtime", systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingCatalog) {
+                CatalogRegistrySheet(catalogText: catalogText, devices: viewModel.deviceItems)
+            }
+            .sheet(isPresented: $isShowingResultDetails) {
+                ResultDetailsSheet(
+                    sections: viewModel.resultDetailSections,
+                    metricsText: viewModel.metricsText,
+                    pipelineEvents: viewModel.pipelineEvents,
+                    agentDashboard: viewModel.agentDashboard,
+                    portfolioEvidence: viewModel.portfolioEvidence
+                )
+            }
+            .sheet(isPresented: $isShowingRuntimeDetails) {
+                RuntimeDetailsSheet(
+                    architectureCards: viewModel.architectureCards,
+                    pipelineEvents: viewModel.pipelineEvents,
+                    agentDashboard: viewModel.agentDashboard,
+                    portfolioEvidence: viewModel.portfolioEvidence,
+                    metricsText: viewModel.metricsText
+                )
+            }
+            .sheet(isPresented: $isShowingAutomationJSON) {
+                JSONSheet(title: "SmartThings JSON", json: viewModel.automationResult?.json ?? "No JSON available.")
+            }
         }
         .task {
             catalogText = await viewModel.deviceCatalogText()
             await viewModel.loadDeviceDashboard()
-        }
-    }
-
-    @ViewBuilder
-    private var portfolioEvidence: some View {
-        if !viewModel.portfolioEvidence.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Adaptive Rollout Evidence", systemImage: "slider.horizontal.3")
-                    .font(.headline)
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                    ForEach(viewModel.portfolioEvidence) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(item.value)
-                                .font(.caption.monospaced())
-                                .lineLimit(2)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
-                    }
-                }
-            }
         }
     }
 
@@ -71,7 +80,7 @@ struct HomeAutomationView: View {
             Label("Home Automation", systemImage: "house.and.flag")
                 .font(.largeTitle.weight(.semibold))
 
-            Text("Resolve smart-home commands with the graph-based multi-agent pipeline, map them to capability-based commands, and execute low-risk actions locally.")
+            Text("Type a smart-home command. The app will resolve it through the selected architecture and show a clean result first; deeper traces stay one tap away.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -109,93 +118,59 @@ struct HomeAutomationView: View {
         }
     }
 
-    private var executionToggle: some View {
-        Toggle(isOn: $viewModel.executeLowRiskCommands) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Execute low-risk mock commands")
-                    .font(.headline)
-                Text("Risky actions still return a confirmation requirement.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .toggleStyle(.switch)
-        .padding(14)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var orchestratorPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Architecture")
-                .font(.headline)
-
-            Picker("Architecture", selection: $viewModel.orchestratorChoice) {
-                ForEach(OrchestratorChoice.allCases) { choice in
-                    Text(choice.displayName).tag(choice)
-                }
-            }
-            .pickerStyle(.menu)
-            .disabled(viewModel.isRunning)
-
-            Text(viewModel.orchestratorChoice.displayName)
-                .font(.callout.weight(.semibold))
-
-            Text(viewModel.orchestratorChoice.summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var architectureControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Runtime Controls", systemImage: "switch.2")
-                .font(.headline)
-
-            Picker("Graph compiler", selection: $viewModel.graphCompilerChoice) {
-                ForEach(GraphCompilerChoice.allCases) { choice in
-                    Text(choice.displayName).tag(choice)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(viewModel.isRunning)
-
-            Text(viewModel.graphCompilerChoice.summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var architectureOverview: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Architecture In Use", systemImage: "rectangle.3.group.bubble")
-                .font(.headline)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], spacing: 10) {
-                ForEach(viewModel.architectureCards) { item in
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(item.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(item.value)
-                            .font(.callout.weight(.semibold))
-                            .lineLimit(2)
-                        Text(item.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
+    private var quickControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Architecture")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("Architecture", selection: $viewModel.orchestratorChoice) {
+                        ForEach(OrchestratorChoice.allCases) { choice in
+                            Text(choice.displayName).tag(choice)
+                        }
                     }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
-                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                    .pickerStyle(.menu)
+                    .disabled(viewModel.isRunning)
+                    Text(viewModel.orchestratorChoice.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Compiler")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("Graph compiler", selection: $viewModel.graphCompilerChoice) {
+                        ForEach(GraphCompilerChoice.allCases) { choice in
+                            Text(choice.displayName).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(viewModel.isRunning)
+                    Text(viewModel.graphCompilerChoice.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Toggle(isOn: $viewModel.executeLowRiskCommands) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Execute low-risk mock commands")
+                        .font(.callout.weight(.semibold))
+                    Text("Risky actions still ask for confirmation.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+            .toggleStyle(.switch)
         }
+        .padding(16)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var resolveButton: some View {
@@ -211,154 +186,38 @@ struct HomeAutomationView: View {
     }
 
     @ViewBuilder
-    private var output: some View {
-        if let errorMessage = viewModel.errorMessage {
-            OutputPanel(title: "Error", text: errorMessage, systemImage: "exclamationmark.triangle")
-        } else if !viewModel.resultText.isEmpty {
-            OutputPanel(title: "Result", text: viewModel.resultText, systemImage: "checkmark.circle")
+    private var agentBoard: some View {
+        if !viewModel.agentDashboard.isEmpty {
+            AgentBoard(items: viewModel.agentDashboard, isRunActive: viewModel.isRunning)
         }
     }
 
     @ViewBuilder
-    private var metricsOutput: some View {
-        if !viewModel.metricsText.isEmpty {
-            OutputPanel(title: "Orchestrator Metrics", text: viewModel.metricsText, systemImage: "chart.xyaxis.line")
-        }
-    }
-
-    @ViewBuilder
-    private var pipelineTimeline: some View {
-        if !viewModel.pipelineEvents.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Pipeline", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.headline)
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
-                    if let currentPipelineStage = viewModel.currentPipelineStage {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(currentPipelineStage)
-                                .font(.caption.weight(.semibold))
-                                //.lineLimit(1)
-                            Spacer()
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, minHeight: 76, alignment: .center)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
-                    }
-
-                    ForEach(viewModel.pipelineEvents) { event in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Image(systemName: iconName(for: event.status))
-                                    .foregroundStyle(iconColor(for: event.status))
-                                Text(event.title)
-                                    .font(.caption.weight(.semibold))
-                                    //.lineLimit(1)
-                            }
-
-                            Text(event.detail.isEmpty ? event.status.rawValue : event.detail)
+    private var resultSummary: some View {
+        if viewModel.isRunning || viewModel.resultCore != nil || viewModel.errorMessage != nil {
+            VStack(alignment: .leading, spacing: 14) {
+                if viewModel.isRunning {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(viewModel.currentPipelineStage ?? "Resolving command")
+                                .font(.headline)
+                            Text("Running the selected orchestration path.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(2)
                         }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                } else if let core = viewModel.resultCore {
+                    ResultCoreCard(core: core) {
+                        isShowingResultDetails = true
                     }
                 }
-            }
-        }
-    }
 
-    @ViewBuilder
-    private var agentPerformanceDashboard: some View {
-        if !viewModel.agentDashboard.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Agent Performance", systemImage: "speedometer")
-                    .font(.headline)
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
-                    ForEach(viewModel.agentDashboard) { item in
-                        HStack(spacing: 9) {
-                            Circle()
-                                .fill(circuitColor(item.circuitState))
-                                .frame(width: 8, height: 8)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item.name)
-                                    .font(.caption.monospaced())
-                                    .lineLimit(1)
-                                Text("\(item.status) - \(item.circuitState)")
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            if let duration = item.duration {
-                                Text(String(format: "%.0fms", duration * 1000))
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                if let automationResult = viewModel.automationResult {
+                    AutomationResultCard(display: automationResult) {
+                        isShowingAutomationJSON = true
                     }
-                }
-            }
-        }
-    }
-
-    private func iconName(for status: HomePipelineEventStatus) -> String {
-        switch status {
-        case .pending:
-            return "circle"
-        case .running:
-            return "play.circle.fill"
-        case .completed:
-            return "checkmark.circle.fill"
-        case .failed:
-            return "xmark.circle.fill"
-        case .skipped:
-            return "minus.circle.fill"
-        }
-    }
-
-    private func iconColor(for status: HomePipelineEventStatus) -> Color {
-        switch status {
-        case .pending:
-            return .secondary
-        case .running:
-            return .blue
-        case .completed:
-            return .green
-        case .failed:
-            return .red
-        case .skipped:
-            return .orange
-        }
-    }
-
-    private func circuitColor(_ state: String) -> Color {
-        switch state {
-        case "closed":
-            return .green
-        case "halfOpen":
-            return .yellow
-        default:
-            return .red
-        }
-    }
-
-    private var deviceDashboard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Devices", systemImage: "square.grid.2x2")
-                .font(.headline)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
-                ForEach(viewModel.deviceItems) { device in
-                    DeviceTile(device: device)
                 }
             }
         }
@@ -372,7 +231,7 @@ struct HomeAutomationView: View {
                     .font(.headline)
 
                 VStack(spacing: 8) {
-                    ForEach(viewModel.commandHistory.prefix(8)) { item in
+                    ForEach(viewModel.commandHistory.prefix(6)) { item in
                         Button {
                             viewModel.rerun(item)
                         } label: {
@@ -383,7 +242,7 @@ struct HomeAutomationView: View {
                                     Text(item.command)
                                         .font(.callout.weight(.medium))
                                         .lineLimit(1)
-                                    Text("\(item.engine) - \(item.summary)")
+                                    Text("\(item.engine) · \(item.summary)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
@@ -392,19 +251,613 @@ struct HomeAutomationView: View {
                                 Image(systemName: "arrow.clockwise")
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(10)
+                            .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
             }
         }
     }
+}
 
-    private var catalogPreview: some View {
-        OutputPanel(title: "Mock Registry", text: catalogText, systemImage: "list.bullet.rectangle")
+private struct ResultCoreCard: View {
+    let core: ResultCoreDisplay
+    let showDetails: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: core.statusSystemImage)
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(core.title)
+                        .font(.headline)
+                    Text(core.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(core.engine)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+
+            Button {
+                showDetails()
+            } label: {
+                Label("Show full result", systemImage: "doc.text.magnifyingglass")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct AgentBoard: View {
+    let items: [AgentDashboardItem]
+    var isRunActive = false
+    @State private var isExpanded = false
+
+    private var finished: [AgentDashboardItem] {
+        items.filter { !$0.isQueued && !$0.isRunning && !$0.isFailed }
+    }
+
+    private var failed: [AgentDashboardItem] {
+        items.filter(\.isFailed)
+    }
+
+    private var running: [AgentDashboardItem] {
+        items.filter(\.isRunning)
+    }
+
+    private var queued: [AgentDashboardItem] {
+        items.filter(\.isQueued)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
+                AgentBoardLane(title: "Running", systemImage: "bolt.fill", tint: .blue, items: running)
+                AgentBoardLane(title: "Queued", systemImage: "clock.fill", tint: .orange, items: queued)
+                AgentBoardLane(title: "Finished", systemImage: "checkmark.circle.fill", tint: .green, items: finished)
+                AgentBoardLane(title: "Failed", systemImage: "xmark.octagon.fill", tint: .red, items: failed)
+            }
+            .padding(.top, 14)
+        } label: {
+            HStack {
+                Label("Agent board", systemImage: "rectangle.3.group")
+                    .font(.headline)
+                Spacer()
+                if isRunActive {
+                    Label("Live", systemImage: "circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+                } else {
+                    Text("Run complete")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Text("\(items.count)")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(.quaternary, in: Capsule())
+            }
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 18))
+        .onAppear {
+            isExpanded = isRunActive
+        }
+        .onChange(of: isRunActive) { _, active in
+            withAnimation(.easeInOut(duration: 0.22)) {
+                isExpanded = active
+            }
+        }
+    }
+}
+
+private struct AgentBoardLane: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let items: [AgentDashboardItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("\(items.count)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(tint.opacity(0.13), in: Capsule())
+            }
+
+            if items.isEmpty {
+                Text("No agents")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .center)
+            } else {
+                ForEach(items) { item in
+                    AgentBoardCard(item: item, tint: tint)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+        .background(tint.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(tint.opacity(0.25), lineWidth: 1)
+        }
+    }
+}
+
+private struct AgentBoardCard: View {
+    let item: AgentDashboardItem
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.14))
+                Image(systemName: item.isRunning ? "waveform.path.ecg" : item.statusIcon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: 32, height: 32)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.displayName)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(item.statusLabel)
+                    if let duration = item.duration {
+                        Text("· \(String(format: "%.0fms", duration * 1000))")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(9)
+        .background(tint.opacity(0.20), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(tint.opacity(0.42), lineWidth: 1)
+        }
+    }
+}
+
+private extension AgentDashboardItem {
+    var normalizedStatus: String { status.lowercased() }
+    var isRunning: Bool { normalizedStatus == "running" }
+    var isQueued: Bool { normalizedStatus == "pending" || normalizedStatus == "queued" }
+    var isFailed: Bool {
+        ["failed", "retryablefailure", "terminalfailure", "timeout"].contains(normalizedStatus)
+    }
+
+    var displayName: String {
+        name
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+    }
+
+    var statusLabel: String {
+        switch normalizedStatus {
+        case "success", "completed": return "Completed"
+        case "retryablefailure": return "Retry failed"
+        case "terminalfailure": return "Failed"
+        default: return status.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    var statusIcon: String {
+        switch normalizedStatus {
+        case "failed", "retryablefailure", "terminalfailure", "timeout": return "xmark"
+        case "skipped", "unsupported": return "forward.fill"
+        case "pending", "queued": return "clock.fill"
+        default: return "checkmark"
+        }
+    }
+}
+
+private struct AutomationResultCard: View {
+    let display: AutomationResultDisplay
+    let showJSON: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(.quaternary.opacity(0.7))
+                        .frame(width: 76, height: 76)
+                    Image(systemName: display.iconSystemName)
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(.yellow)
+                }
+
+                Text(display.name)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                    .background(.quaternary.opacity(0.42), in: Capsule())
+
+                Text(display.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("If")
+                    .font(.title.weight(.bold))
+
+                AutomationEventRow(
+                    systemImage: "clock.fill",
+                    title: display.triggerTitle,
+                    subtitle: display.triggerSubtitle,
+                    detail: nil
+                )
+
+                if let conditionTree = display.conditionTree {
+                    AutomationConditionNodeView(node: conditionTree, depth: 0)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Then")
+                    .font(.title.weight(.bold))
+
+                VStack(spacing: 10) {
+                    ForEach(display.actionItems) { item in
+                        AutomationEventRow(
+                            systemImage: item.systemImage,
+                            title: item.title,
+                            subtitle: item.subtitle,
+                            detail: item.detail
+                        )
+                    }
+                }
+            }
+
+            HStack {
+                Label(display.smartThingsStatus, systemImage: "checkmark.seal")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if display.json != nil {
+                    Button {
+                        showJSON()
+                    } label: {
+                        Label("Show JSON", systemImage: "curlybraces")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(18)
+        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 28))
+        .foregroundStyle(.white)
+    }
+}
+
+private struct AutomationConditionNodeView: View {
+    let node: AutomationConditionDisplayNode
+    let depth: Int
+
+    private var isGroup: Bool { !node.children.isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: node.systemImage)
+                    .font(.headline)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(accentColor)
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(node.title)
+                            .font(.headline)
+                        if isGroup {
+                            Text(node.subtitle)
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(accentColor.opacity(0.18), in: Capsule())
+                                .foregroundStyle(accentColor)
+                        }
+                    }
+                    if !isGroup {
+                        Text(node.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.62))
+                    }
+                    Text(node.detail)
+                        .font(.callout)
+                        .foregroundStyle(isGroup ? .white.opacity(0.62) : .blue)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if isGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(node.children) { child in
+                        AutomationConditionNodeView(node: child, depth: depth + 1)
+                    }
+                }
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(accentColor.opacity(0.55))
+                        .frame(width: 3)
+                }
+            }
+        }
+        .padding(depth == 0 ? 16 : 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(backgroundColor, in: RoundedRectangle(cornerRadius: depth == 0 ? 22 : 15))
+    }
+
+    private var accentColor: Color {
+        switch node.kind {
+        case .all: return .green
+        case .any: return .orange
+        case .negated: return .red
+        case .changes: return .purple
+        case .condition: return .cyan
+        }
+    }
+
+    private var backgroundColor: Color {
+        depth == 0 ? .white.opacity(0.09) : .white.opacity(0.055)
+    }
+}
+
+private struct AutomationEventRow: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+    let detail: String?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.cyan)
+                .frame(width: 34)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.68))
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(.blue)
+                }
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 22))
+    }
+}
+
+private struct CatalogRegistrySheet: View {
+    let catalogText: String
+    let devices: [HomeDeviceDashboardItem]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Registry Devices") {
+                    ForEach(devices) { device in
+                        DeviceTile(device: device)
+                    }
+                }
+
+                Section("Catalogue Text") {
+                    Text(catalogText.isEmpty ? "Loading..." : catalogText)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+            .navigationTitle("Catalog & Registry")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct ResultDetailsSheet: View {
+    let sections: [ResultDetailSection]
+    let metricsText: String
+    let pipelineEvents: [HomePipelineEventItem]
+    let agentDashboard: [AgentDashboardItem]
+    let portfolioEvidence: [PortfolioEvidenceItem]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Result") {
+                    ForEach(sections) { section in
+                        DisclosureGroup(section.title) {
+                            Text(section.content)
+                                .font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(.vertical, 6)
+                        }
+                    }
+                }
+
+                RuntimeDisclosureSections(
+                    metricsText: metricsText,
+                    pipelineEvents: pipelineEvents,
+                    agentDashboard: agentDashboard,
+                    portfolioEvidence: portfolioEvidence
+                )
+            }
+            .navigationTitle("Result Details")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct RuntimeDetailsSheet: View {
+    let architectureCards: [ArchitectureCardItem]
+    let pipelineEvents: [HomePipelineEventItem]
+    let agentDashboard: [AgentDashboardItem]
+    let portfolioEvidence: [PortfolioEvidenceItem]
+    let metricsText: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Architecture") {
+                    ForEach(architectureCards) { card in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(card.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(card.value)
+                                .font(.callout.weight(.semibold))
+                            Text(card.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                RuntimeDisclosureSections(
+                    metricsText: metricsText,
+                    pipelineEvents: pipelineEvents,
+                    agentDashboard: agentDashboard,
+                    portfolioEvidence: portfolioEvidence
+                )
+            }
+            .navigationTitle("Runtime Details")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct RuntimeDisclosureSections: View {
+    let metricsText: String
+    let pipelineEvents: [HomePipelineEventItem]
+    let agentDashboard: [AgentDashboardItem]
+    let portfolioEvidence: [PortfolioEvidenceItem]
+
+    var body: some View {
+        if !pipelineEvents.isEmpty {
+            Section("Pipeline") {
+                ForEach(pipelineEvents) { event in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(event.title)
+                            .font(.callout.weight(.semibold))
+                        Text(event.detail.isEmpty ? event.status.rawValue : event.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+
+        if !agentDashboard.isEmpty {
+            Section("Agents") {
+                AgentBoard(items: agentDashboard)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            }
+        }
+
+        if !portfolioEvidence.isEmpty {
+            Section("Adaptive Rollout Evidence") {
+                ForEach(portfolioEvidence) { item in
+                    LabeledContent(item.title, value: item.value)
+                }
+            }
+        }
+
+        if !metricsText.isEmpty {
+            Section("Metrics JSON") {
+                DisclosureGroup("Show metrics") {
+                    Text(metricsText)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+}
+
+private struct JSONSheet: View {
+    let title: String
+    let json: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(json)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 
@@ -426,7 +879,7 @@ private struct DeviceTile: View {
                     .foregroundStyle(riskColor)
             }
 
-            Text("\(device.room) - \(device.deviceType)")
+            Text("\(device.room) · \(device.deviceType)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -436,9 +889,7 @@ private struct DeviceTile: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 6)
     }
 
     private var riskColor: Color {
@@ -450,27 +901,6 @@ private struct DeviceTile: View {
         default:
             return .green
         }
-    }
-}
-
-private struct OutputPanel: View {
-    let title: String
-    let text: String
-    let systemImage: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-
-            Text(text.isEmpty ? "Loading..." : text)
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(14)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
