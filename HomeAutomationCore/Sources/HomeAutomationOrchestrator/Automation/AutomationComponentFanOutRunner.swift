@@ -278,11 +278,24 @@ public struct AutomationComponentFanOutRunner: Sendable {
             .map(\.result)
         let unsupportedFragments = plan.unsupportedFragments + outcomes.flatMap(\.unsupportedFragments)
 
+        // Collect condition-specific telemetry for Phase 0 baseline
+        let conditionTelemetry = ConditionTelemetryCollector().collectMetrics(
+            from: conditionResults,
+            tree: plan.conditionTree,
+            triggerKind: plan.trigger?.kindHint == .device ? "device" : "schedule",
+            deviceCount: devices.count,
+            isOnCriticalPath: true // simplified for Phase 0; refine with critical-path analysis
+        )
+
         var payload: [String: String] = [
             "componentCount": String((plan.trigger == nil ? 0 : 1) + plan.actions.count + plan.conditions.count),
             "triggerCount": plan.trigger == nil ? "0" : "1",
             "actionCount": String(plan.actions.count),
             "conditionCount": String(plan.conditions.count),
+            "conditionLeafCount": String(conditionTelemetry.first?.leafCount ?? 0),
+            "conditionTreeNodeCount": String(conditionTelemetry.first?.treeNodeCount ?? 0),
+            "conditionTreeDepth": String(conditionTelemetry.first?.treeDepth ?? 0),
+            "conditionTreeShape": conditionTelemetry.first?.treeShape ?? "none",
             "maxConcurrentComponents": String(Self.maxConcurrentComponents(outcomes.map(\.timing))),
             "maxConcurrentComponentsStarted": String(Self.maxConcurrentComponents(outcomes.map(\.timing))),
             "componentStartSpreadMs": String(Self.startSpreadMs(outcomes.map(\.timing))),
@@ -296,6 +309,10 @@ public struct AutomationComponentFanOutRunner: Sendable {
         ]
         if let speculativeLabel {
             payload["speculativePhase"] = speculativeLabel
+        }
+        if !conditionTelemetry.isEmpty {
+            payload["conditionCompleteness"] = conditionTelemetry.first?.completeness ?? "unknown"
+            payload["conditionConfidence"] = String(conditionTelemetry.first?.confidence ?? 0)
         }
 
         await HomeAutomationTelemetry.shared.log(
