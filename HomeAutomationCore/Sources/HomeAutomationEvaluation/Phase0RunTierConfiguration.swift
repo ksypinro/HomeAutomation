@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 /// Phase 0 baseline run tier configuration.
 /// Defines warmup, measurement, and validation requirements for each tier.

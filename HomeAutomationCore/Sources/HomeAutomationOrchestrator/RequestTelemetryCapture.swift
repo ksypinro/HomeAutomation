@@ -36,9 +36,7 @@ public struct RequestTelemetryCapture: Sendable {
             payload: TelemetryPayload(values: payload.mapValues { .string($0) })
         )
 
-        logger.info("Request telemetry: strategy=\(snapshot.strategy.rawValue) arm=\(snapshot.executingArm) "
-            + "duration=\(String(format: "%.0f", snapshot.requestToOutcomeDurationMs))ms "
-            + "fm=\(snapshot.fmCallCount)")
+        logger.info("Request telemetry: strategy=\(snapshot.strategy.rawValue) arm=\(snapshot.executingArm) duration=\(snapshot.requestToOutcomeDurationMs, format: .fixed(precision: 0))ms fm=\(snapshot.fmCallCount)")
     }
 
     /// Create a request telemetry snapshot from orchestration state.

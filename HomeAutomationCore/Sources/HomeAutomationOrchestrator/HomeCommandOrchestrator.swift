@@ -598,7 +598,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 continuation: continuation,
                                 appendConversationMemory: true,
                                 userText: trimmedText,
-                                logCompletion: false
+                                logCompletion: false,
+                                requestStartedAt: requestStartedAt,
+                                portfolioExecutionPlan: portfolioExecutionPlan
                             )
                         }
                         return
@@ -666,7 +668,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 continuation: continuation,
                                 appendConversationMemory: true,
                                 userText: trimmedText,
-                                logCompletion: false
+                                logCompletion: false,
+                                requestStartedAt: requestStartedAt,
+                                portfolioExecutionPlan: portfolioExecutionPlan
                             )
                         }
                         return
@@ -696,7 +700,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 continuation: continuation,
                                 appendConversationMemory: false,
                                 userText: trimmedText,
-                                logCompletion: false
+                                logCompletion: false,
+                                requestStartedAt: requestStartedAt,
+                                portfolioExecutionPlan: portfolioExecutionPlan
                             )
                         }
                         return
@@ -752,7 +758,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         eventForwarder: eventForwarder,
                         continuation: continuation,
                         appendConversationMemory: false,
-                        userText: trimmedText
+                        userText: trimmedText,
+                        requestStartedAt: requestStartedAt,
+                        portfolioExecutionPlan: portfolioExecutionPlan
                     )
                     return
                 }
@@ -796,7 +804,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         eventForwarder: eventForwarder,
                         continuation: continuation,
                         appendConversationMemory: false,
-                        userText: trimmedText
+                        userText: trimmedText,
+                        requestStartedAt: requestStartedAt,
+                        portfolioExecutionPlan: portfolioExecutionPlan
                     )
                     return
                 }
@@ -857,7 +867,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     eventForwarder: eventForwarder,
                     continuation: continuation,
                     appendConversationMemory: true,
-                    userText: trimmedText
+                    userText: trimmedText,
+                    requestStartedAt: requestStartedAt,
+                    portfolioExecutionPlan: portfolioExecutionPlan
                 )
                 logger.info("Stream resolution completed successfully.")
             }
@@ -926,7 +938,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         continuation: AsyncThrowingStream<OrchestratorUpdate, Error>.Continuation,
         appendConversationMemory: Bool,
         userText: String,
-        logCompletion: Bool = true
+        logCompletion: Bool = true,
+        requestStartedAt: Date? = nil,
+        portfolioExecutionPlan: PortfolioArmExecutionPlan? = nil
     ) async {
         await metricsCollector.store(metrics)
         if appendConversationMemory {
@@ -948,14 +962,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         await runContext.eventBus.finish()
         await eventForwarder.value
 
-        // Phase 0: capture request-level telemetry for baseline
-        await captureRequestTelemetry(
-            result: result,
-            startedAt: requestStartedAt,
-            runContext: runContext,
-            portfolioExecutionPlan: portfolioExecutionPlan,
-            orchestrationMode: orchestrationMode
-        )
+        if let requestStartedAt, let portfolioExecutionPlan {
+            await captureRequestTelemetry(
+                result: result,
+                startedAt: requestStartedAt,
+                runContext: runContext,
+                portfolioExecutionPlan: portfolioExecutionPlan,
+                orchestrationMode: orchestrationMode
+            )
+        }
 
         continuation.yield(.result(result))
         continuation.finish()

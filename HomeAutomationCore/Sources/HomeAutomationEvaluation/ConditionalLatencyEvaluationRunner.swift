@@ -38,16 +38,15 @@ public struct ConditionalLatencyEvaluationRunner: Sendable {
 
     /// Validate correctness parity between base and conditioned results.
     /// Ensures the condition did not alter action/trigger/risk/compilation.
-    public func validateCorrectnessParit(
+    public func validateCorrectnessParity(
         base: HomeAutomationResolverResult,
         conditioned: HomeAutomationResolverResult,
         caseID: String
     ) -> CorrectnessValidationResult {
         var errors: [String] = []
 
-        // Both should be automations or both should fail
-        let baseIsAutomation = base.resolution.isAutomationResolution
-        let conditionedIsAutomation = conditioned.resolution.isAutomationResolution
+        let baseIsAutomation = base.isAutomationResolution
+        let conditionedIsAutomation = conditioned.isAutomationResolution
         if baseIsAutomation != conditionedIsAutomation {
             errors.append("Resolution type mismatch: base=\(baseIsAutomation), conditioned=\(conditionedIsAutomation)")
         }

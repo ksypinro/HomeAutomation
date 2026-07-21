@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import HomeAutomationCore
 import HomeAutomationOrchestrator
 

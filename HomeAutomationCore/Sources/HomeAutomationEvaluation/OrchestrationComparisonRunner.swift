@@ -410,6 +410,16 @@ public struct OrchestrationComparisonRunner: Sendable {
             deps = coordinator.makeRuntimeDependencies(useMiniPipeline: true)
         case .verifierLoop:
             deps = coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+        case .adaptiveStatic:
+            deps = coordinator.makeRuntimeDependencies(
+                orchestrationMode: .adaptivePortfolio,
+                portfolioRolloutMode: .activeStatic
+            )
+        case .adaptiveShadow:
+            deps = coordinator.makeRuntimeDependencies(
+                orchestrationMode: .adaptivePortfolio,
+                portfolioRolloutMode: .shadowStatic
+            )
         }
 
         let orchestrator = HomeCommandOrchestrator(dependencies: deps)
@@ -570,11 +580,11 @@ public struct OrchestrationComparisonRunner: Sendable {
 
         lines.append("## Arm Summary")
         lines.append("")
-        lines.append("| Metric | graph | graph+Tier1 | verifierLoop |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Metric | graph | graph+Tier1 | verifierLoop | adaptiveStatic | adaptiveShadow |")
+        lines.append("|---|---|---|---|---|---|")
 
         let byArm = Dictionary(uniqueKeysWithValues: report.armSummaries.map { ($0.arm, $0) })
-        let arms: [OrchestrationArm] = [.graph, .graphWithTier1, .verifierLoop]
+        let arms: [OrchestrationArm] = [.graph, .graphWithTier1, .verifierLoop, .adaptiveStatic, .adaptiveShadow]
 
         func cell(_ arm: OrchestrationArm, _ f: (OrchestrationArmSummary) -> String) -> String {
             byArm[arm].map(f) ?? "—"
@@ -600,8 +610,8 @@ public struct OrchestrationComparisonRunner: Sendable {
             lines.append("")
             lines.append("## Per-Category Mean FM Calls")
             lines.append("")
-            lines.append("| Category | graph | graph+Tier1 | verifierLoop |")
-            lines.append("|---|---|---|---|")
+            lines.append("| Category | graph | graph+Tier1 | verifierLoop | adaptiveStatic | adaptiveShadow |")
+            lines.append("|---|---|---|---|---|---|")
             for category in OrchestrationSuiteCategory.allCases {
                 guard let categoryArms = report.armCategorySummaries[category.rawValue] else { continue }
                 let byCategoryArm = Dictionary(uniqueKeysWithValues: categoryArms.map { ($0.arm, $0) })

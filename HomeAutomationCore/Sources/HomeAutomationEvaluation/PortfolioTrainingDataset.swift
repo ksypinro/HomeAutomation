@@ -244,6 +244,8 @@ extension OrchestrationArm {
         case .graph: return .graph
         case .graphWithTier1: return .graphWithTier1
         case .verifierLoop: return .verifierLoop
+        case .adaptiveStatic: return .graph
+        case .adaptiveShadow: return .graph
         }
     }
 }
