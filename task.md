@@ -186,22 +186,28 @@ Status legend for this section: [x] wired & functional · [scaffold] type exists
 - [x] Service timeout value config-driven via `FoundationModelTimeoutConfiguration.default` (8s), not a release threshold.
 
 ### Fan-out scheduling (PR 3)
-- [x] Order: trigger → conditions (early) → actions — implemented directly in `AutomationComponentFanOutRunner` work-queue construction.
+- [x] Order: trigger → conditions (early) → actions — implemented in `AutomationComponentFanOutRunner` work-queue construction.
+- [x] Per-kind concurrency caps — `AutomationFanOutSchedulingConfiguration` is now consumed by the runner; scheduling uses the pure `nextEligibleIndex` policy so at most `maxConcurrentGraphActions` (2) action pipelines run at once while conditions (queued first) start before long action pipelines. Overall cap stays 6.
 - [x] Residual batching: `BatchedConditionClauseResolver.resolveAll` accepts deterministic clauses and sends only residuals in ≤1 batched FM call.
-- [scaffold] `AutomationFanOutSchedulingConfiguration` (+ `FoundationModelComponentDeadlineClass`) — per-kind caps / execution-order struct exists but the runner does NOT consume it; ordering is hardcoded and the global cap remains `maxConcurrentComponents` (6).
-- [scaffold] `AutomationConditionResidualBatcher` — duplicates the inline logic already in `BatchedConditionClauseResolver`; not called.
+- [scaffold] `AutomationConditionResidualBatcher` — duplicates the inline logic already in `BatchedConditionClauseResolver`; not called (kept by decision).
+- [scaffold] `FoundationModelComponentDeadlineClass` — deadline-class mapping exists but the runner does not yet stamp per-component priority (recorder still derives priority from `FMAdmissionContext`).
 - [x] Do NOT raise global gate concurrency as the primary fix (unchanged at 6).
 
 ### Prompt/session cleanup (PR 4)
-- [scaffold] `ConditionSessionFactory`, `ConditionBatchSessionContext`, `ConditionTelemetryCleanup` — created but NOT called; the batch resolver still uses the existing session pool + inline prompt building directly. (Kept by decision for a future wiring PR.)
+- [x] Hard prompt budget — `BatchedConditionClauseResolver.budgetedDevices` caps the batch device list (`maxBatchPromptDevices` = 48), keeping clause-relevant devices first so a large registry cannot inflate the prompt.
 - [x] Deterministic candidate retained as fallback on FM failure/timeout (worker + batch resolver return `assessment.condition`).
+- [scaffold] `ConditionSessionFactory`, `ConditionBatchSessionContext`, `ConditionTelemetryCleanup` — created but NOT called; the batch resolver uses the existing session pool + inline prompt building. (Kept by decision for a future wiring PR.)
 
-- [ ] Tests (targeted Phase 2 behaviors) — not yet written; general suite passes.
+### Tests
+- [x] Per-kind cap scheduling policy (`nextEligibleIndex`): action cap, front-of-queue preference, overall cap — `Phase2SchedulingTests`.
+- [x] Batch prompt device budget (large registry capped, clause-relevant devices retained; small registry unchanged) — `Phase2SchedulingTests`.
+- [x] Service-timeout path exercised indirectly (residual/fallback tests) — `ResidualBatchingTests`, `PhaseIIICallReductionTests`.
+- [ ] Remaining targeted tests (admission-vs-service distinction, cancellation before/after admission, saturation ordering E2E) — deferred.
 
-**Phase 2 actual state (audited):**
-  - ✅ **Functional:** service-timeout enforcement (8s) for condition FM calls; fan-out reorder (conditions before actions); residual batching (≤1 batch FM call); deterministic-fallback retention.
-  - ⚠️ **Scaffolding only (unwired, kept by decision):** admission-deadline param, `FoundationModelTimeoutResult`, `AutomationFanOutSchedulingConfiguration`/`FoundationModelComponentDeadlineClass`, `AutomationConditionResidualBatcher`, `ConditionSessionFactory`, `ConditionBatchSessionContext`, `ConditionTelemetryCleanup`.
-  - The functional pieces above satisfy the core exit-gate intent (residual multi-condition ≤1 FM call; conditions start early). Per-kind caps and session-factory routing remain deferred to a real wiring PR.
+**Phase 2 actual state (audited + finished):**
+  - ✅ **Functional:** service-timeout enforcement (8s) for condition FM calls; fan-out reorder (conditions before actions); **per-kind action cap wired** (`AutomationFanOutSchedulingConfiguration` live); residual batching (≤1 batch FM call); **hard batch-prompt device budget**; deterministic-fallback retention.
+  - ⚠️ **Scaffolding only (unwired, kept by decision):** admission-deadline param, `FoundationModelTimeoutResult`, `FoundationModelComponentDeadlineClass`, `AutomationConditionResidualBatcher`, `ConditionSessionFactory`, `ConditionBatchSessionContext`, `ConditionTelemetryCleanup`.
+  - Exit-gate intent met: residual multi-condition ≤1 FM call; conditions start early and cannot be starved by the action cap; large registries stay within the prompt budget; service tails bounded by the 8s budget. Full suite (647 tests) green.
 
 ---
 

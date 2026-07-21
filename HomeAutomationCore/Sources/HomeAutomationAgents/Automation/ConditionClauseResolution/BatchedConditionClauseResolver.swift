@@ -274,7 +274,10 @@ public struct BatchedConditionClauseResolver: Sendable {
     }
 
     private func batchedPrompt(for inputs: [AutomationConditionClauseResolutionInput]) -> String {
-        let allDevices = stableUniqueDevices(inputs.flatMap(\.availableDevices))
+        let uniqueDevices = stableUniqueDevices(inputs.flatMap(\.availableDevices))
+        // Hard prompt budget: a large registry must not inflate the batch prompt. Keep only
+        // clause-relevant devices, then stable-fill up to the cap.
+        let allDevices = budgetedDevices(uniqueDevices, for: inputs)
         let allCapabilities = Array(Set(allDevices.flatMap(\.capabilities))).sorted()
 
         var clauses = ""
@@ -321,6 +324,48 @@ public struct BatchedConditionClauseResolver: Sendable {
             valid[itemID] = matches[0]
         }
         return valid
+    }
+
+    // MARK: - Prompt budgeting
+
+    /// Hard cap on devices listed in a batch condition prompt. Sized so the device
+    /// section stays well within the ~8k-character condition prompt budget.
+    public static let maxBatchPromptDevices = 48
+
+    /// Selects a bounded device subset for the batch prompt: clause-relevant devices
+    /// first (token overlap with any clause text), then stable-fill up to the cap.
+    func budgetedDevices(
+        _ devices: [HomeCandidateRecord],
+        for inputs: [AutomationConditionClauseResolutionInput]
+    ) -> [HomeCandidateRecord] {
+        guard devices.count > Self.maxBatchPromptDevices else { return devices }
+
+        let clauseTokenSets = inputs.map { promptTokens($0.component.rawText) }
+        func isRelevant(_ device: HomeCandidateRecord) -> Bool {
+            let deviceTokens = promptTokens(device.displayName).union(promptTokens(device.deviceType))
+            guard !deviceTokens.isEmpty else { return false }
+            return clauseTokenSets.contains { !$0.isDisjoint(with: deviceTokens) }
+        }
+
+        var selected: [HomeCandidateRecord] = []
+        var seen = Set<String>()
+        for device in devices where isRelevant(device) {
+            if seen.insert(device.id).inserted { selected.append(device) }
+            if selected.count >= Self.maxBatchPromptDevices { return selected }
+        }
+        for device in devices {
+            if selected.count >= Self.maxBatchPromptDevices { break }
+            if seen.insert(device.id).inserted { selected.append(device) }
+        }
+        return selected
+    }
+
+    private func promptTokens(_ value: String) -> Set<String> {
+        let normalized = value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9\s]+"#, with: " ", options: .regularExpression)
+        return Set(normalized.split(separator: " ").map(String.init).filter { $0.count >= 3 })
     }
 
     // MARK: - Helpers
