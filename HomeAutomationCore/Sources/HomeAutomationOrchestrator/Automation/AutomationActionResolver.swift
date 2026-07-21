@@ -67,11 +67,14 @@ public struct AutomationActionResolver: Sendable {
     public func resolve(
         _ actionText: String,
         eventBus: AgentEventBus,
-        runID: UUID
+        runID: UUID,
+        strategy: AutomationActionResolutionStrategy? = nil
     ) async -> AutomationActionResolutionResult {
         logger.info("Resolving automation action: '\(actionText, privacy: .private)'")
 
-        if let miniPipeline {
+        let effectiveStrategy = strategy ?? defaultStrategy
+        if effectiveStrategy == .tier1MiniPipeline,
+           let miniPipeline {
             return await miniPipeline.resolve(actionText, eventBus: eventBus, runID: runID)
         }
 
@@ -157,7 +160,8 @@ public struct AutomationActionResolver: Sendable {
     public func resolveAll(
         _ actionDescriptions: [String],
         eventBus: AgentEventBus,
-        runID: UUID
+        runID: UUID,
+        strategy: AutomationActionResolutionStrategy? = nil
     ) async -> [AutomationActionResolutionResult] {
         logger.info("Resolving \(actionDescriptions.count, privacy: .public) automation action(s).")
         guard !actionDescriptions.isEmpty else {
@@ -228,7 +232,12 @@ public struct AutomationActionResolver: Sendable {
                         ]
                     )
                     let result = await HomeAutomationTelemetryScope.$current.withValue(actionContext) {
-                        await self.resolve(actionText, eventBus: childEventBus, runID: runID)
+                        await self.resolve(
+                            actionText,
+                            eventBus: childEventBus,
+                            runID: runID,
+                            strategy: strategy
+                        )
                     }
                     await HomeAutomationTelemetry.shared.log(
                         "automation.action.completed",
@@ -287,6 +296,10 @@ public struct AutomationActionResolver: Sendable {
     }
 
     // MARK: - Private
+
+    private var defaultStrategy: AutomationActionResolutionStrategy {
+        usesMiniPipeline ? .tier1MiniPipeline : .graph
+    }
 
     private static func actionAgentID(_ actionID: String) -> String {
         "\(AgentID.automationActionResolution.rawValue):\(actionID)"

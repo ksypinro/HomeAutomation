@@ -28,14 +28,19 @@ public struct DraftVerifierWorkerSession: Sendable {
     public func verify(
         envelope: DraftEnvelope,
         prompt: VerifierPrompt,
-        session: LanguageModelSession
+        session: LanguageModelSession,
+        clearsAcceptedDisputes: Bool = true
     ) async throws -> DraftVerdict {
         logger.debug("[Input] userText: \(envelope.userText, privacy: .public), promptChars: \(prompt.characterCount)")
 
         if let verify {
             let result = try await verify(envelope, prompt)
             logger.debug("[MockOutput] accepted: \(result.accepted), disputes: \(result.disputes.count)")
-            return constrain(result, envelope: envelope)
+            return constrain(
+                result,
+                envelope: envelope,
+                clearsAcceptedDisputes: clearsAcceptedDisputes
+            )
         }
 
         guard foundationModelAvailability() else {
@@ -62,12 +67,23 @@ public struct DraftVerifierWorkerSession: Sendable {
         }
 
         logger.debug("[FoundationModelOutput] accepted: \(modelVerdict.accepted), disputes: \(modelVerdict.disputes.count)")
-        return constrain(modelVerdict, envelope: envelope)
+        return constrain(
+            modelVerdict,
+            envelope: envelope,
+            clearsAcceptedDisputes: clearsAcceptedDisputes
+        )
     }
 
-    private func constrain(_ verdict: DraftVerdict, envelope: DraftEnvelope) -> DraftVerdict {
+    private func constrain(
+        _ verdict: DraftVerdict,
+        envelope: DraftEnvelope,
+        clearsAcceptedDisputes: Bool
+    ) -> DraftVerdict {
         let allowedFieldIDs = Set(envelope.disputableFieldIDs().map(\.rawValue))
-        let constrained = verdict.constrained(allowedFieldIDs: allowedFieldIDs)
+        let constrained = verdict.constrained(
+            allowedFieldIDs: allowedFieldIDs,
+            clearsAcceptedDisputes: clearsAcceptedDisputes
+        )
         if constrained.disputes.count != verdict.disputes.count {
             logger.info("[Constraint] Dropped \(verdict.disputes.count - constrained.disputes.count) invalid dispute(s).")
         }

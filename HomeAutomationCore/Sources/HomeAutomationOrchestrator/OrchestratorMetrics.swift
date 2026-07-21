@@ -38,6 +38,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
     public var parameterValidationRan: Bool
     public var confirmationPolicyRan: Bool
     public var executionPlanningRan: Bool
+    public var finalizationReceipt: ResolutionFinalizationReceipt?
     public var requiresConfirmation: Bool
     public var readyOrExecuted: Bool
     public var unsupported: Bool
@@ -49,6 +50,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
         parameterValidationRan: Bool = false,
         confirmationPolicyRan: Bool = false,
         executionPlanningRan: Bool = false,
+        finalizationReceipt: ResolutionFinalizationReceipt? = nil,
         requiresConfirmation: Bool = false,
         readyOrExecuted: Bool = false,
         unsupported: Bool = false,
@@ -59,6 +61,7 @@ public struct OrchestratorSafetyMetrics: Sendable, Codable, Equatable {
         self.parameterValidationRan = parameterValidationRan
         self.confirmationPolicyRan = confirmationPolicyRan
         self.executionPlanningRan = executionPlanningRan
+        self.finalizationReceipt = finalizationReceipt
         self.requiresConfirmation = requiresConfirmation
         self.readyOrExecuted = readyOrExecuted
         self.unsupported = unsupported
@@ -203,6 +206,15 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
     public var modelAvailabilityStatus: String
     public var modelCallCount: Int
     public var skippedModelCallCount: Int
+    public var completedModelCallCount: Int
+    public var failedModelCallCount: Int
+    public var cancelledModelCallCount: Int
+    public var cancelledBeforeInferenceCount: Int
+    public var queueWaitTotalMs: Double
+    public var serviceTotalMs: Double
+    public var promptCharacterCount: Int
+    public var outputCharacterCount: Int
+    public var telemetryOverheadMs: Double
     public var contextWindowFailures: Int
     public var guardrailFailures: Int
     public var selectedDraftAttempt: String?
@@ -217,6 +229,15 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
         modelAvailabilityStatus: String = "unknown",
         modelCallCount: Int = 0,
         skippedModelCallCount: Int = 0,
+        completedModelCallCount: Int = 0,
+        failedModelCallCount: Int = 0,
+        cancelledModelCallCount: Int = 0,
+        cancelledBeforeInferenceCount: Int = 0,
+        queueWaitTotalMs: Double = 0,
+        serviceTotalMs: Double = 0,
+        promptCharacterCount: Int = 0,
+        outputCharacterCount: Int = 0,
+        telemetryOverheadMs: Double = 0,
         contextWindowFailures: Int = 0,
         guardrailFailures: Int = 0,
         selectedDraftAttempt: String? = nil,
@@ -230,6 +251,15 @@ public struct FoundationModelUsageMetrics: Sendable, Codable, Equatable {
         self.modelAvailabilityStatus = modelAvailabilityStatus
         self.modelCallCount = modelCallCount
         self.skippedModelCallCount = skippedModelCallCount
+        self.completedModelCallCount = completedModelCallCount
+        self.failedModelCallCount = failedModelCallCount
+        self.cancelledModelCallCount = cancelledModelCallCount
+        self.cancelledBeforeInferenceCount = cancelledBeforeInferenceCount
+        self.queueWaitTotalMs = queueWaitTotalMs
+        self.serviceTotalMs = serviceTotalMs
+        self.promptCharacterCount = promptCharacterCount
+        self.outputCharacterCount = outputCharacterCount
+        self.telemetryOverheadMs = telemetryOverheadMs
         self.contextWindowFailures = contextWindowFailures
         self.guardrailFailures = guardrailFailures
         self.selectedDraftAttempt = selectedDraftAttempt
@@ -261,9 +291,14 @@ public struct OrchestratorMetrics: Sendable, Codable {
     public var candidateMetrics: OrchestratorCandidateMetrics
     public var automationMetrics: OrchestratorAutomationMetrics
     public var foundationModelUsage: FoundationModelUsageMetrics
+    public var foundationModelUsageSnapshot: FoundationModelUsageSnapshot?
     public var retrievalQuality: RetrievalQualityMetrics
     public var metricsV2: RunMetricsV2?
     public var loop: LoopRunMetrics?
+    public var portfolioMetrics: PortfolioMetrics?
+    public var portfolioDecision: PortfolioDecision?
+    public var portfolioExecutionPlan: PortfolioArmExecutionPlan?
+    public var portfolioRolloutEvidence: PortfolioRolloutEvidence?
 
     public init(command: String) {
         self.command = command
@@ -281,16 +316,24 @@ public struct OrchestratorMetrics: Sendable, Codable {
         self.candidateMetrics = OrchestratorCandidateMetrics()
         self.automationMetrics = OrchestratorAutomationMetrics()
         self.foundationModelUsage = FoundationModelUsageMetrics()
+        self.foundationModelUsageSnapshot = nil
         self.retrievalQuality = RetrievalQualityMetrics()
         self.metricsV2 = nil
         self.loop = nil
+        self.portfolioMetrics = nil
+        self.portfolioDecision = nil
+        self.portfolioExecutionPlan = nil
+        self.portfolioRolloutEvidence = nil
     }
 
     public mutating func captureEvaluationFields(
         context: ResolutionContext,
         result: HomeAutomationResolverResult
     ) {
-        stageDurations = agentTraces.reduce(into: [:]) { partial, trace in
+        let adaptiveStageDurations = stageDurations.filter { key, _ in
+            key == "adaptivePreparation" || key == "portfolioRouter"
+        }
+        stageDurations = agentTraces.reduce(into: adaptiveStageDurations) { partial, trace in
             partial[trace.agentID.rawValue] = trace.durationSeconds
         }
         agentStatuses = agentTraces.reduce(into: [:]) { partial, trace in
@@ -320,6 +363,10 @@ public struct OrchestratorMetrics: Sendable, Codable {
             parameterValidationRan: agentStatuses[AgentID.parameterValidation.rawValue] != nil,
             confirmationPolicyRan: agentStatuses[AgentID.confirmationPolicy.rawValue] != nil,
             executionPlanningRan: agentStatuses[AgentID.executionPlanning.rawValue] != nil,
+            finalizationReceipt: ResolutionFinalizationReceipt.directCommand(
+                graphRun: graphRun,
+                resolution: result.resolution
+            ),
             requiresConfirmation: {
                 if case .requiresConfirmation = result.resolution { return true }
                 return false
@@ -339,7 +386,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
             } ?? false
         )
         retrievalQuality = Self.retrievalQualityMetrics(context: context, agentStatuses: agentStatuses)
-        captureFoundationModelFields(context: context)
+        captureFoundationModelEligibilityFields(context: context)
         metricsV2 = RunMetricsV2.derive(from: self)
     }
 
@@ -382,6 +429,47 @@ public struct OrchestratorMetrics: Sendable, Codable {
             skippedNodeIDs: statuses.filter { $0.value == .skipped }.map(\.key).sorted(),
             nodeDurations: [:]
         )
+        safetyMetrics.finalizationReceipt = ResolutionFinalizationReceipt.automationCreation(
+            graphRun: self.graphRun,
+            resolution: result.resolution
+        )
+        metricsV2 = RunMetricsV2.derive(from: self)
+    }
+
+    public mutating func captureFoundationModelUsage(
+        snapshot: FoundationModelUsageSnapshot,
+        selectedArm: FoundationModelCallArm = .unknown
+    ) {
+        foundationModelUsageSnapshot = snapshot
+        foundationModelUsage.modelCallCount = snapshot.summary.actualCallCount
+        foundationModelUsage.completedModelCallCount = snapshot.summary.completedCallCount
+        foundationModelUsage.failedModelCallCount = snapshot.summary.failedCallCount
+        foundationModelUsage.cancelledModelCallCount = snapshot.summary.cancelledCallCount
+        foundationModelUsage.cancelledBeforeInferenceCount = snapshot.summary.cancelledBeforeInferenceCount
+        foundationModelUsage.queueWaitTotalMs = snapshot.summary.queueWaitTotalMs
+        foundationModelUsage.serviceTotalMs = snapshot.summary.serviceTotalMs
+        foundationModelUsage.promptCharacterCount = snapshot.summary.promptCharacterCount
+        foundationModelUsage.outputCharacterCount = snapshot.summary.outputCharacterCount
+        foundationModelUsage.telemetryOverheadMs = snapshot.summary.telemetryOverheadMs
+        foundationModelUsage.selectedToolNames = Array(Set(snapshot.entries.flatMap(\.request.selectedToolNames))).sorted()
+        foundationModelUsage.toolCount = foundationModelUsage.selectedToolNames.count
+        let observedArm = selectedArm == .unknown
+            ? snapshot.entries.first?.request.arm ?? .unknown
+            : selectedArm
+        let selectedUtility = portfolioDecision?.eligibleArms.first {
+            $0.arm == portfolioDecision?.selectedArm
+        }?.utility.total
+        portfolioMetrics = PortfolioMetrics(
+            snapshot: snapshot,
+            selectedArm: observedArm,
+            preparationMs: stageDurations["adaptivePreparation"].map { $0 * 1_000 },
+            routerMs: stageDurations["portfolioRouter"].map { $0 * 1_000 },
+            eligibleArms: portfolioDecision?.eligibleArms.map(\.arm),
+            predictedUtility: selectedUtility
+        )
+        let failures = snapshot.entries.compactMap(\.failureKind)
+        foundationModelUsage.contextWindowFailures = failures.filter { $0 == .contextWindowExceeded }.count
+        foundationModelUsage.guardrailFailures = failures.filter { $0 == .guardrailRefusal }.count
         metricsV2 = RunMetricsV2.derive(from: self)
     }
 
@@ -515,7 +603,7 @@ public struct OrchestratorMetrics: Sendable, Codable {
         )
     }
 
-    private mutating func captureFoundationModelFields(context: ResolutionContext) {
+    private mutating func captureFoundationModelEligibilityFields(context: ResolutionContext) {
         let modelStages: [AgentID] = [
             .operationDetection,
             .semanticNLU,
@@ -528,7 +616,6 @@ public struct OrchestratorMetrics: Sendable, Codable {
             .draftRepair
         ]
         let statuses = Set(agentStatuses.keys)
-        let executedModelStages = modelStages.filter { statuses.contains($0.rawValue) }
         var stageUsage = foundationModelUsage.perStageModelUsage
         for stage in modelStages {
             if fallbackUsed {
@@ -543,12 +630,13 @@ public struct OrchestratorMetrics: Sendable, Codable {
         let selectedToolNames = budgetReport?.selectedToolNames ?? context.instructionPackage?.tools.map(\.name) ?? []
 
         foundationModelUsage.perStageModelUsage = stageUsage
-        foundationModelUsage.modelCallCount = fallbackUsed ? 0 : executedModelStages.count
         foundationModelUsage.skippedModelCallCount = fallbackUsed
             ? modelStages.count
             : Self.estimatedSkippedNLUCount(context: context)
-        foundationModelUsage.contextWindowFailures = errorKinds.filter { $0 == .contextWindowExceeded }.count
-        foundationModelUsage.guardrailFailures = errorKinds.filter { $0 == .guardrailRefusal }.count
+        if foundationModelUsageSnapshot == nil {
+            foundationModelUsage.contextWindowFailures = errorKinds.filter { $0 == .contextWindowExceeded }.count
+            foundationModelUsage.guardrailFailures = errorKinds.filter { $0 == .guardrailRefusal }.count
+        }
         foundationModelUsage.selectedToolNames = selectedToolNames
         foundationModelUsage.toolCount = selectedToolNames.count
         foundationModelUsage.estimatedToolOutputCharacterCount = budgetReport?.estimatedToolOutputCharacterCount ?? 0

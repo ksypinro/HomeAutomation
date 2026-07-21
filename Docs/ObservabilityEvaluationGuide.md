@@ -7,7 +7,7 @@ The short version:
 - Runtime observability is trace-first and emitted as schema-v2 `ObservabilityEvent` records.
 - The same events are written to text logs, JSONL logs, optional OpenTelemetry-shaped JSON, and in-memory sinks for tests.
 - `AgentEventBus` is the UI-facing progress stream, while `HomeAutomationTelemetry` is the durable event stream.
-- `OrchestratorMetrics` and `RunMetricsV2` are summary snapshots derived from graph execution state.
+- `OrchestratorMetrics` and `RunMetricsV2` are summary snapshots; Foundation Model usage in them is derived from the run-scoped `FoundationModelUsageLedger`, not graph-stage estimates.
 - `home-automation-eval` runs deterministic and live suites through the real orchestrator.
 - Per-agent evaluation is currently split between unit tests, integration tests, JSONL trace assertions, and the evaluation runner.
 
@@ -20,6 +20,7 @@ The short version:
 | JSONL/text/OTel/in-memory sinks | `HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/DailyJSONLLogWriter.swift`, `DailyTextLogWriter.swift`, `TelemetrySinks.swift` |
 | Payload redaction | `HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/TelemetryRedactor.swift` |
 | FoundationModel call recorder | `HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelCallRecorder.swift` |
+| FoundationModel usage ledger | `HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelUsageLedger.swift` |
 | UI event stream | `HomeAutomationCore/Sources/HomeAutomationAgents/Runtime/AgentEventBus.swift` |
 | Graph runtime instrumentation | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphScheduler.swift`, `GraphNodeExecutionLoop.swift`, `GraphPatchCommitter.swift`, `GraphCheckpointCoordinator.swift` |
 | Detached agent execution | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/DetachedAgentExecutor.swift` |
@@ -58,6 +59,22 @@ There are two event streams:
 
 1. `AgentEventBus` emits `OrchestratorPipelineEvent` values for UI and streaming progress. These events include sequence number, run ID, stage, status, trace/span IDs, and component metadata when available.
 2. `HomeAutomationTelemetry` emits durable `ObservabilityEvent` records to sinks. These are the main source for analysis.
+
+## Foundation Model Usage Ledger
+
+Phase 2 adds `FoundationModelUsageLedger` as the source of truth for Foundation Model usage. The orchestrator installs one ledger per run; `FoundationModelCallRecorder.record` creates exactly one ledger entry for each actual `session.respond` boundary.
+
+Ledger timing uses monotonic nanosecond instants internally and reports public durations in milliseconds:
+
+| Field | Meaning |
+| --- | --- |
+| `queueWaitTotalMs` | Time from recorder enqueue to FoundationModelGate admission. |
+| `serviceTotalMs` | Time spent inside the actual inference operation after admission. |
+| `telemetryOverheadMs` | Ledger/event bookkeeping overhead, reported separately from queue and service time. |
+| `modelCallCount` | Actual calls that crossed the inference boundary. Cancelled-before-admission entries do not count. |
+| `cancelledBeforeInferenceCount` | Queued work cancelled before `session.respond` was invoked. |
+
+Ledger attribution uses bounded internal labels: run ID, arm (`graph`, `graphWithTier1`, `verifierLoop`, etc.), job kind, graph/node/agent IDs, attempt, priority, session reuse, model availability, and escalation chain. It does not store raw user commands, prompts, model output, device names, or other private high-cardinality text.
 
 ## Trace Shape
 
@@ -527,11 +544,12 @@ Important sections:
 | `candidateMetrics` | Retrieved/hydrated/selected counts and IDs. |
 | `safetyMetrics` | Safety gate execution, confirmation, risk, memory target. |
 | `automationMetrics` | Automation action/condition count, graph status, backend status, SmartThings compilation support. |
-| `foundationModelUsage` | Model availability, model call estimates, skipped model calls, context failures, tools, budget report. |
+| `foundationModelUsage` | Ledger-derived actual model calls, queue/service milliseconds, failures, cancellations, character counts, telemetry overhead, model availability, skipped eligibility diagnostics, tools, budget report. |
+| `foundationModelUsageSnapshot` | Immutable per-run ledger snapshot used by comparisons and later adaptive-routing work. |
 | `retrievalQuality` | RAG strategy names, score metrics, judge retry fields. |
 | `metricsV2` | V2 summary: graph metrics, agent attempts, model/tool call summary, fan-out summary, candidate decision. |
 
-Current interpretation note: `RunMetricsV2` is a summary derived from `OrchestratorMetrics`. For precise timing, retry, model call, and component-concurrency reconstruction, use JSONL `ObservabilityEvent` records as the source of truth.
+Current interpretation note: `RunMetricsV2` is a summary derived from `OrchestratorMetrics`. Foundation Model counts and queue/service units come from `foundationModelUsageSnapshot`; for raw trace reconstruction and per-event replay, use JSONL `ObservabilityEvent` records.
 
 ## Evaluation Runner
 

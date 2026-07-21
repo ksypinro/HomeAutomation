@@ -1,6 +1,6 @@
 # Gap-Closure Implementation Plan — Redesign & Parallelism Docs Audit
 
-> **Status**: Ready for implementation
+> **Status**: Historical plan — implemented and merged in PR #22 (`80989c8`)
 > **Date**: 2026-07-11
 > **Audited docs**: [AutomationCreationRedesign.md](AutomationCreationRedesign.md),
 > [AutomationParallelismStrategy.md](AutomationParallelismStrategy.md)
@@ -15,23 +15,25 @@ verified in code — SJF gate lanes, parallel loop repairs, fan-out CPU cap, two
 scheduling, clarification short-circuit, batched conditions, session pools with
 pre-warming, speculative segmentation, and speculative assembly/compilation.
 
-`AutomationCreationRedesign.md` is implemented except for three gaps, all
-concentrated on the loop path and the user-facing confirmation:
+At the time of this audit, `AutomationCreationRedesign.md` was implemented except
+for three gaps concentrated on the loop path and the user-facing confirmation.
+Those gaps are now closed in the current checkout; this file is retained as the
+historical implementation plan, while `GapClosureTask.md` records completion.
 
 | # | Gap | Where verified |
 |---|---|---|
-| G-1 | **H6 — automation repair specialists unimplemented.** `RepairSpecialistRegistry` returns `nil` for `.trigger`, `.conditionClause`, `.segmentation`, and `.holisticDraft` repair steps, so verifier disputes on those fields can never be repaired — the loop escalates to the legacy graph instead. | `RepairSpecialistRegistry.swift:121` |
-| G-2 | **Device triggers unsupported on the loop path (Case D).** `TriggerDraft` retains neither the raw trigger fragment nor a structured device-trigger condition, so `StructuralDraftBuilder.automationCreationPlan(from:)` cannot compile "when the front door opens…" — the loop exits `.unsupported` and only the graph path serves these commands. | task.md H6 note; H2 bridge |
-| G-3 | **A-4 half-done — the confirmation card does not render the parenthesized condition interpretation.** The verifier prompt states the chosen boolean reading (A-2/A-5 landed), but `HomeCommandResolution.displaySummary` renders only "Automation drafted with N action(s)". The redesign requires the reading to be user-visible precisely because the parser silently commits to AND-over-OR precedence at 0.90 confidence. | `HomeResolutionModels.swift:67-76`; `VerifierPromptBuilder.treeInterpretation` |
+| G-1 | **Closed — H6 automation repair specialists.** `RepairSpecialistRegistry` wires `.trigger`, `.conditionClause`, and `.segmentation`; `.holisticDraft` remains intentionally unsupported and escalates to graph. | `AutomationRepairSpecialistTests` |
+| G-2 | **Closed — device triggers supported on the loop path (Case D).** `TriggerDraft` retains raw trigger text and a structured device-trigger condition; `StructuralDraftBuilder` compiles device triggers. | `StructuralDraftBuilderTests`; orchestration comparison corpus |
+| G-3 | **Closed — A-4 confirmation rendering.** Automation summaries render condition readings for drafted/confirmation results. | `ConditionReadingRenderer`; `AutomationCreationFlowTests` |
 
-One adjacent item rides along: the shared-verb mis-split limitation
-("turn on the AC and the fan" → `["Turn on the AC", "The fan"]`) is *detected* by the
-verifier's segmentation-coverage check but cannot be *repaired* until G-1 wires the
-`.segmentation` specialist.
+One adjacent item rode along: the shared-verb mis-split limitation
+("turn on the AC and the fan" → `["Turn on the AC", "The fan"]`) was *detected* by the
+verifier's segmentation-coverage check but could not be *repaired* until G-1 wired the
+`.segmentation` specialist. Current source includes that specialist.
 
-Uncommitted work already in the working tree (precedes this plan): Tier 1
-mini-pipeline candidate-hydration bugfix + regression tests, orchestrator-mode UI
-picker, `makeRAGEnabledCoordinator` factory.
+Previously uncommitted prerequisite work (Tier 1 mini-pipeline candidate-hydration
+bugfix + regression tests, orchestrator-mode UI picker, `makeRAGEnabledCoordinator`
+factory) has been consolidated into the current mainline.
 
 ---
 

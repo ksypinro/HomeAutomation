@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Detailed, phased implementation plan for the HomeAutomation Adaptive Portfolio and Frontier Orchestrator.">
+  <title>Adaptive Portfolio + Frontier · Implementation Plan</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="shell">
+    <header class="mobile-bar"><strong>Agent Field Guide</strong><button class="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button></header>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="index.html"><span class="brand-mark">H</span><span><strong>HomeAutomation</strong><small>Agent field guide</small></span></a>
+      <p class="nav-label">Guide</p>
+      <nav class="site-nav" aria-label="Documentation pages">
+        <a href="index.html"><span>00</span><span>System overview</span></a>
+        <a href="agents-core.html"><span>01</span><span>Routing &amp; context</span></a>
+        <a href="agents-command.html"><span>02</span><span>Command agents</span></a>
+        <a href="agents-automation.html"><span>03</span><span>Automation agents</span></a>
+        <a href="orchestrators.html"><span>04</span><span>Three orchestrators</span></a>
+        <a href="orchestrator.html"><span>05</span><span>Latency playbook</span></a>
+        <a href="implementation-plan.html"><span>06</span><span>Implementation plan</span></a>
+      </nav>
+      <div class="sidebar-note"><strong>Plan status</strong>Proposed implementation sequence. Safety and measurement phases are mandatory predecessors to adaptive execution.</div>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="content">
+        <header class="hero compact">
+          <p class="eyebrow">06 · Engineering execution plan · 12 July 2026</p>
+          <h1>Make the adaptive architecture shippable.</h1>
+          <p class="lede">An incremental, code-level plan that turns the Adaptive Portfolio + Frontier proposal into a safe runtime: shared finalization first, truthful measurement second, static shadow routing third, then minimal-DAG execution, frontier scheduling, and learned selection.</p>
+          <div class="hero-meta"><span class="pill">11 ordered phases</span><span class="pill">no online LLM planner</span><span class="pill amber">graph remains the fail-safe</span></div>
+        </header>
+
+        <section class="section" id="current-state">
+          <div class="section-heading"><h2>Current-state checkpoint</h2><p>The plan starts from the live checkout, not only the design documents.</p></div>
+          <div class="callout success">
+            <strong>Phase 0 source-of-truth reconciliation started</strong>
+            <p>The earlier warning on this page was true when drafted, but PR #22 has since landed the loop automation specialist work in this checkout. Current source wires <code>.trigger</code>, <code>.conditionClause</code>, and <code>.segmentation</code> in <code>RepairSpecialistRegistry</code>; <code>.holisticDraft</code> still returns <code>nil</code> intentionally and escalates to the graph path. Adaptive eligibility must use the live code and Phase 0 baseline report, not the older historical plan text.</p>
+          </div>
+          <div class="grid-3">
+            <article class="metric"><span class="metric-value">2</span><span class="metric-label">Top-level runtime modes today: graph and verifier loop</span></article>
+            <article class="metric"><span class="metric-value">3</span><span class="metric-label">Reusable evaluated arms: graph, graph + Tier‑1, verifier loop</span></article>
+            <article class="metric"><span class="metric-value">0</span><span class="metric-label">Adaptive decisions allowed before safety and telemetry blockers close</span></article>
+          </div>
+        </section>
+
+        <section class="section" id="target">
+          <div class="section-heading"><h2>Target runtime</h2><p><code>HomeCommandOrchestrator</code> remains the public entry point and owns one run, event stream, context store, and metrics record.</p></div>
+          <div class="flow">
+            <div class="flow-step"><em>prepare · 0 FM</em><b>Prepared request</b><span>Deterministic state, envelope, memory, device snapshot, runtime pressure, and versioned features.</span></div>
+            <div class="flow-step"><em>constrain · hard</em><b>Eligibility policy</b><span>Remove arms that lack coverage or safety for this exact request.</span></div>
+            <div class="flow-step"><em>select · cheap</em><b>Portfolio router</b><span>Static rules first; later an offline-trained, uncertainty-aware utility model.</span></div>
+            <div class="flow-step"><em>execute · bounded</em><b>Arm + minimal DAG</b><span>Reuse prepared artifacts, run only true dependencies, preserve validated templates.</span></div>
+            <div class="flow-step"><em>finalize · shared</em><b>Safety + outcome</b><span>One mandatory finalization path, actual call telemetry, verified result, and feedback.</span></div>
+          </div>
+
+          <h3 style="margin-top:34px">Non-negotiable invariants</h3>
+          <div class="invariant-grid">
+            <div class="invariant">Routing itself makes no Foundation Model call.</div>
+            <div class="invariant">An ineligible arm can never win through utility scoring.</div>
+            <div class="invariant">Every non-terminal proposal passes the shared finalizer.</div>
+            <div class="invariant">Safety, confirmation, and mutation gates are never pruned or batched.</div>
+            <div class="invariant">Invalid compiled graphs and uncertain router outputs fall back to the static graph.</div>
+            <div class="invariant">No online exploration is permitted for mutations, high-risk commands, or out-of-distribution input.</div>
+            <div class="invariant">Every queued or running FM job is identifiable, measurable, and cancellation-aware.</div>
+            <div class="invariant">Router training uses observed call spans and end-to-end outcomes—not graph-stage proxies.</div>
+          </div>
+        </section>
+
+        <section class="section" id="contents">
+          <div class="section-heading"><h2>Execution sequence</h2><p>Phases are ordered by dependency. Effort is relative, not a calendar promise.</p></div>
+          <div class="dependency-strip" aria-label="Phase dependency chain">
+            <span>0<br>Baseline</span><span>1–2<br>Safety + truth</span><span>3–4<br>Prepare + shadow</span><span>5–6<br>Execute + compile</span><span>7–8<br>Schedule + batch</span><span>9–10<br>Learn + roll out</span>
+          </div>
+          <nav class="plan-toc" aria-label="Implementation phases">
+            <a href="#phase-0"><span>00</span><span>Reconcile and freeze the baseline</span></a>
+            <a href="#phase-1"><span>01</span><span>Build the common finalizer</span></a>
+            <a href="#phase-2"><span>02</span><span>Record truthful FM telemetry</span></a>
+            <a href="#phase-3"><span>03</span><span>Prepare one reusable feature snapshot</span></a>
+            <a href="#phase-4"><span>04</span><span>Ship eligibility and static shadow routing</span></a>
+            <a href="#phase-5"><span>05</span><span>Refactor arm executors and activate adaptive mode</span></a>
+            <a href="#phase-6"><span>06</span><span>Compile dependency-minimal DAGs</span></a>
+            <a href="#phase-7"><span>07</span><span>Implement the frontier FM scheduler</span></a>
+            <a href="#phase-8"><span>08</span><span>Add explicit batching and session correctness</span></a>
+            <a href="#phase-9"><span>09</span><span>Train an offline utility router</span></a>
+            <a href="#phase-10"><span>10</span><span>Evaluate, canary, and roll out</span></a>
+          </nav>
+        </section>
+
+        <section class="section" id="contracts">
+          <div class="section-heading"><h2>Proposed contracts and ownership</h2><p>Keep portfolio contracts in the orchestrator module; the evaluation module converts to them, never the reverse.</p></div>
+          <div class="callout"><strong>Module placement rule</strong><p>Paths beginning <code>Adaptive/</code> or <code>Finalization/</code> live under <code>Sources/HomeAutomationOrchestrator</code>. Model-neutral admission, ledger, estimator, and prepared-session types live under <code>Sources/HomeAutomationCore/Telemetry</code> so Core never imports Agents or Orchestrator. Training/report types remain in <code>HomeAutomationEvaluation</code>.</p></div>
+          <pre class="code-block">public enum PortfolioArm: String, Sendable, Codable {
+    case graph
+    case graphTier1
+    case verifierLoop
+    case exactTemplate   // disabled until a later allowlisted phase
+}
+
+public struct PreparedOrchestrationRequest: Sendable {
+    let request: CommandRequest
+    let deterministicState: HomeResolutionState
+    let operation: HomeOperationDetectionResult
+    let envelope: DraftEnvelope
+    let memoryHints: [MemoryHint]
+    let deviceSnapshot: [HomeCandidateRecord]
+    let features: PortfolioFeatureSnapshot
+}
+
+public struct PortfolioDecision: Sendable, Codable {
+    let selectedArm: PortfolioArm
+    let eligibleArms: Set&lt;PortfolioArm&gt;
+    let rejectedReasons: [PortfolioArm: [String]]
+    let predictedUtility: [PortfolioArm: Double]
+    let uncertainty: Double
+    let policyVersion: String
+}
+
+public protocol PortfolioRouting: Sendable {
+    func decide(
+        prepared: PreparedOrchestrationRequest,
+        eligibleArms: Set&lt;PortfolioArm&gt;
+    ) async -&gt; PortfolioDecision
+}
+
+public protocol PortfolioArmExecuting: Sendable {
+    var arm: PortfolioArm { get }
+    func execute(
+        prepared: PreparedOrchestrationRequest,
+        run: OrchestrationRunContext
+    ) async -&gt; ArmExecutionOutput
+}</pre>
+
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>New surface</th><th>Suggested file</th><th>Responsibility</th></tr></thead>
+              <tbody>
+                <tr><td><code>PortfolioArm</code>, <code>PortfolioRolloutMode</code></td><td><code>Adaptive/PortfolioTypes.swift</code></td><td>Runtime-owned arm and rollout vocabulary; maps to evaluation arms through an extension in HomeAutomationEvaluation.</td></tr>
+                <tr><td><code>PreparedOrchestrationRequest</code></td><td><code>Adaptive/PreparedOrchestrationRequest.swift</code></td><td>One immutable, reusable deterministic preparation result; prevents loop→graph recomputation.</td></tr>
+                <tr><td><code>PortfolioFeatureSnapshot</code></td><td><code>Adaptive/PortfolioFeatureSnapshot.swift</code></td><td>Versioned numerical/categorical features plus feature provenance and missing-value flags.</td></tr>
+                <tr><td><code>PortfolioEligibilityPolicy</code></td><td><code>Adaptive/PortfolioEligibilityPolicy.swift</code></td><td>Hard coverage, safety, availability, OOD, memory, and mutation constraints.</td></tr>
+                <tr><td><code>StaticPortfolioRouter</code></td><td><code>Adaptive/StaticPortfolioRouter.swift</code></td><td>Auditable first router; produces a decision in shadow before active use.</td></tr>
+                <tr><td><code>GraphArmExecutor</code>, <code>VerifierLoopArmExecutor</code></td><td><code>Adaptive/ArmExecutors.swift</code></td><td>Execute one arm inside the same run context without nesting orchestrators or duplicating root routing.</td></tr>
+                <tr><td><code>ResolutionFinalizer</code></td><td><code>Finalization/ResolutionFinalizer.swift</code></td><td>Seeds typed context and runs shared direct-command or automation safety/finalization graph fragments.</td></tr>
+                <tr><td><code>DependencyMinimalGraphCompiler</code></td><td><code>Adaptive/DependencyMinimalGraphCompiler.swift</code></td><td>Prunes satisfied producers and false barriers from approved templates, then validates or falls back.</td></tr>
+                <tr><td><code>FMAdmissionRequest</code>, <code>FMAdmissionLease</code></td><td><code>Telemetry/FoundationModelFrontierScheduler.swift</code></td><td>Run-aware scheduling metadata, scored queue, cancellation, fairness, and exact release accounting.</td></tr>
+                <tr><td><code>FoundationModelUsageLedger</code></td><td><code>Telemetry/FoundationModelUsageLedger.swift</code></td><td>Run-scoped source of truth for actual calls, queue wait, service time, outcome, priority, and estimates.</td></tr>
+                <tr><td><code>PortfolioModelArtifact</code></td><td><code>Adaptive/PortfolioModelArtifact.swift</code></td><td>Versioned offline coefficients/calibration; rejects schema mismatch and defaults safely.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="telemetry-contract">
+          <div class="section-heading"><h2>Additive telemetry contract</h2><p>Events use bounded enums/buckets and internal IDs; never include raw command text or device names in router/scheduler payloads.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Event</th><th>Minimum payload</th><th>Consumer</th></tr></thead>
+              <tbody>
+                <tr><td><code>orchestration.route.decided</code></td><td>Router/config/feature-schema versions, shadow/enforced mode, eligible arms and bounded rejection codes, chosen arm, scores, uncertainty/OOD, fallback code, routing ms, operation/risk/ambiguity buckets, memory flag, model availability, gate-depth bucket, warm/cold label.</td><td>Shadow analysis, route contracts, production diagnosis.</td></tr>
+                <tr><td><code>orchestration.dag.compiled</code></td><td>Template/version, nodes before/after, bounded pruned IDs/reasons, mandatory finalizer IDs, validation result, static/estimated critical path, compiler fallback reason.</td><td>Graph parity and compiler safety.</td></tr>
+                <tr><td><code>fm.job.enqueued/admitted/completed/cancelled</code></td><td>Run-local ordinal, workflow/node/worker kind, score components, estimate/source, queue depth/wait, lease ID, cancellation code, prefix-key digest, batch size, service ms.</td><td>Frontier correctness, fairness, latency attribution.</td></tr>
+                <tr><td><code>model.call.*</code> enrichment</td><td>Actual call ordinal, job/worker kind, true gate wait and service ms, prompt/output characters, fresh or within-run session, prewarm label, failure kind. TTFT remains absent unless measured through a validated streaming path.</td><td>Usage ledger and arm comparison.</td></tr>
+                <tr><td><code>orchestration.finalizer.completed</code></td><td>Required/executed gates in order, failed gate, policy version, confirmation outcome, mutation allowed/performed, receipt ID.</td><td>Hard safety gate and audit trail.</td></tr>
+                <tr><td><code>orchestration.shadow.compared</code></td><td>Chosen/reference arm, exact-field and safety parity, observed utility/regret, execution disposition, telemetry-completeness flag.</td><td>Promotion and learned-router training.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="phases">
+          <div class="section-heading"><h2>Phase-by-phase implementation</h2><p>Each phase has a narrow deliverable, explicit tests, and a stop/go checkpoint.</p></div>
+
+          <article class="plan-phase" id="phase-0">
+            <div class="phase-heading"><div class="phase-index">00</div><div><h3>Reconcile and freeze the baseline</h3><p>Land existing work cleanly and establish the exact behavior the adaptive path must preserve.</p></div><div class="phase-meta"><span class="status-chip blocker">blocker</span><span class="status-chip">effort M</span></div></div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Separate existing changes.</strong> Treat the already-landed Tier‑1 hydration fix/tests, UI picker, RAG coordinator factory, and PR #22 gap-closure work as the inherited baseline; do not fold unrelated doc cleanup into router commits.</li>
+                <li><strong>Reconcile GapClosureTask.</strong> Keep the tracker and architecture guide aligned with source: <code>.trigger</code>, <code>.conditionClause</code>, and <code>.segmentation</code> are callable; <code>.holisticDraft</code> is the documented graph-escalation fallback. Source-level coverage lives in <code>AutomationRepairSpecialistTests</code>.</li>
+                <li><strong>Capture a baseline report.</strong> Save deterministic and supported-hardware live reports for all three arms, with corpus version, OS/device, model availability, cold/warm state, and commit hash.</li>
+                <li><strong>Freeze public behavior.</strong> Record output, confirmation, clarification, SmartThings mutation, and trace contracts for representative direct, schedule automation, device-trigger, ambiguous, memory-reference, high-risk, and model-unavailable cases.</li>
+              </ol>
+              <p><b>Files touched:</b> source-of-truth docs, Phase 0 baseline note, and existing evaluation fixtures/trace contracts if the baseline exposes a missing representative case.</p>
+            </div><aside class="phase-aside"><h4>Exit checkpoint</h4><ul><li><code>swift test</code> passes.</li><li>Three-arm baseline report is archived.</li><li>Tracker and source agree.</li><li>No adaptive runtime type exists yet.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-1">
+            <div class="phase-heading"><div class="phase-index">01</div><div><h3>Build one common finalizer</h3><p>Make safety equivalence structural before any router can choose a faster arm.</p></div><div class="phase-meta"><span class="status-chip blocker">release blocker</span><span class="status-chip">effort XL</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · shared finalizer is active</strong>
+              <p>Phase 1 now has typed <code>ResolutionFinalizationReceipt</code> metrics, approved direct-command and automation finalizer graph fragments, <code>FinalizationSeedBuilder</code> coverage for loop envelopes, <code>ResolutionFinalizer</code> integration for accepted verifier-loop outputs, direct fallback re-finalization before actionable direct-command emission, and finalized deterministic loop escalation when live graph/model fallback is unavailable. The refreshed deterministic three-arm baseline records 100% finalization receipt coverage and 0 actionable results without completed receipts for graph, graph + Tier‑1, and verifier loop. The next implementation phase is truthful Foundation Model telemetry and latency attribution.</p>
+            </div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Extract reusable graph fragments.</strong> Split direct proposal work from <code>safetyValidation → parameterValidation → confirmationPolicy → executionPlanning → mockExecution</code>, and automation proposal work from <code>automationValidation → compilation → optional creation → result assembly</code>.</li>
+                <li><strong>Create <code>FinalizationSeedBuilder</code>.</strong> Convert a loop envelope or graph proposal into root context fields and typed artifacts: resolution state, selected IDs, aggregation, full registry-hydrated candidates, capability decision, draft/rule draft, resolved actions, operand records, and creation options.</li>
+                <li><strong>Run finalization through GraphScheduler.</strong> Reuse circuit breakers, timeouts, interrupts, mandatory-gate policy, events, and graph validation rather than cloning validation logic in a new service.</li>
+                <li><strong>Stop returning bridge-built ready plans.</strong> Change loop acceptance to return a proposal; <code>LoopResultBridge</code> may map/seed data but cannot emit a mutation-capable terminal result.</li>
+                <li><strong>Normalize verifier verdicts.</strong> Acceptance requires no disputes, no clarification, and no understated risk; risk understatement becomes a typed risk dispute before finalization.</li>
+                <li><strong>Add a finalization receipt.</strong> Record the gate set, policy version, graph ID, and completion status; <code>HomeCommandOrchestrator</code> refuses to emit non-terminal proposals without a receipt.</li>
+              </ol>
+              <p><b>New files:</b> <code>Finalization/FinalizationGraphFactory.swift</code>, <code>Finalization/FinalizationSeedBuilder.swift</code>, <code>Finalization/ResolutionFinalizer.swift</code>, <code>Finalization/FinalizationReceipt.swift</code>.</p>
+              <p><b>Modified:</b> <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphPlanner.swift">GraphPlanner.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/LoopResultBridge.swift">LoopResultBridge.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeCommandOrchestrator.swift">HomeCommandOrchestrator.swift</a>, context artifact keys and adapters.</p>
+            </div><aside class="phase-aside"><h4>Mandatory tests</h4><ul><li>Direct high-risk parity across arms.</li><li>Invalid range/enum parity.</li><li>Memory-derived sensitive target confirms.</li><li>SmartThings creator spy is never called before validation/approval.</li><li>Open circuit/timeout at every final gate fails closed.</li><li>Every emitted actionable result has a receipt.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-2">
+            <div class="phase-heading"><div class="phase-index">02</div><div><h3>Record truthful model and latency telemetry</h3><p>Create the measurement substrate used by the router, scheduler, evaluator, and rollout gates.</p></div><div class="phase-meta"><span class="status-chip blocker">measurement blocker</span><span class="status-chip parallel">parallel with late phase 1</span><span class="status-chip">effort L</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · deterministic telemetry baseline archived</strong>
+              <p>Phase 2 now uses a per-run <code>FoundationModelUsageLedger</code> as the source of truth for actual model calls, queue/service milliseconds, cancellation-before-inference, character counts, tool usage, telemetry overhead, and arm/job attribution. The comparison runner consumes ledger facts, supports seeded counterbalanced arm order, warmups, repetitions, dataset selection, and dry-run mutation safety. A deterministic local baseline is archived; live supported-hardware baselines remain an external prerequisite. Full-suite green remains blocked by known unrelated verifier verdict expectations.</p>
+            </div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Add a per-run <code>FoundationModelUsageLedger</code>.</strong> Carry the actor through a TaskLocal scope around the full resolution run; key entries by model-call ID and store run/arm/job attribution, agent/node, attempt, enqueue/start/end, actual queue milliseconds, service milliseconds, prompt/output character counts, selected tools, priority, cancellation, and failure kind.</li>
+                <li><strong>Instrument at <code>session.respond</code> boundaries.</strong> One ledger record per actual inference. Split Fragment NLU’s two responses or replace them with one combined schema.</li>
+                <li><strong>Make runtime mode and trace attribution truthful.</strong> Stop hard-coding <code>runtimeMode: "graph"</code>; wrap every arm—including loop and any sampled shadow execution—in a run/arm child telemetry scope so every model call has exactly one run, arm, and job; record graph ID and escalation chain.</li>
+                <li><strong>Fix comparison inputs.</strong> Read FM call count and gate wait from the ledger, not executed agent stages or graph-node queue durations; include root/preparation/finalization in one end-to-end clock.</li>
+                <li><strong>Counterbalance live runs.</strong> Randomize or Latin-square arm order per case and label cold/warm/thermal state so cache and throttling do not systematically favor one arm.</li>
+                <li><strong>Extend metrics.</strong> Add preparation time, router time, selected/eligible arms, predicted versus observed latency/calls/escalation, compiler fallback, scheduler wait, cancellation savings, and finalizer duration. Keep character counts named as characters; leave TTFT absent unless a separately validated streaming observation exists.</li>
+              </ol>
+              <p><b>New files:</b> <code>HomeAutomationCore/Telemetry/FoundationModelUsageLedger.swift</code>, <code>HomeAutomationOrchestrator/Adaptive/PortfolioMetrics.swift</code>.</p>
+              <p><b>Modified:</b> <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelCallRecorder.swift">FoundationModelCallRecorder.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift">OrchestrationComparisonRunner.swift</a>, <code>OrchestratorMetrics.swift</code>, <code>OrchestratorMetricsV2.swift</code>.</p>
+            </div><aside class="phase-aside"><h4>Exit checkpoint</h4><ul><li>Ledger call count equals fake session call count.</li><li>Queue units are milliseconds end to end.</li><li>Cancelled queued calls do not count as inference.</li><li>All arm clocks cover the same window.</li><li>Telemetry overhead is reported separately.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-3">
+            <div class="phase-heading"><div class="phase-index">03</div><div><h3>Prepare one reusable request and feature snapshot</h3><p>Compute deterministic evidence once, then reuse it for routing, execution, and escalation.</p></div><div class="phase-meta"><span class="status-chip">effort L</span><span class="status-chip">depends 0–2</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · deterministic preparation is active</strong>
+              <p>Phase 3 now prepares a reusable <code>PreparedOrchestrationRequest</code> with a versioned, privacy-safe <code>PortfolioFeatureSnapshot</code>, deterministic envelope, device snapshot freshness, memory-reference metadata, and bounded fail-closed diagnostics for cancelled preparation. Preparation runs before model-capable routing without Foundation Model calls, prompts, model-backed retrieval, device execution, or external mutation. <code>PortfolioMetrics.preparationMs</code> is populated from the preserved adaptive preparation timing when the run ledger snapshot is captured.</p>
+            </div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Create <code>OrchestrationFeatureExtractor</code>.</strong> Run deterministic operation/NLU parsing, candidate scoring, envelope creation, memory detection, and one registry snapshot without calling Foundation Models.</li>
+                <li><strong>Version the schema.</strong> Include <code>featureSchemaVersion</code>, missing-value flags, extraction duration, and provenance; never silently change feature meaning under an existing model artifact.</li>
+                <li><strong>Capture request features.</strong> Operation/confidence, language/OOD signal, text size, action/condition counts, minimum/quantile field confidence, candidate top-two margin, unsupported fragments, precedence ambiguity, risk floor, memory reference, exact-template match, FM/RAG availability, gate depth, and warm-state hints.</li>
+                <li><strong>Carry reusable artifacts.</strong> Store the deterministic envelope, full device snapshot, memory hints, and resolution state in <code>PreparedOrchestrationRequest</code>; loop and graph escalation must consume these rather than repeat parsing/search.</li>
+                <li><strong>Add snapshot freshness.</strong> Attach device-registry/index versions. Reprepare or fall back if the registry changes before finalization.</li>
+                <li><strong>Bound preparation.</strong> No retrieval that can block on a model, no external mutation, and no prompt/session creation in this phase.</li>
+              </ol>
+              <p><b>New files:</b> <code>Adaptive/PreparedOrchestrationRequest.swift</code>, <code>Adaptive/PortfolioFeatureSnapshot.swift</code>, <code>Adaptive/OrchestrationFeatureExtractor.swift</code>.</p>
+            </div><aside class="phase-aside"><h4>Feature contract tests</h4><ul><li>Same input/fixture → stable feature vector.</li><li>No FoundationModelCallRecorder events.</li><li>Memory flag and hint preserved.</li><li>Device-trigger/precedence coverage encoded.</li><li>Registry version invalidates stale snapshot.</li><li>Serialization round trip and schema mismatch tests.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-4">
+            <div class="phase-heading"><div class="phase-index">04</div><div><h3>Ship hard eligibility and a static router in shadow</h3><p>Generate routing decisions without changing which arm serves the user.</p></div><div class="phase-meta"><span class="status-chip">shadow only</span><span class="status-chip">effort M</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · static portfolio router runs in shadow</strong>
+              <p>Phase 4 now has <code>PortfolioRolloutMode.shadowStatic</code>, hard arm eligibility policy, deterministic static routing rules, complete privacy-safe <code>PortfolioDecision</code> records, bounded explanations, telemetry, scoped context storage, and backwards-compatible metrics. Shadow mode records the arm it would choose and why, including eligible/rejected arms and router duration, while continuing through the configured execution arm with no hidden second execution or model-call/device-mutation change.</p>
+            </div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Implement the hard allowlist.</strong> Reject arms by model availability, unsupported operation, missing specialist coverage, high/critical risk policy, external mutation requirements, memory support, OOD/uncertainty, and finalizer readiness.</li>
+                <li><strong>Encode auditable static rules.</strong> Strong low-risk direct command → verifier loop; confident simple schedule automation → Tier‑1; device trigger/complex condition/OOD/memory reference → graph until coverage gates say otherwise; predicted loop escalation → graph directly.</li>
+                <li><strong>Return a complete decision record.</strong> Include every eligible/rejected arm, reasons, rule ID, utility components, uncertainty, policy version, and safe fallback.</li>
+                <li><strong>Add <code>PortfolioRolloutMode.shadowStatic</code>.</strong> Compute and log the decision, then continue through the user-selected/current arm. No behavior change and no hidden second execution.</li>
+                <li><strong>Build decision explanations.</strong> Add a compact UI/metrics line such as “would choose Tier‑1: simple schedule, 2 confident actions, no memory, low risk.”</li>
+              </ol>
+              <p><b>New files:</b> <code>Adaptive/PortfolioEligibilityPolicy.swift</code>, <code>Adaptive/StaticPortfolioRouter.swift</code>, <code>Adaptive/PortfolioDecision.swift</code>, <code>Adaptive/PortfolioRolloutMode.swift</code>.</p>
+            </div><aside class="phase-aside"><h4>Safety properties</h4><ul><li>Selected arm ∈ eligible arms.</li><li>Empty eligible set → graph/fallback decision.</li><li>High uncertainty → graph.</li><li>Mutation/high risk never explores.</li><li>Shadow mode never changes result, calls, or event ordering.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-5">
+            <div class="phase-heading"><div class="phase-index">05</div><div><h3>Refactor arm executors and activate static adaptive mode</h3><p>Execute a selected arm inside one orchestrator run without duplicated root work or nested metrics.</p></div><div class="phase-meta"><span class="status-chip blocker">activation blocker</span><span class="status-chip">effort XL</span></div></div>
+            <div class="callout warning">
+              <strong>Partial implementation · active static seam is available</strong>
+              <p>Phase 5 now has <code>PortfolioRolloutMode.activeStatic</code>, <code>OrchestrationMode.adaptivePortfolio</code>, an <code>AdaptivePortfolioController</code>, selected/executing arm metrics, fail-closed executor fallback, prebuilt Tier‑1 registry selection, and prepared-evidence root-routing skip for high-confidence active adaptive runs. The remaining Phase 5 work is the larger structural extraction: move run setup into <code>OrchestrationRunContext</code>, move graph/verifier branch bodies into concrete arm executors, introduce a typed automation action strategy, and add explicit loop-escalation prepared-artifact reuse tests.</p>
+            </div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Introduce <code>OrchestrationRunContext</code>.</strong> Own run ID, trace, request, context store, event bus, metrics/ledger, checkpoint options, shared conversation memory, and finalizer for the complete request. Do not construct per-arm dependency packages that reset memory or metrics.</li>
+                <li><strong>Extract arm executors.</strong> Move current private graph/automation/unsupported execution methods into <code>GraphArmExecutor</code>; wrap the existing verifier controller in <code>VerifierLoopArmExecutor</code>. Executors return proposals/escalation—not final user results.</li>
+                <li><strong>Avoid nested orchestrators.</strong> Do not instantiate <code>HomeCommandOrchestrator</code> per arm. The top-level orchestrator prepares once, selects once, delegates once, finalizes once, and emits one result.</li>
+                <li><strong>Make root routing conditional.</strong> High-confidence deterministic prepared routing seeds context and skips the root FM graph. Low-confidence or OOD graph decisions may run <code>OperationDetectionAgent</code> with the NLU soft deadline.</li>
+                <li><strong>Unify Tier‑1 selection per request.</strong> Preferred target: refactor <code>AutomationActionResolver</code> to own full-graph and mini-pipeline strategies and accept <code>AutomationActionResolutionStrategy</code>, stored in typed run context. If that refactor must be staged, build two immutable registries once in coordinator-owned portfolio dependencies—never rebuild one per request.</li>
+                <li><strong>Seed escalation.</strong> A loop escalation carries its prepared envelope and valid artifacts into a minimal graph executor; record the escalation chain and do not repeat deterministic preparation.</li>
+                <li><strong>Add <code>adaptivePortfolio</code> mode.</strong> Extend runtime dependencies and coordinator construction; preserve existing graph and verifier-loop modes as explicit rollback choices.</li>
+              </ol>
+              <p><b>New files:</b> <code>Adaptive/OrchestrationRunContext.swift</code>, <code>Adaptive/ArmExecutors.swift</code>, <code>Adaptive/AdaptivePortfolioController.swift</code>.</p>
+              <p><b>Modified:</b> <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeCommandOrchestrator.swift">HomeCommandOrchestrator.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeAutomationCoordinator.swift">HomeAutomationCoordinator.swift</a>, <code>Loop/OrchestrationMode.swift</code>, <code>AutomationActionResolver.swift</code>, <code>AutomationComponentFanOutRunner.swift</code>.</p>
+            </div><aside class="phase-aside"><h4>Activation checkpoint</h4><ul><li>Static adaptive mode matches explicit arm outputs.</li><li>Exactly one input/outcome event pair.</li><li>No duplicate root model call.</li><li>Loop escalation reuses prepared artifacts.</li><li>Existing UI choices still work.</li><li>Rollback is construction-time configuration only.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-6">
+            <div class="phase-heading"><div class="phase-index">06</div><div><h3>Compile dependency-minimal DAGs</h3><p>Remove false barriers and already-satisfied producers without permitting arbitrary runtime graph synthesis.</p></div><div class="phase-meta"><span class="status-chip">effort L</span><span class="status-chip parallel">can overlap phase 5 tests</span></div></div>
+            <div class="callout success">
+              <strong>Implementation complete · compiler seam is safe-gated</strong>
+              <p>Phase 6 now has approved versioned templates for the current root, direct-command, fallback, automation-creation, unsupported, and finalization graphs; a manifest/seed-based <code>DependencyMinimalGraphCompiler</code>; privacy-safe compile reports; disabled/shadow/active compiler modes; validation fallback to known static graphs; non-prunable safety and mutation approval gates; and deterministic critical-path metadata carried outside graph identity. Default runtime behavior remains unchanged because <code>GraphCompilationMode.disabled</code> is the default. Loop-escalation template expansion remains staged until the remaining Phase 5 executor/escalation extraction is completed.</p>
+            </div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Define approved templates.</strong> Represent direct, automation, fallback, finalization, and escalation graphs as versioned templates with immutable mandatory-node sets.</li>
+                <li><strong>Compile from manifests and seeds.</strong> Use <code>AgentManifest.consumes/produces</code> and typed artifact contracts to remove producers whose outputs are already valid in the prepared context.</li>
+                <li><strong>Replace all-to-all barriers.</strong> Add only true data dependencies. Raw-text command examples and Bixby retrieval need not wait for risk; candidate retrieval can start from deterministic prepared state; join evidence only at its consumer.</li>
+                <li><strong>Protect the safety closure.</strong> Safety/finalization nodes, mutation approval interrupts, and required fallback edges are non-prunable. The compiler cannot change agent implementation or invent a tool.</li>
+                <li><strong>Validate every compiled graph.</strong> Run <code>GraphValidator</code> with the seeded initial context. Any validation error logs a compiler fallback and executes the known static graph.</li>
+                <li><strong>Calculate graph critical path metadata.</strong> Annotate nodes with downstream successors and estimated remaining service cost for the frontier scheduler; keep annotations outside graph equality/identity.</li>
+              </ol>
+              <p><b>New files:</b> <code>Adaptive/GraphTemplate.swift</code>, <code>Adaptive/DependencyMinimalGraphCompiler.swift</code>, <code>Adaptive/CriticalPathAnalyzer.swift</code>.</p>
+            </div><aside class="phase-aside"><h4>Compiler tests</h4><ul><li>Cycle/reachability/property tests.</li><li>All mandatory gates survive any seed.</li><li>Prepared keys prune only valid producers.</li><li>Malformed manifest/seed → static fallback.</li><li>Result parity with unpruned template.</li><li>Fewer/equal nodes on eligible fixtures.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-7">
+            <div class="phase-heading"><div class="phase-index">07</div><div><h3>Implement the frontier Foundation Model scheduler</h3><p>Implemented lease-based legacy admission plus shadow/active frontier scheduling with run-aware metadata and cancellation-correct graph behavior.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">simulated benchmark added</span><span class="status-chip">real hardware benchmark recommended</span></div></div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Replace priority-only admission.</strong> <code>FMAdmissionRequest</code> carries run/call/node IDs, enqueue time, estimated service, downstream critical path, deadline class, prefix key, batch key, cancellation value, and stable sequence number.</li>
+                <li><strong>Return an explicit lease.</strong> <code>admit</code> becomes cancellation-aware and returns <code>FMAdmissionLease</code>; <code>release(leaseID)</code> prevents counter drift and double release. A cancelled waiter is removed, not over-admitted.</li>
+                <li><strong>Score the ready frontier.</strong> Start with <code>criticalPathSaved / max(estimatedServiceMs, ε) + ageBoost + prefixAffinity − cancellationRisk</code>. Use deterministic tie-breaking and a maximum-wait aging bound.</li>
+                <li><strong>Add an estimator actor.</strong> Keep robust p50/p75/p90 samples by agent kind, prompt-size bucket, schema/tool digest, batch bucket, runtime environment, and cold/warm state; schedule with p75 and conservative calibrated/global fallbacks until a minimum sample count. Never train on queue wait or pre-start cancellation.</li>
+                <li><strong>Propagate metadata through TaskLocal context.</strong> Graph nodes provide downstream critical-path and cancellation class; individual workers refine prompt size, prefix, and call attempt. Remove redundant <code>Task.detached</code> execution or explicitly restore the scheduling TaskLocal. Give every nested action subgraph a unique workflow scope ID.</li>
+                <li><strong>Cancel promptly and distinctly.</strong> <code>GraphScheduler</code> cancels non-essential siblings on terminal exit. Cancelled nodes are not failed, do not trip breakers, do not unlock successors, and are not checkpointed complete; an already-admitted cancellation-resistant call retains its lease until it truly ends.</li>
+                <li><strong>Add fairness.</strong> Use monotonic time, a maximum-starvation threshold, stable enqueue sequence, a per-run consecutive-grant cap, and cross-run fairness grace. Prefix affinity is only a small tie-breaker.</li>
+                <li><strong>Stage scheduler modes.</strong> <code>legacy</code> uses corrected lease-based FIFO, <code>shadow</code> logs Frontier’s proposed order without changing admission, and <code>active</code> selects. Missing context, NaN/outlier estimates, or unknown nodes use stable FIFO.</li>
+                <li><strong>Keep capacity configurable.</strong> Benchmark <code>maxConcurrent = 1</code> versus <code>2</code> on supported hardware. Do not auto-increase from queue pressure.</li>
+              </ol>
+              <pre class="code-block">score(job, now) =
+    criticalPathRemainingMs / max(estimatedServiceMs, 1)
+  + min(maxAgeBoost, ageWeight * queuedMs)
+  + smallPrefixAffinityBonus
+  - cancellationRiskPenalty
+
+tieBreak = (score descending, deadline ascending, sequence ascending)</pre>
+              <p><b>New files:</b> <code>Telemetry/FoundationModelFrontierScheduler.swift</code>, <code>Telemetry/FMServiceTimeEstimator.swift</code>, <code>Telemetry/FMAdmissionContext.swift</code>, <code>Benchmarks/FoundationModelGateCapacityBenchmark.swift</code>.</p>
+              <p><b>Modified:</b> <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelGate.swift">FoundationModelGate.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelCallRecorder.swift">FoundationModelCallRecorder.swift</a>, <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphScheduler.swift">GraphScheduler.swift</a>, node execution telemetry, package benchmark target, and type inventory.</p>
+              <p><b>Verification status:</b> focused Phase 7 gate/lease/frontier/estimator tests pass; runtime wiring preserves admission TaskLocal through detached execution; the benchmark executable compares configured capacity 1/2 with simulated service work. Release rollout should repeat the benchmark with real on-device Foundation Model calls for TTFT, accuracy, and safety metrics.</p>
+            </div><aside class="phase-aside"><h4>Deterministic scheduler tests</h4><ul><li>Injected clock and estimator.</li><li>Critical short job outranks long non-critical job.</li><li>Aging eventually serves long job.</li><li>Cancelled waiter never runs.</li><li>Every lease releases once.</li><li>Terminal exit cancels eligible siblings.</li><li>Finalizer jobs cannot be starved.</li><li>Capacity 1/2 traces stay within bound.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-8">
+            <div class="phase-heading"><div class="phase-index">08</div><div><h3>Add explicit residual batching and correct session lifecycle</h3><p>Implemented typed residual batch identity, per-item fallback, action-capability batch seam, bounded coalescing policy, and fresh-session/prewarm lifecycle semantics.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">session pooling disabled</span><span class="status-chip">fused NLU remains shadow-only</span></div></div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Do not auto-batch arbitrary frontier jobs.</strong> Add explicit batch adapters with one schema, per-item confidence, stable IDs, and independent deterministic fallback.</li>
+                <li><strong>Extend existing batching.</strong> Preserve batched conditions; add batched low-confidence automation action capability resolution. Consider fused deterministic-hinted front-end NLU only after shadow output parity.</li>
+                <li><strong>Use a bounded coalescing window.</strong> Wait only for already-imminent compatible residuals; skip batching when it would delay the critical path or clarification.</li>
+                <li><strong>Replace cross-request session pooling.</strong> <code>LanguageModelSession</code> is stateful. Reuse a verifier session within one loop run, but create fresh instruction-scoped sessions for unrelated requests.</li>
+                <li><strong>Prewarm the real prefix.</strong> Call Apple’s <code>prewarm(promptPrefix:)</code> with sufficient lead time; track prefix version and cache hit/warm state. Session construction alone is not prewarming.</li>
+                <li><strong>Discard failed/overflowed sessions.</strong> Use <code>defer</code> for lifecycle accounting, but do not return an errored transcript to any pool.</li>
+              </ol>
+              <p><b>Batch compatibility:</b> same run boundary, model, immutable instruction digest, response schema, tool-set digest, locale, policy version, and privacy class. Map outputs by typed item ID—not positional index—and bypass the micro-window for overdue/zero-slack work.</p>
+              <p><b>New files:</b> <code>Automation/BatchedActionCapabilityResolver.swift</code>, <code>Telemetry/FoundationModelBatching.swift</code>, <code>Telemetry/FoundationModelBatchCoalescer.swift</code>, <code>Telemetry/FoundationModelSessionFactory.swift</code>. The optional fused NLU path remains shadow-only and is not active runtime behavior.</p>
+              <p><b>Verification status:</b> residual batching tests cover typed item-ID mapping, missing/duplicate/unknown item fallback, action-capability per-item fallback, no retained session transcripts, real prefix prewarm metadata, and zero-slack/safety coalescing bypass. Phase III call-reduction tests were updated to the fresh-session contract.</p>
+            </div><aside class="phase-aside"><h4>Acceptance</h4><ul><li>Batch output preserves item identity/order.</li><li>One bad item does not poison siblings.</li><li>No transcript crosses run IDs.</li><li>Prompt/schema parity shadow report passes.</li><li>Batching reduces actual calls without safety/accuracy drift.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-9">
+            <div class="phase-heading"><div class="phase-index">09</div><div><h3>Train an offline, uncertainty-aware utility router</h3><p>Implemented offline artifact loading, conservative learned routing, counterfactual training export, and regret evaluation while keeping static graph-safe fallback.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">offline only</span><span class="status-chip">no production exploration</span></div></div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Generate counterfactual training rows.</strong> For each case, run every eligible arm under counterbalanced conditions and persist features, eligibility, output correctness, duration distribution, actual calls, queue wait, escalation, clarification, confirmation, and failure.</li>
+                <li><strong>Define utility outside production.</strong> Start with calibrated correctness probability minus weighted p95 latency, expected calls, escalation, and uncertainty. Safety failure makes an arm ineligible; it is never a finite penalty.</li>
+                <li><strong>Train a simple artifact first.</strong> Use per-arm calibrated linear/logistic predictors or gradient-boosted models offline; export normalized coefficients/trees and calibration metadata as versioned JSON. Avoid a runtime LLM router.</li>
+                <li><strong>Add OOD and confidence rejection.</strong> Feature range/schema mismatch, missing required features, or small utility margin returns the static graph decision.</li>
+                <li><strong>Evaluate router regret.</strong> Compare selected utility with the best eligible per-case oracle; slice by operation, risk, language, memory, device count, cold/warm state, and escalation.</li>
+                <li><strong>Keep exploration out of production.</strong> If contextual-bandit research is pursued, update weights offline from verified logs. Never use live UCB exploration on mutation/high-risk traffic.</li>
+              </ol>
+              <p><b>New files:</b> <code>Adaptive/LearnedPortfolioRouter.swift</code>, <code>Adaptive/PortfolioModelArtifact.swift</code>; evaluation-side <code>PortfolioTrainingDataset.swift</code> and <code>PortfolioRouterEvaluator.swift</code>.</p>
+              <p><b>CLI additions:</b> <code>--export-portfolio-training</code>, <code>--evaluate-portfolio-router</code>, model artifact path/version flags.</p>
+              <p><b>Verification status:</b> focused Phase 9 tests cover artifact scoring/schema rejection, learned router OOD and low-margin fallback, eligible-arm selection, safety-ineligible evaluation rows, regret calculation, and coordinator type inventory coverage. Active learned rollout remains a later release-gated phase.</p>
+            </div><aside class="phase-aside"><h4>Model gates</h4><ul><li>Static router remains fallback.</li><li>Artifact schema/hash verified.</li><li>Calibration and regret reported.</li><li>No safety-ineligible prediction accepted.</li><li>Shadow learned decision before active use.</li></ul></aside></div>
+          </article>
+
+          <article class="plan-phase" id="phase-10">
+            <div class="phase-heading"><div class="phase-index">10</div><div><h3>Evaluate, canary, and roll out</h3><p>Implemented rollout modes, independent rollback/canary configuration, operator evidence, and fail-closed release gate reporting with graph-safe rollback.</p></div><div class="phase-meta"><span class="status-chip">implemented</span><span class="status-chip">final gate</span><span class="status-chip">graph rollback retained</span></div></div>
+            <div class="phase-columns"><div>
+              <ol class="task-list">
+                <li><strong>Rollout modes:</strong> <code>disabled</code> → <code>shadowStatic</code> → <code>activeStatic</code> → <code>shadowLearned</code> → <code>activeLearned</code>. Each mode is dependency-injected and recorded per run.</li>
+                <li><strong>Run deterministic CI gates.</strong> Full tests, golden dataset, trace contracts, graph validation/property tests, and router eligibility invariants on every change.</li>
+                <li><strong>Run hardware gates.</strong> Counterbalanced live-model suite across cold/warm and representative thermal states; compare concurrency 1/2 and report p50/p95, TTFT, calls, queue wait, cancellations, escalation, accuracy, and safety.</li>
+                <li><strong>Canary in isolated steps.</strong> Canary frontier scheduling inside graph first (<code>1% → 5% → 25% → 50% → 100%</code>) so scheduler impact is isolated. Then canary static portfolio routing only for low-risk, no-memory, no-external-mutation cases; add simple Tier‑1 schedules next. Retain at least 10% graph holdback.</li>
+                <li><strong>Expose operator evidence.</strong> UI/JSON metrics show selected arm, eligibility reasons, predictions, observed values, compiler/scheduler fallbacks, finalization receipt, and policy/model versions.</li>
+                <li><strong>Automate rollback with independent switches.</strong> Configuration separately disables adaptive routing, frontier scheduling, residual batching, and prewarm/session affinity; also carries arm/risk allowlists, canary percentage, and policy/model/config versions. Any safety divergence, artifact mismatch, elevated unsupported/clarification rate, scheduler invariant failure, or latency regression returns new runs to graph without an app restart.</li>
+              </ol>
+              <p><b>Modified:</b> evaluation runner/exit criteria/CLI, <code>HomeAutomationViewModel.swift</code>, <code>HomeAutomationView.swift</code>, runtime configuration and metrics rendering.</p>
+              <p><b>Verification status:</b> focused Phase 10 tests cover learned rollout-mode semantics, rollback switch behavior, missing-artifact graph fallback, rollout evidence, and release gate fail-closed behavior. Core build passes; hardware/live-model gates remain intentionally represented as explicit release-gate inputs rather than inferred from local deterministic tests.</p>
+            </div><aside class="phase-aside"><h4>Definition of shipped</h4><ul><li>All hard safety gates pass.</li><li>Static adaptive is no worse than graph in any protected slice.</li><li>Learned router beats static on predeclared utility without drift.</li><li>Rollback drill succeeds.</li><li>Documentation and type inventory updated.</li></ul></aside></div>
+          </article>
+        </section>
+
+        <section class="section" id="testing">
+          <div class="section-heading"><h2>Test and evaluation matrix</h2><p>Build deterministic seams before any live-model benchmark so scheduler and router behavior is reproducible.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Layer</th><th>Suggested test file</th><th>Required coverage</th></tr></thead>
+              <tbody>
+                <tr><td>Finalization</td><td><code>ResolutionFinalizerTests.swift</code></td><td>Direct/automation proposal seeding, full hydration, confirmation, invalid parameters, external mutation approval, breaker/timeout fail-closed, receipt invariant.</td></tr>
+                <tr><td>Features</td><td><code>PortfolioFeatureExtractorTests.swift</code></td><td>Stable vectors, no FM calls, memory/OOD/risk/coverage flags, registry versioning, schema serialization.</td></tr>
+                <tr><td>Eligibility</td><td><code>PortfolioEligibilityPolicyTests.swift</code></td><td>Every hard constraint and pairwise combination; property: selected arm is always eligible.</td></tr>
+                <tr><td>Static routing</td><td><code>StaticPortfolioRouterTests.swift</code></td><td>Decision table, uncertainty fallback, deterministic explanations, empty allowlist, policy versioning.</td></tr>
+                <tr><td>Arm integration</td><td><code>AdaptivePortfolioIntegrationTests.swift</code></td><td>Single run/event stream, prepared reuse, exact selected-arm parity, loop→graph escalation without duplicate preparation, rollback mode.</td></tr>
+                <tr><td>Graph compilation</td><td><code>DependencyMinimalGraphCompilerTests.swift</code></td><td>Manifest/artifact dataflow, mandatory-node preservation, invalid-graph fallback, result parity, node-count/critical-path reduction.</td></tr>
+                <tr><td>FM frontier</td><td><code>FoundationModelFrontierSchedulerTests.swift</code></td><td>Injected clock, score order, aging/fairness, cancellation, leases, capacity, deterministic ties, estimator cold start.</td></tr>
+                <tr><td>Usage ledger</td><td><code>FoundationModelUsageLedgerTests.swift</code></td><td>Actual respond count, queue/service units, failed/cancelled calls, nested subgraphs, loop multiple responses, run isolation.</td></tr>
+                <tr><td>Batch/session</td><td><code>ResidualBatchingTests.swift</code></td><td>Stable item IDs, per-item fallback, no cross-run transcript, true prewarm instrumentation, failed-session discard.</td></tr>
+                <tr><td>Evaluation</td><td><code>AdaptiveOrchestrationComparisonTests.swift</code></td><td>Counterbalanced arm order, per-case oracle, regret, safety parity, protected slices, cold/warm labels, report round trip.</td></tr>
+                <tr><td>Chaos</td><td><code>AdaptiveResilienceTests.swift</code></td><td>Model unavailable mid-run, circuit opens, registry changes, RAG failure, cancellation race, malformed model artifact, invalid compiled graph.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="dataset">
+          <div class="section-heading"><h2>Adaptive evaluation dataset</h2><p><code>adaptive-v1</code> supplements the existing 1,000-case seed; it does not replace its safety and duplicate-device fixtures.</p></div>
+          <div class="callout warning"><strong>Comparison harness change required</strong><p>The current three-arm comparison uses the small default corpus and ignores <code>--dataset</code>/<code>--dataset-path</code>. Add dataset loading, repetitions, warmups, seeded counterbalanced arm order, hardware/build labels, gate concurrency, prewarm mode, and forced dry-run mutation controls before using it for promotion.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Required stratum</th><th>Minimum targeted cases</th><th>What it proves</th></tr></thead>
+              <tbody>
+                <tr><td>Exact low-risk templates</td><td>30</td><td>Optional zero-FM eligibility and finalizer correctness.</td></tr>
+                <tr><td>High-margin direct commands</td><td>30</td><td>Verifier-loop selection without target ambiguity.</td></tr>
+                <tr><td>Candidate ties / low margin</td><td>30</td><td>Clarification and safe graph fallback.</td></tr>
+                <tr><td>Memory/pronoun sequences</td><td>30 sequences</td><td>Prior-turn handling, target sensitivity, and no shadow-memory writes.</td></tr>
+                <tr><td>Security, cooking, unlock/open, high risk</td><td>50</td><td>Exact confirmation/finalizer/mutation parity.</td></tr>
+                <tr><td>Simple schedule/Tier‑1 automation</td><td>30</td><td>Zero/one-call action mini-pipeline routing.</td></tr>
+                <tr><td>Device triggers and nested AND/OR/NOT</td><td>30</td><td>Coverage eligibility, precedence, and automation finalization.</td></tr>
+                <tr><td>Unsupported, noisy, multilingual, OOD</td><td>30</td><td>Uncertainty detection and graph/unsupported fallback.</td></tr>
+                <tr><td>Large fan-out, batch, cancellation</td><td>20</td><td>Frontier fairness, bounded concurrency, batching, and early exit.</td></tr>
+                <tr><td>Injected runtime faults</td><td>Full matrix</td><td>Model/RAG unavailable, stale cache, open circuit, saturated gate, cancellation, malformed artifact.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="footnotes">Extend the case contract backward-compatibly with prior turns and runtime conditions, or add a separate <code>AdaptiveRouteContract</code> containing expected eligible/chosen arms, risk, warm/queue/model conditions, mandatory finalizer gates, and mutation expectation. Use a strict golden-evaluation preset: failures cannot be allowed and aggregate pass rate alone cannot override a failed safety/telemetry gate.</p>
+        </section>
+
+        <section class="section" id="gates">
+          <div class="section-heading"><h2>Release gates</h2><p>Safety gates are absolute. Performance targets are provisional until Phase 2 produces a trusted baseline.</p></div>
+          <div class="grid-2">
+            <article class="panel"><p class="eyebrow">Hard · must be exact</p><h3>Safety and correctness</h3><ul><li>100% mandatory-gate presence/order and zero missing finalizers.</li><li>Per-case outcome, confirmation, and mutation count match graph on the critical suite; zero false-ready/executed high-risk cases.</li><li>Adaptive is non-inferior to graph with a provisional 0.5 percentage-point margin at 95% confidence overall and for exact device/capability/command fields; zero protected-slice loss.</li><li>No ineligible arm is selected; OOD/high-uncertainty graph fallback is 100%.</li><li>SmartThings and mock mutations occur only after required gates and requested authority, with no duplicate backend call.</li><li>Evaluation telemetry pairs 100% of calls; incomplete telemetry blocks promotion.</li></ul></article>
+            <article class="panel"><p class="eyebrow">Provisional · calibrate after baseline</p><h3>Latency and efficiency</h3><ul><li>Router-only decision overhead p95 ≤ max(25 ms, 2% of graph p50).</li><li>Nominal/warm adaptive p50 ≤85% and p95 ≤90% of counterbalanced graph; no eligible slice p95 &gt;105%; cold p95 ≤105%.</li><li>Actual mean FM calls ≤80% of graph for direct and ≤85% for automation; p95 calls and queue wait no worse than graph.</li><li>Loop escalation among loop-routed cases ≤10%; otherwise the policy must route directly to graph.</li><li>Queue starvation never exceeds the configured maximum age; queued cancellation is 100% and permit count never exceeds configuration.</li><li>Normalized mean oracle regret ≤0.05 and p95 ≤0.15 before learned activation; production telemetry pairing ≥99.9%.</li></ul></article>
+          </div>
+        </section>
+
+        <section class="section" id="risks">
+          <div class="section-heading"><h2>Risk register and rollback</h2><p>Each new optimization has a local fallback rather than depending on one global emergency path.</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Risk</th><th>Prevention/detection</th><th>Runtime fallback</th></tr></thead>
+              <tbody>
+                <tr><td>Router chooses an unsafe or uncovered arm</td><td>Hard eligibility precedes scoring; finalizer receipt invariant; property tests.</td><td>Graph reference arm.</td></tr>
+                <tr><td>Feature/model schema drift</td><td>Version/hash checks, missing flags, offline compatibility test.</td><td>Static router, then graph on uncertainty.</td></tr>
+                <tr><td>Loop escalation repeats expensive work</td><td>Prepared request and seeded context; ledger detects duplicate stage/call chain.</td><td>Direct graph without adaptive re-entry.</td></tr>
+                <tr><td>Compiled graph drops required data or safety</td><td>Immutable mandatory set + GraphValidator + differential tests.</td><td>Known static graph template.</td></tr>
+                <tr><td>Frontier scheduler starves long work</td><td>Aging bound, deterministic tie-breaks, queue-age alarms.</td><td>FIFO within existing capacity.</td></tr>
+                <tr><td>Cancellation/release race corrupts capacity</td><td>Explicit lease IDs, idempotent release, injected-clock stress tests.</td><td>Disable frontier policy and use fixed-capacity FIFO.</td></tr>
+                <tr><td>Session transcript crosses requests</td><td>Per-run session ownership and run-ID assertions.</td><td>Fresh session per call.</td></tr>
+                <tr><td>Batch lowers one item’s quality</td><td>Per-item schema/confidence/fallback and shadow comparison.</td><td>Unbatched specialist call or deterministic result.</td></tr>
+                <tr><td>Live benchmark biased by heat/cache</td><td>Counterbalanced order, cold/warm/thermal labels, repeated runs.</td><td>No promotion decision from biased report.</td></tr>
+                <tr><td>Adaptive system complexity obscures incidents</td><td>Decision explanation, policy/model versions, one run trace, local fallback labels.</td><td>Single configuration switch to graph.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="done">
+          <div class="section-heading"><h2>Overall definition of done</h2><p>The architecture is complete only when implementation, evidence, and operational rollback all exist.</p></div>
+          <dl class="definition-list">
+            <dt>Correctness</dt><dd>All arms produce proposals that pass the same finalizer; golden outputs and protected-slice accuracy meet or exceed graph.</dd>
+            <dt>Safety</dt><dd>Confirmation and mutation parity are exact; finalization receipts and hard eligibility are enforced in code, not convention.</dd>
+            <dt>Measurement</dt><dd>Every actual inference and queue wait is run-correlated; end-to-end windows, units, cold/warm labels, and arm order are comparable.</dd>
+            <dt>Routing</dt><dd>Static router is active and explainable; learned router is versioned, calibrated, OOD-aware, and safely rejectable.</dd>
+            <dt>Execution</dt><dd>Prepared work is reused, compiled graphs validate or fall back, terminal cancellation is effective, and frontier fairness invariants hold.</dd>
+            <dt>Efficiency</dt><dd>Hardware evaluation demonstrates the declared p50/p95 and call-count gains without protected-slice regressions.</dd>
+            <dt>Operations</dt><dd>Shadow/canary modes, decision telemetry, per-slice monitors, model/policy version rollback, and graph kill switch are tested.</dd>
+            <dt>Documentation</dt><dd>Architecture guide, coordinator type inventory, CLI help, evaluation report schema, and rollout runbook match shipped behavior.</dd>
+          </dl>
+        </section>
+
+        <section class="section footnotes" id="references">
+          <div class="section-heading"><h2>Primary implementation anchors</h2><p>The plan deliberately extends existing seams rather than replacing the runtime wholesale.</p></div>
+          <p><a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeCommandOrchestrator.swift">HomeCommandOrchestrator.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/HomeAutomationCoordinator.swift">HomeAutomationCoordinator.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphScheduler.swift">GraphScheduler.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphPlanner.swift">GraphPlanner.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/GraphValidator.swift">GraphValidator.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationOrchestrator/Loop/VerifierLoopOrchestrator.swift">VerifierLoopOrchestrator.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelGate.swift">FoundationModelGate.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationCore/Telemetry/FoundationModelCallRecorder.swift">FoundationModelCallRecorder.swift</a> · <a href="../../HomeAutomationCore/Sources/HomeAutomationEvaluation/OrchestrationComparisonRunner.swift">OrchestrationComparisonRunner.swift</a>.</p>
+        </section>
+
+        <footer class="page-footer"><a href="orchestrator.html">← Latency architecture</a><a href="index.html">Return to overview →</a></footer>
+      </div>
+    </main>
+  </div>
+  <script src="site.js"></script>
+</body>
+</html>

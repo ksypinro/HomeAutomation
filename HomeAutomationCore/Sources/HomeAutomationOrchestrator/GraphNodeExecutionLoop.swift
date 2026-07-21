@@ -160,6 +160,7 @@ extension GraphScheduler {
         policy: OrchestratorPolicyEngine,
         circuitBreakers: CircuitBreakerRegistry,
         runID: UUID,
+        schedulerOptions: GraphSchedulerExecutionOptions,
         metrics: GraphRunMetricsRecorder
     ) async -> GraphNodeOutcome {
         let selection = agentSelector.selectAgent(for: node, graph: graph, registry: registry)
@@ -290,6 +291,21 @@ extension GraphScheduler {
                 agentRunID: agentRunID,
                 attempt: attemptCount
             )
+            let criticalPathMetadata = schedulerOptions.criticalPath?.nodeMetadata[node.id]
+            let fmAdmissionContext = FMAdmissionContext(
+                schedulerMode: schedulerOptions.foundationModelSchedulerMode,
+                runID: runID.uuidString,
+                graphID: graph.id,
+                nodeID: node.id,
+                agentID: agentID.rawValue,
+                jobKind: nil,
+                criticalPathRemainingMs: criticalPathMetadata?.estimatedRemainingServiceMs,
+                estimatedServiceMs: criticalPathMetadata?.estimatedServiceMs,
+                deadlineClass: node.executionPolicy == .safetyGate ? .interactive : .pipeline,
+                cancellationClass: node.executionPolicy == .safetyGate ? .cancellationResistant : .normal,
+                prefixAffinityKey: "\(graph.goal.rawValue):\(agentID.rawValue)",
+                workflowScopeID: graph.id
+            )
             await HomeAutomationTelemetry.shared.log(
                 "agent.started",
                 context: telemetryContext,
@@ -309,13 +325,53 @@ extension GraphScheduler {
                     agentID: agentID,
                     timeoutNanoseconds: selection.agent.timeoutNanoseconds
                 ) {
-                    await detachedExecutor.runDetached(
-                        agent: selection.agent,
-                        context: context,
-                        telemetryContext: telemetryContext,
-                        priority: .userInitiated
+                    await FMAdmissionContextScope.$current.withValue(fmAdmissionContext) {
+                        await detachedExecutor.runDetached(
+                            agent: selection.agent,
+                            context: context,
+                            telemetryContext: telemetryContext,
+                            priority: .userInitiated
+                        )
+                    }
+                }
+            } catch is CancellationError {
+                end = Date()
+                await contextStore.appendTrace(
+                    AgentTraceEntry(
+                        agentID: agentID,
+                        startedAt: start,
+                        endedAt: end,
+                        result: .skipped
+                    )
+                )
+                await metrics.markFinished(
+                    nodeID: node.id,
+                    status: .skipped,
+                    startedAt: start,
+                    endedAt: end
+                )
+                await HomeAutomationTelemetry.shared.log(
+                    "graph.node.cancelled",
+                    context: telemetryContext,
+                    status: .cancelled,
+                    spanKind: .graphNode,
+                    durationMs: end.timeIntervalSince(start) * 1_000,
+                    payload: TelemetryPayload(values: [
+                        "detail": .string("Graph scheduler cancelled sibling after terminal exit")
+                    ])
+                )
+                await HomeAutomationTelemetryScope.$current.withValue(baseTelemetryContext) {
+                    await eventBus.publish(
+                        OrchestratorPipelineEvent(
+                            runID: runID,
+                            stage: node.id,
+                            agentID: agentID.rawValue,
+                            status: .skipped,
+                            detail: "Graph scheduler cancelled sibling after terminal exit"
+                        )
                     )
                 }
+                return GraphNodeOutcome(nodeID: node.id, exit: nil)
             } catch is AgentTimeoutError {
                 result = .retryableFailure(AgentFailure(
                     agentID: agentID,

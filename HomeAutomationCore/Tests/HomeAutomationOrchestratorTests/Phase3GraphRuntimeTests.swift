@@ -382,11 +382,13 @@ struct Phase3GraphRuntimeTests {
         let graphRun = try #require(metrics.graphRun)
 
         #expect(metrics.fallbackUsed)
-        #expect(graphRun.graphID == "direct-command-fallback-graph")
-        #expect(graphRun.nodeStatuses[AgentID.ruleFallback.rawValue] == .completed)
-        #expect(graphRun.selectedAgents[AgentID.ruleFallback.rawValue] == AgentID.ruleFallback.rawValue)
-        #expect(graphRun.skippedNodeIDs.contains(AgentID.bixbyFallback.rawValue))
-        #expect(graphRun.skippedNodeIDs.contains(AgentID.unsupportedCommand.rawValue))
+        #expect(graphRun.graphID == "direct-command-finalization-graph")
+        #expect(graphRun.nodeStatuses[AgentID.safetyValidation.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.parameterValidation.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.confirmationPolicy.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.executionPlanning.rawValue] == .completed)
+        #expect(graphRun.nodeStatuses[AgentID.mockExecution.rawValue] == .skipped)
+        #expect(graphRun.selectedAgents[AgentID.safetyValidation.rawValue] == AgentID.safetyValidation.rawValue)
     }
 
     @Test

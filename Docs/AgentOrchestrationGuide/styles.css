@@ -471,6 +471,11 @@ h1 {
   background: var(--amber-pale);
 }
 
+.callout.success {
+  border-left-color: var(--teal);
+  background: var(--teal-pale);
+}
+
 .callout strong {
   display: block;
   margin-bottom: 4px;
@@ -792,6 +797,300 @@ tr:last-child td {
   font-size: 0.86rem;
 }
 
+.plan-toc {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plan-toc a {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.plan-toc a:hover {
+  border-color: var(--teal);
+  color: var(--teal-deep);
+}
+
+.plan-toc a span:first-child {
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.plan-toc a span:last-child {
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.invariant-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.invariant {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.72);
+  font-size: 0.82rem;
+}
+
+.invariant::before {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--teal);
+  color: white;
+  content: "✓";
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.plan-phase {
+  position: relative;
+  margin-top: 28px;
+  padding: 30px;
+  border: 1px solid rgba(23, 32, 31, 0.16);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(28, 40, 36, 0.055);
+  scroll-margin-top: 24px;
+}
+
+.plan-phase::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: linear-gradient(180deg, var(--teal), var(--amber));
+  content: "";
+}
+
+.phase-heading {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+
+.phase-index {
+  color: var(--teal-deep);
+  font-family: var(--serif);
+  font-size: 3.4rem;
+  line-height: 0.9;
+}
+
+.phase-heading h3 {
+  margin: 0 0 6px;
+  font-family: var(--serif);
+  font-size: clamp(1.6rem, 3vw, 2.25rem);
+  letter-spacing: -0.025em;
+}
+
+.phase-heading p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.phase-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.status-chip {
+  display: inline-flex;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 0.61rem;
+  text-transform: uppercase;
+}
+
+.status-chip.blocker {
+  border-color: rgba(161, 61, 56, 0.35);
+  background: rgba(161, 61, 56, 0.08);
+  color: var(--red);
+}
+
+.status-chip.parallel {
+  border-color: rgba(13, 116, 109, 0.28);
+  background: var(--teal-pale);
+  color: var(--teal-deep);
+}
+
+.task-list {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: task;
+}
+
+.task-list li {
+  position: relative;
+  padding: 13px 14px 13px 48px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 253, 248, 0.62);
+  font-size: 0.84rem;
+  counter-increment: task;
+}
+
+.task-list li::before {
+  position: absolute;
+  top: 13px;
+  left: 13px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--teal-deep);
+  content: counter(task, decimal-leading-zero);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+}
+
+.task-list li strong {
+  color: var(--ink);
+}
+
+.phase-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(250px, 0.65fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.phase-aside {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(216, 235, 230, 0.48);
+}
+
+.phase-aside h4 {
+  margin-bottom: 9px;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.phase-aside p,
+.phase-aside li {
+  font-size: 0.76rem;
+}
+
+.phase-aside ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.code-block {
+  margin: 18px 0;
+  padding: 18px;
+  overflow-x: auto;
+  border: 1px solid rgba(23, 32, 31, 0.18);
+  border-radius: 12px;
+  background: #17201f;
+  color: #dce7e2;
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.dependency-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  margin: 18px 0;
+}
+
+.dependency-strip span {
+  position: relative;
+  display: grid;
+  min-height: 62px;
+  place-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-align: center;
+}
+
+.dependency-strip span:not(:last-child)::after {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: -9px;
+  width: 10px;
+  height: 2px;
+  background: var(--amber);
+  content: "";
+}
+
+.definition-list {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.35fr) 1fr;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.definition-list dt,
+.definition-list dd {
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.definition-list dt {
+  color: var(--teal-deep);
+  font-family: var(--mono);
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.definition-list dd {
+  border-left: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.81rem;
+}
+
+.definition-list dt:last-of-type,
+.definition-list dd:last-of-type {
+  border-bottom: 0;
+}
+
 .footnotes {
   color: var(--ink-soft);
   font-size: 0.78rem;
@@ -907,8 +1206,36 @@ tr:last-child td {
   .grid-2,
   .grid-3,
   .metric-grid,
-  .recommendation-grid {
+  .recommendation-grid,
+  .plan-toc,
+  .invariant-grid,
+  .phase-columns {
     grid-template-columns: 1fr;
+  }
+
+  .phase-heading {
+    grid-template-columns: 54px 1fr;
+  }
+
+  .phase-meta {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .dependency-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dependency-strip span:not(:last-child)::after {
+    display: none;
+  }
+
+  .definition-list {
+    grid-template-columns: 1fr;
+  }
+
+  .definition-list dd {
+    border-left: 0;
   }
 
   .search-bar {

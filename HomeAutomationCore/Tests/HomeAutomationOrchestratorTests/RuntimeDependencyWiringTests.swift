@@ -22,12 +22,80 @@ struct RuntimeDependencyWiringTests {
         #expect(deps.loopOrchestrator != nil)
     }
 
+    @Test("adaptivePortfolio mode wires rollback executors and Tier-1 registry")
+    func adaptivePortfolioModeWiresPortfolioDependencies() {
+        let deps = makeCoordinator().makeRuntimeDependencies(
+            orchestrationMode: .adaptivePortfolio,
+            portfolioRolloutMode: .activeStatic
+        )
+
+        #expect(deps.orchestrationMode == .adaptivePortfolio)
+        #expect(deps.loopOrchestrator != nil)
+        #expect(deps.tier1AgentRegistry != nil)
+        #expect(deps.portfolioRolloutMode == .activeStatic)
+    }
+
     @Test("graph mode carries no loop orchestrator")
     func graphModeHasNoLoopOrchestrator() {
         let deps = makeCoordinator().makeRuntimeDependencies(orchestrationMode: .graph)
 
         #expect(deps.orchestrationMode == .graph)
         #expect(deps.loopOrchestrator == nil)
+    }
+
+    @Test("runtime dependencies expose bounded Foundation Model arm")
+    func runtimeDependenciesExposeFoundationModelArm() {
+        let coordinator = makeCoordinator()
+        let graph = coordinator.makeRuntimeDependencies(orchestrationMode: .graph)
+        let tier1 = coordinator.makeRuntimeDependencies(orchestrationMode: .graph, useMiniPipeline: true)
+        let loop = coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+
+        #expect(graph.foundationModelArm == .graph)
+        #expect(tier1.foundationModelArm == .graphWithTier1)
+        #expect(loop.foundationModelArm == .verifierLoop)
+    }
+
+    @Test("detached executor preserves Foundation Model usage ledger scope")
+    func detachedExecutorPreservesUsageLedgerScope() async {
+        let ledger = FoundationModelUsageLedger(runID: "detached-run")
+        let executor = DetachedAgentExecutor()
+        let context = HomeAutomationTelemetryContext(runID: "detached-run")
+
+        let inheritedRunID = await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
+            await executor.runDetachedValue(telemetryContext: context) {
+                FoundationModelUsageLedgerScope.current?.runID
+            }
+        }
+
+        #expect(inheritedRunID == "detached-run")
+    }
+
+    @Test("detached executor preserves Foundation Model admission context")
+    func detachedExecutorPreservesAdmissionContextScope() async {
+        let executor = DetachedAgentExecutor()
+        let telemetry = HomeAutomationTelemetryContext(runID: "detached-run")
+        let context = FMAdmissionContext(
+            schedulerMode: .shadow,
+            runID: "detached-run",
+            graphID: "graph",
+            nodeID: "node",
+            agentID: "agent",
+            jobKind: .automationResolution,
+            criticalPathRemainingMs: 250,
+            estimatedServiceMs: 50,
+            deadlineClass: .pipeline,
+            cancellationClass: .normal,
+            prefixAffinityKey: "agent",
+            workflowScopeID: "graph"
+        )
+
+        let inherited = await FMAdmissionContextScope.$current.withValue(context) {
+            await executor.runDetachedValue(telemetryContext: telemetry) {
+                FMAdmissionContextScope.current
+            }
+        }
+
+        #expect(inherited == context)
     }
 
     @Test("withMiniPipeline(true) produces a mini-pipeline-backed action resolver")

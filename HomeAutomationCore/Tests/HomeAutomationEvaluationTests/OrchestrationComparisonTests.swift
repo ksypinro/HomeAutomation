@@ -244,6 +244,7 @@ struct OrchestrationComparisonTests {
         let report = await runner.run()
 
         #expect(report.caseCount == 4)
+        #expect(report.telemetryComplete)
         #expect(report.armSummaries.count == 3)
         #expect(report.armCategorySummaries[OrchestrationSuiteCategory.directCommand.rawValue] != nil)
         #expect(report.armCategorySummaries[OrchestrationSuiteCategory.automation.rawValue] != nil)
@@ -257,6 +258,61 @@ struct OrchestrationComparisonTests {
         // direct-command cases (loop iteration histogram non-empty).
         let loopSummary = report.armSummaries.first { $0.arm == .verifierLoop }
         #expect(loopSummary?.loopIterationHistogram.isEmpty == false)
+    }
+
+    @Test
+    func seededArmOrderIsReproducibleAndCounterbalanced() {
+        let first = (0..<3).map {
+            OrchestrationComparisonRunner.armOrder(caseIndex: $0, repetitionIndex: 0, seed: 20260713).first
+        }
+        let second = (0..<3).map {
+            OrchestrationComparisonRunner.armOrder(caseIndex: $0, repetitionIndex: 0, seed: 20260713).first
+        }
+
+        #expect(first == second)
+        #expect(Set(first.compactMap { $0 }) == Set(OrchestrationArm.allCases))
+    }
+
+    @Test(.timeLimit(.minutes(3)))
+    func comparisonRunnerExcludesWarmupsFromSummariesButRetainsRecords() async {
+        let runner = OrchestrationComparisonRunner(
+            caseLimit: 1,
+            requireLiveModel: false,
+            seed: 7,
+            repetitions: 2,
+            warmups: 1
+        )
+        let report = await runner.run()
+        let records = report.perCaseResults.values.flatMap { $0 }
+
+        #expect(report.includedRunCount == OrchestrationArm.allCases.count * 2)
+        #expect(records.filter(\.isWarmup).count == OrchestrationArm.allCases.count)
+        #expect(records.filter { !$0.isWarmup }.count == report.includedRunCount)
+        #expect(report.armSummaries.allSatisfy { $0.totalCases == 2 })
+    }
+
+    @Test
+    func incompleteTelemetryAddsBlockingExitCriterion() {
+        let result = makeArmResult(
+            arm: .graph,
+            passed: true,
+            durationMs: 10,
+            modelCallCount: 0,
+            telemetryComplete: false
+        )
+        let summaries = OrchestrationArm.allCases.map { arm in
+            OrchestrationArmSummary.make(arm: arm, results: arm == .graph ? [result] : [])
+        }
+        let telemetryComplete = [result].allSatisfy(\.telemetryComplete)
+        var criteria = OrchestrationExitCriteria.evaluate(summaries: summaries)
+        criteria.append(ExitCriterionResult(
+            name: "Telemetry completeness",
+            threshold: "100%",
+            actual: telemetryComplete ? "100%" : "incomplete",
+            passed: telemetryComplete
+        ))
+
+        #expect(criteria.first { $0.name == "Telemetry completeness" }?.passed == false)
     }
 
     // MARK: - G1: Report generation
@@ -315,13 +371,15 @@ struct OrchestrationComparisonTests {
         confirmation: Bool = false,
         loopIterations: Int? = nil,
         escalated: Bool = false,
-        suite: String = "test"
+        suite: String = "test",
+        telemetryComplete: Bool = true
     ) -> OrchestrationArmResult {
         OrchestrationArmResult(
             arm: arm,
             caseID: UUID().uuidString,
             suite: suite,
             tags: [],
+            telemetryComplete: telemetryComplete,
             passed: passed,
             durationMs: durationMs,
             modelCallCount: modelCallCount,

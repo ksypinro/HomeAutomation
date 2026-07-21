@@ -11,6 +11,11 @@ struct AutomationRuntimeAgentInputError: LocalizedError, Sendable {
 }
 
 public enum AutomationRuntimeContextKeys {
+    public static let actionResolutionStrategy = ScopedContextKey<AutomationActionResolutionStrategy>(
+        "automationActionResolutionStrategy",
+        scope: .root
+    )
+
     public static let pipelineEventBridge = ScopedContextKey<AutomationPipelineEventBridge>(
         "automationPipelineEventBridge",
         scope: .root
@@ -55,6 +60,20 @@ public enum AutomationRuntimeContextKeys {
         in scope: ContextScope
     ) -> ScopedContextKey<AutomationConditionOperandResolutionRecord> {
         ScopedContextKey("automationConditionOperandResolution", scope: scope)
+    }
+}
+
+public enum AutomationActionResolutionStrategy: String, Sendable, Codable, Hashable {
+    case graph
+    case tier1MiniPipeline
+
+    public init(executingArm: FoundationModelCallArm) {
+        switch executingArm {
+        case .graphWithTier1:
+            self = .tier1MiniPipeline
+        default:
+            self = .graph
+        }
     }
 }
 

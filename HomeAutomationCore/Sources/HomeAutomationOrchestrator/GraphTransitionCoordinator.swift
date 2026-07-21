@@ -106,8 +106,7 @@ extension GraphScheduler {
                 graphID: graph.id,
                 stage: node.id,
                 graphNodeID: node.id,
-                agentID: agentID.rawValue,
-                runtimeMode: "graph"
+                agentID: agentID.rawValue
             ),
             status: decision.isApproved ? "approved" : "rejected",
             payload: [

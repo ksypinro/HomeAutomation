@@ -387,12 +387,12 @@ they are deterministic):
 | Dispute pattern | Specialist | Implementation |
 |---|---|---|
 | `operation` / kind `wrongOperation` | `operationDetection` | rule-based operation re-detect |
-| kind `wrongGrouping`, `conditionTree.*` | `segmentation` | *(deferred — not yet wired)* |
+| kind `wrongGrouping`, `conditionTree.*` | `segmentation` | `AutomationComponentSegmentationWorkerSession` |
 | `risk.level` | `riskRaise` | `AutomationRiskAssessor` (deterministic) |
-| `automation.trigger.*` | `trigger` | *(deferred — not yet wired)* |
-| `automation.conditionLeaves[i].*` | `conditionClause` | *(deferred — not yet wired)* |
+| `automation.trigger.*` | `trigger` | `AutomationTriggerResolutionWorkerSession` + device-condition resolution |
+| `automation.conditionLeaves[i].*` | `conditionClause` | `AutomationConditionClauseResolutionWorkerSession` or `BatchedConditionClauseResolver` |
 | `*.targetDeviceID`, `*.room` | `target` | `ActionTargetResolver` (rules + suggested-value hint) |
-| `*.capability`, `*.commandName`, `*.parameters` | `capability` | *(returns nil today — latches, then escalates)* |
+| `*.capability`, `*.commandName`, `*.parameters` | `capability` | `CapabilityResolutionWorker` |
 | everything else | `fragmentNLU` | `FragmentNLUWorkerSession` (FM, fragment-scoped) |
 
 `EnvelopeMerger.apply(result:to:iteration:)` merges each `RepairResult` back into the envelope,
@@ -667,14 +667,13 @@ it is the escalation target, which is what makes the loop safe to ship increment
 | 1 | ~~High~~ **Fixed** | ~~`.verifierLoop` mode is not wired in production~~ — `makeRuntimeDependencies(orchestrationMode: .verifierLoop)` now constructs the loop via `makeVerifierLoopOrchestrator()`, and `HomeCommandOrchestrator` records `LoopRunMetrics` on run metrics. Covered by `RuntimeDependencyWiringTests`. |
 | 2 | ~~High~~ **Fixed** | ~~`useMiniPipeline` parameter is a no-op in the runtime-deps overload~~ — the flag now threads through `AutomationCoordinator.withMiniPipeline(_:)` and `AgentCoordinator.makeAgentRegistry(automationCoordinator:)` into the built registry; `AutomationActionResolver.usesMiniPipeline` makes it observable in tests. |
 | 3 | ~~Medium~~ **Fixed** | ~~The comparison runner is deterministic-only~~ — `OrchestrationComparisonRunner(requireLiveModel:)` + `--compare-orchestration --require-live-model true` run arms against the live FM; deterministic remains the CI-safe default. |
-| 4 | ~~Medium~~ **Fixed** | ~~Accepted automation envelopes bridge to `.unsupported(...)` placeholders~~ — `StructuralDraftBuilder.automationCreationPlan(from:)` maps the envelope to a `HomeAutomationCreationPlan` and compiles Rules API JSON via `SmartThingsRuleCompiler`; the bridge returns `.automationDrafted` / `.automationRequiresConfirmation`. Schedule-triggered automations are end-to-end; device triggers still report an unsupported reason (needs H6's structured trigger condition). |
+| 4 | ~~Medium~~ **Fixed** | ~~Accepted automation envelopes bridge to `.unsupported(...)` placeholders~~ — `StructuralDraftBuilder.automationCreationPlan(from:)` maps the envelope to a `HomeAutomationCreationPlan` and compiles Rules API JSON via `SmartThingsRuleCompiler`; the bridge returns `.automationDrafted` / `.automationRequiresConfirmation`. Schedule-triggered and device-triggered automations are end-to-end now that H6 carries structured trigger conditions. |
 | 5 | ~~Low~~ **Fixed** | ~~The two loop FM-call exit gates read the same aggregate~~ — arm summaries now split by `OrchestrationSuiteCategory` (directCommand vs automation); each FM-call gate reads its own category with aggregate fallback. |
 | 6 | ~~Low~~ **Fixed** | ~~Room-less devices always fail the τ-gate~~ — `command.room` is omitted from `fieldConfidence` when the device has no room, so τ-gates and zero-confidence pre-repair skip it. |
-| 7 | Low (partial) | Capability repair is now wired to `CapabilityResolutionWorker` (deterministic fallback + optional FM). Trigger/condition/segmentation specialists still return nil (latch → escalate) — required before the loop path serves automations end-to-end (task H6, depends on H2). |
+| 7 | ~~Low~~ **Fixed** | Capability repair is wired to `CapabilityResolutionWorker` (deterministic fallback + optional FM). Trigger/condition/segmentation specialists are also wired; `.holisticDraft` remains the intentional graph-escalation fallback. Covered by `AutomationRepairSpecialistTests`. |
 
-Remaining before a default flip: a live-model comparison run on real hardware, structured
-device-trigger conditions in the envelope, and H6 (automation repair specialists) to close the
-loop path for device-triggered and multi-condition automations.
+Remaining before a default flip: a live-model comparison run on real hardware, common finalizer
+parity for loop outputs, truthful per-call telemetry, and adaptive-routing eligibility evidence.
 
 ---
 

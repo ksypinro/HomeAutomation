@@ -108,7 +108,7 @@ public struct VerifierPromptBuilder: Sendable {
         appendField(&lines, "  room", cmd.room, flag: lowConfIDs.contains(.command(.room)))
 
         if !cmd.parameters.isEmpty {
-            let paramStr = cmd.parameters.map { "\($0.name)=\($0.value)" }.joined(separator: ", ")
+            let paramStr = cmd.parameters.map { "\($0.name)=\(String(describing: $0.value))" }.joined(separator: ", ")
             let flag = lowConfIDs.contains(.command(.parameters)) ? " ⚠" : ""
             lines.append("  parameters: \(paramStr)\(flag)")
         }
@@ -271,7 +271,7 @@ public struct VerifierPromptBuilder: Sendable {
         case "command.room":
             return envelope.command?.room
         case "command.parameters":
-            return envelope.command?.parameters.map { "\($0.name)=\($0.value)" }.joined(separator: ", ")
+            return envelope.command?.parameters.map { "\($0.name)=\(String(describing: $0.value))" }.joined(separator: ", ")
         case "automation.trigger.type":
             return envelope.automation?.trigger.map { String(describing: $0.type) }
         case "automation.trigger.time":

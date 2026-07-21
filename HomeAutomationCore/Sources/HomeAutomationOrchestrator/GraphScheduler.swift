@@ -31,7 +31,7 @@ public struct GraphScheduler: Sendable {
                 operation: graph.goal.rawValue,
                 graphID: graph.id,
                 stage: graph.id,
-                runtimeMode: "graph"
+                runtimeMode: inheritedTelemetry?.runtimeMode
             )
         await HomeAutomationTelemetry.shared.log(
             "graph.started",
@@ -91,6 +91,24 @@ public struct GraphScheduler: Sendable {
         let safetyGateHandler = GraphSafetyGateHandler()
         let transitionPolicy = GraphTransitionPolicy()
         var interruption: GraphCheckpointRecord?
+
+        // Publish the selected graph up front so observers can distinguish work
+        // waiting on dependencies from work that has already started. A pending
+        // event is later replaced by the node's running/completed event.
+        for node in graph.nodes where dependencies.pendingNodeIDs.contains(node.id) {
+            guard let selection = agentSelector.selectAgent(for: node, graph: graph, registry: registry) else {
+                continue
+            }
+            await eventBus.publish(
+                OrchestratorPipelineEvent(
+                    runID: runID,
+                    stage: node.id,
+                    agentID: selection.agent.id.rawValue,
+                    status: .pending,
+                    detail: "Waiting for dependencies"
+                )
+            )
+        }
 
         let firstExit = await HomeAutomationTelemetryScope.$current.withValue(graphTelemetryContext) {
             await withTaskGroup(
@@ -175,8 +193,7 @@ public struct GraphScheduler: Sendable {
                                         operation: graph.goal.rawValue,
                                         graphID: graph.id,
                                         stage: node.id,
-                                        graphNodeID: node.id,
-                                        runtimeMode: "graph"
+                                        graphNodeID: node.id
                                     ),
                                     status: "paused",
                                     payload: [
@@ -216,6 +233,7 @@ public struct GraphScheduler: Sendable {
                                 policy: policy,
                                 circuitBreakers: circuitBreakers,
                                 runID: runID,
+                                schedulerOptions: options,
                                 metrics: metrics
                             )
                         }
@@ -302,6 +320,21 @@ public struct GraphScheduler: Sendable {
                 )
                 if firstExit == nil, let exit = outcome.exit {
                     firstExit = exit
+                    if !runningNodeIDs.isEmpty || dependencies.hasPendingNodes {
+                        group.cancelAll()
+                        await markPendingSkipped(
+                            runningNodeIDs.union(dependencies.pendingNodeIDs),
+                            nodesByID: dependencies.nodesByID,
+                            agentSelector: agentSelector,
+                            registry: registry,
+                            graph: graph,
+                            eventBus: eventBus,
+                            runID: runID,
+                            metrics: metrics,
+                            reason: "Terminal graph exit"
+                        )
+                        return firstExit
+                    }
                 }
             }
 

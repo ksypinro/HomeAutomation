@@ -165,6 +165,36 @@ struct AutomationTier1Tests {
         #expect(result.subgraphRun == nil)
     }
 
+    @Test
+    func resolverGraphStrategyOverridesMiniPipeline() async throws {
+        let pipeline = AutomationActionMiniPipeline(
+            registry: MockHomeDeviceRegistry(),
+            validator: AgentCommandValidator(),
+            fragmentNLU: FragmentNLUWorkerSession(foundationModelAvailability: { false }),
+            capabilityWorker: CapabilityResolutionWorker(foundationModelAvailability: { false })
+        )
+        let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let scheduler = GraphScheduler()
+        let resolver = AutomationActionResolver(
+            registry: registry,
+            graphPlanner: GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { false })),
+            policy: OrchestratorPolicyEngine(isModelAvailable: { false }),
+            scheduler: scheduler,
+            subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
+            circuitBreakers: CircuitBreakerRegistry(),
+            miniPipeline: pipeline
+        )
+
+        let result = await resolver.resolve(
+            "Turn on bedroom AC",
+            eventBus: AgentEventBus(),
+            runID: UUID(),
+            strategy: .graph
+        )
+
+        #expect(result.subgraphRun != nil)
+    }
+
     // MARK: - F2: τ-gate segmentation
 
     @Test

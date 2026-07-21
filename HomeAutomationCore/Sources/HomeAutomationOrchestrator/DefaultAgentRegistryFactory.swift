@@ -178,7 +178,7 @@ public enum DefaultAgentRegistryFactory {
             ),
             ContextualHomeAgent(
                 agent: AutomationActionResolutionAgent(
-                    resolveActions: { actionDescriptions, eventBus, runID in
+                    resolveActions: { actionDescriptions, eventBus, runID, strategy in
                         guard let agentRegistry = registryBox.registry else {
                             return []
                         }
@@ -190,7 +190,8 @@ public enum DefaultAgentRegistryFactory {
                         return await resolver.resolveAll(
                             actionDescriptions,
                             eventBus: eventBus,
-                            runID: runID
+                            runID: runID,
+                            strategy: strategy
                         )
                     }
                 ),

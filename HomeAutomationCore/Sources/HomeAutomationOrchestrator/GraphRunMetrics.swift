@@ -15,6 +15,8 @@ public struct GraphRunMetrics: Sendable, Hashable, Codable {
     public let goal: String
     public let startedAt: Date
     public var finishedAt: Date?
+    public var compilationReport: GraphCompilationReport?
+    public var criticalPath: GraphCriticalPathMetadata?
     public var nodeStatuses: [String: GraphNodeRunStatus]
     public var selectedAgents: [String: String]
     public var skippedNodeIDs: [String]
@@ -32,6 +34,8 @@ public struct GraphRunMetrics: Sendable, Hashable, Codable {
         goal: OrchestrationGoal,
         startedAt: Date = Date(),
         finishedAt: Date? = nil,
+        compilationReport: GraphCompilationReport? = nil,
+        criticalPath: GraphCriticalPathMetadata? = nil,
         nodeStatuses: [String: GraphNodeRunStatus] = [:],
         selectedAgents: [String: String] = [:],
         skippedNodeIDs: [String] = [],
@@ -48,6 +52,8 @@ public struct GraphRunMetrics: Sendable, Hashable, Codable {
         self.goal = goal.rawValue
         self.startedAt = startedAt
         self.finishedAt = finishedAt
+        self.compilationReport = compilationReport
+        self.criticalPath = criticalPath
         self.nodeStatuses = nodeStatuses
         self.selectedAgents = selectedAgents
         self.skippedNodeIDs = skippedNodeIDs

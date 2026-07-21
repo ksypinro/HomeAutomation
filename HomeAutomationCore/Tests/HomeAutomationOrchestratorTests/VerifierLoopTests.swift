@@ -63,6 +63,128 @@ struct VerifierLoopTests {
         #expect(output.metrics.acceptedOnIteration == 1)
     }
 
+    @Test("accepted verdict with disputes is normalized into repair before acceptance")
+    func acceptedWithDisputesRequiresRepair() async {
+        let callCount = CallCounter()
+
+        let orchestrator = makeOrchestrator(
+            verifyBehavior: { _, _ in
+                let count = await callCount.increment()
+                if count == 1 {
+                    return DraftVerdict(
+                        accepted: true,
+                        disputes: [
+                            DraftDispute(
+                                fieldID: "command.capability",
+                                kind: .wrongValue,
+                                evidence: "accepted verdict still carried a dispute"
+                            )
+                        ],
+                        needsClarification: false
+                    )
+                }
+                return DraftVerdict(accepted: true, disputes: [], needsClarification: false)
+            },
+            specialistBehavior: { _, _ in
+                .capability(
+                    fieldID: FieldID(rawValue: "command.capability"),
+                    HomeCapabilityDecision(
+                        selectedCapability: "switch",
+                        selectedCommand: "on",
+                        targetDeviceID: nil,
+                        alternatives: [],
+                        evidence: [],
+                        confidence: 0.9
+                    )
+                )
+            }
+        )
+
+        let output = await orchestrator.run(
+            request: makeRequest(),
+            operationHint: nil,
+            eventBus: AgentEventBus(),
+            runID: UUID()
+        )
+
+        guard case .accepted(_, let iterations) = output.exit else {
+            Issue.record("Expected .accepted after repair, got \(output.exit)")
+            return
+        }
+        #expect(iterations == 2)
+        #expect(output.metrics.repairCallCount == 1)
+        #expect(output.metrics.disputedFieldIDsPerIteration == [["command.capability"]])
+    }
+
+    @Test("accepted verdict with clarification exits as clarification")
+    func acceptedWithClarificationIsNotAccepted() async {
+        let orchestrator = makeOrchestrator(
+            verifyBehavior: { _, _ in
+                DraftVerdict(accepted: true, disputes: [], needsClarification: true)
+            }
+        )
+
+        let output = await orchestrator.run(
+            request: makeRequest(),
+            operationHint: nil,
+            eventBus: AgentEventBus(),
+            runID: UUID()
+        )
+
+        guard case .clarification = output.exit else {
+            Issue.record("Expected clarification, got \(output.exit)")
+            return
+        }
+        #expect(output.metrics.acceptedOnIteration == nil)
+    }
+
+    @Test("risk understatement is converted into a risk repair before acceptance")
+    func riskUnderstatementRequiresRiskRepair() async {
+        let callCount = CallCounter()
+
+        let orchestrator = makeOrchestrator(
+            verifyBehavior: { _, _ in
+                let count = await callCount.increment()
+                if count == 1 {
+                    return DraftVerdict(
+                        accepted: true,
+                        disputes: [],
+                        needsClarification: false,
+                        riskUnderstated: true
+                    )
+                }
+                return DraftVerdict(accepted: true, disputes: [], needsClarification: false)
+            },
+            specialistBehavior: { step, _ in
+                guard step.specialist == .riskRaise else { return nil }
+                return .riskRaise(
+                    HomeRiskClassificationResult(
+                        riskLevel: .high,
+                        requiresConfirmation: true,
+                        reason: "test risk raise",
+                        confidence: 0.9
+                    )
+                )
+            }
+        )
+
+        let output = await orchestrator.run(
+            request: makeRequest("unlock the front door"),
+            operationHint: nil,
+            eventBus: AgentEventBus(),
+            runID: UUID()
+        )
+
+        guard case .accepted(let envelope, let iterations) = output.exit else {
+            Issue.record("Expected .accepted after risk repair, got \(output.exit)")
+            return
+        }
+        #expect(iterations == 2)
+        #expect(output.metrics.repairCallCount == 1)
+        #expect(output.metrics.disputedFieldIDsPerIteration == [[FieldID.riskLevel.rawValue]])
+        #expect(envelope.risk.level == .high)
+    }
+
     @Test("one dispute → repair → accept on second iteration")
     func oneDisputeRepairAccept() async {
         let callCount = CallCounter()

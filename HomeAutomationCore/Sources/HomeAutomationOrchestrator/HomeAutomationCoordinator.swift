@@ -520,6 +520,7 @@ public struct DefaultHomeAutomationAgentRegistryFactory: HomeAutomationAgentRegi
 /// Fully assembled runtime dependencies consumed by `HomeCommandOrchestrator`.
 public struct HomeAutomationRuntimeDependencies: Sendable {
     public let agentRegistry: AgentRegistry
+    public let tier1AgentRegistry: AgentRegistry?
     public let graphPlanner: GraphPlanner
     public let policy: OrchestratorPolicyEngine
     public let scheduler: GraphScheduler
@@ -530,9 +531,15 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let smartThingsRuleCreator: (any SmartThingsRuleCreating)?
     public let orchestrationMode: OrchestrationMode
     public let loopOrchestrator: VerifierLoopOrchestrator?
+    public let foundationModelArm: FoundationModelCallArm
+    public let portfolioRolloutMode: PortfolioRolloutMode
+    public let portfolioRolloutConfiguration: PortfolioRolloutConfiguration
+    public let portfolioModelArtifact: PortfolioModelArtifact?
+    public let graphCompilationMode: GraphCompilationMode
 
     public init(
         agentRegistry: AgentRegistry,
+        tier1AgentRegistry: AgentRegistry? = nil,
         graphPlanner: GraphPlanner,
         policy: OrchestratorPolicyEngine,
         scheduler: GraphScheduler,
@@ -542,9 +549,15 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         deviceRegistry: any DeviceRegistryProtocol,
         smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil,
         orchestrationMode: OrchestrationMode = .graph,
-        loopOrchestrator: VerifierLoopOrchestrator? = nil
+        loopOrchestrator: VerifierLoopOrchestrator? = nil,
+        foundationModelArm: FoundationModelCallArm = .graph,
+        portfolioRolloutMode: PortfolioRolloutMode = .disabled,
+        portfolioRolloutConfiguration: PortfolioRolloutConfiguration = PortfolioRolloutConfiguration(),
+        portfolioModelArtifact: PortfolioModelArtifact? = nil,
+        graphCompilationMode: GraphCompilationMode = .disabled
     ) {
         self.agentRegistry = agentRegistry
+        self.tier1AgentRegistry = tier1AgentRegistry
         self.graphPlanner = graphPlanner
         self.policy = policy
         self.scheduler = scheduler
@@ -555,6 +568,11 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.smartThingsRuleCreator = smartThingsRuleCreator
         self.orchestrationMode = orchestrationMode
         self.loopOrchestrator = loopOrchestrator
+        self.foundationModelArm = foundationModelArm
+        self.portfolioRolloutMode = portfolioRolloutMode
+        self.portfolioRolloutConfiguration = portfolioRolloutConfiguration
+        self.portfolioModelArtifact = portfolioModelArtifact
+        self.graphCompilationMode = graphCompilationMode
     }
 }
 
@@ -675,19 +693,26 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
 
     public func makeRuntimeDependencies(
         orchestrationMode: OrchestrationMode = .graph,
-        useMiniPipeline: Bool = false
+        useMiniPipeline: Bool = false,
+        portfolioRolloutMode: PortfolioRolloutMode = .disabled,
+        portfolioRolloutConfiguration: PortfolioRolloutConfiguration = PortfolioRolloutConfiguration(),
+        portfolioModelArtifact: PortfolioModelArtifact? = nil,
+        graphCompilationMode: GraphCompilationMode = .disabled
     ) -> HomeAutomationRuntimeDependencies {
+        let baseAgentRegistry = makeAgentRegistry()
+        let tier1AgentRegistry = agentCoordinator.makeAgentRegistry(
+            automationCoordinator: automationCoordinator.withMiniPipeline(true)
+        )
         let agentRegistry: AgentRegistry
         if useMiniPipeline {
-            agentRegistry = agentCoordinator.makeAgentRegistry(
-                automationCoordinator: automationCoordinator.withMiniPipeline(true)
-            )
+            agentRegistry = tier1AgentRegistry
         } else {
-            agentRegistry = makeAgentRegistry()
+            agentRegistry = baseAgentRegistry
         }
 
         return HomeAutomationRuntimeDependencies(
             agentRegistry: agentRegistry,
+            tier1AgentRegistry: tier1AgentRegistry,
             graphPlanner: graphPlanner,
             policy: policy,
             scheduler: scheduler,
@@ -697,9 +722,14 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
             deviceRegistry: deviceRegistry,
             smartThingsRuleCreator: smartThingsRuleCreator,
             orchestrationMode: orchestrationMode,
-            loopOrchestrator: orchestrationMode == .verifierLoop
+            loopOrchestrator: (orchestrationMode == .verifierLoop || orchestrationMode == .adaptivePortfolio)
                 ? makeVerifierLoopOrchestrator()
-                : nil
+                : nil,
+            foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm,
+            portfolioRolloutMode: portfolioRolloutMode,
+            portfolioRolloutConfiguration: portfolioRolloutConfiguration,
+            portfolioModelArtifact: portfolioModelArtifact,
+            graphCompilationMode: graphCompilationMode
         )
     }
 

@@ -6,6 +6,7 @@ import os
 public struct BatchedConditionClauseResolver: Sendable {
     private let singleResolver: AutomationConditionClauseResolutionWorkerSession
     private let foundationModelAvailability: @Sendable () -> Bool
+    private let resolveBatchOutput: (@Sendable ([AutomationConditionClauseResolutionInput]) async throws -> BatchedConditionClauseFMOutput)?
     private let deterministicAcceptThreshold: Double
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.BatchedConditionClause")
 
@@ -14,10 +15,12 @@ public struct BatchedConditionClauseResolver: Sendable {
         foundationModelAvailability: @escaping @Sendable () -> Bool = {
             SystemLanguageModel.default.isAvailable
         },
+        resolveBatchOutput: (@Sendable ([AutomationConditionClauseResolutionInput]) async throws -> BatchedConditionClauseFMOutput)? = nil,
         deterministicAcceptThreshold: Double = 0.8
     ) {
         self.singleResolver = singleResolver
         self.foundationModelAvailability = foundationModelAvailability
+        self.resolveBatchOutput = resolveBatchOutput
         self.deterministicAcceptThreshold = deterministicAcceptThreshold
     }
 
@@ -85,27 +88,46 @@ public struct BatchedConditionClauseResolver: Sendable {
         let prompt = batchedPrompt(for: inputs)
         logger.debug("[BatchedConditionInput] \(prompt, privacy: .public)")
 
-        do {
-            let session = LanguageModelSession(
-                instructions: Instructions(batchedInstructions)
-            )
-            let fmOutput = try await FoundationModelCallRecorder.record(
-                agentID: AgentID.automationConditionClauseResolution.rawValue + ".batched",
-                policyMode: "batched-model-first-with-fallback",
-                modelAvailability: "available",
-                promptCharacterCount: batchedInstructions.count + prompt.count,
-                selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"]
-            ) {
-                try await session.respond(
-                    to: Prompt(prompt),
-                    generating: BatchedConditionClauseFMOutput.self
-                ).content
-            }
+        let compatibility = FoundationModelBatchCompatibilityKey(
+            runID: HomeAutomationTelemetryScope.current?.runID,
+            instructionDigest: FoundationModelBatchCompatibilityKey.stableDigest(batchedInstructions),
+            responseSchemaDigest: FoundationModelBatchCompatibilityKey.stableDigest("BatchedConditionClauseFMOutput.v2.itemID"),
+            toolSetDigest: FoundationModelBatchCompatibilityKey.stableDigest("availableConditionDevices|capabilityAttributeCatalog"),
+            privacyClass: .privateUserData,
+            workflowScopeID: FMAdmissionContextScope.current?.workflowScopeID
+        )
+        let batchContext = FoundationModelBatchContext(
+            batchID: "condition-\(UUID().uuidString)",
+            itemCount: inputs.count,
+            compatibilityDigest: compatibility.digest
+        )
 
+        do {
+            let fmOutput = try await FoundationModelBatchContextScope.$current.withValue(batchContext) {
+                if let resolveBatchOutput {
+                    return try await resolveBatchOutput(inputs)
+                }
+                let session = LanguageModelSession(
+                    instructions: Instructions(batchedInstructions)
+                )
+                return try await FoundationModelCallRecorder.record(
+                    agentID: AgentID.automationConditionClauseResolution.rawValue + ".batched",
+                    policyMode: "batched-model-first-with-fallback",
+                    modelAvailability: "available",
+                    promptCharacterCount: batchedInstructions.count + prompt.count,
+                    selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"]
+                ) {
+                    try await session.respond(
+                        to: Prompt(prompt),
+                        generating: BatchedConditionClauseFMOutput.self
+                    ).content
+                }
+            }
             logger.debug("[BatchedConditionOutput] \(fmOutput.items.count) items returned.")
 
-            return inputs.enumerated().map { index, input in
-                let itemOutput = index < fmOutput.items.count ? fmOutput.items[index] : nil
+            let outputsByID = validOutputsByItemID(fmOutput.items, expectedIDs: Set(inputs.map(\.component.id)))
+            return inputs.map { input in
+                let itemOutput = outputsByID[input.component.id]
                 let fallback = deterministicCondition(for: input)
                 if let itemOutput, itemOutput.confidence >= 0.5 {
                     return makeResult(
@@ -257,7 +279,7 @@ public struct BatchedConditionClauseResolver: Sendable {
         Resolve multiple automation condition clauses into structured conditions in one pass.
 
         For each clause, decide the condition operator and operands. Choose deviceID, capability, and attribute from the provided device and capability lists.
-        Return one result per clause, in the same order as the input.
+        Return one result per clause. Each result must echo the clause itemID exactly.
         Use the requested triggerPolicy for each clause.
         Do not resolve actions or SmartThings JSON.
         """
@@ -273,7 +295,7 @@ public struct BatchedConditionClauseResolver: Sendable {
             clauses += """
 
             --- Clause \(index + 1) ---
-            id: \(input.component.id)
+            itemID: \(input.component.id)
             rawText: \(input.component.rawText)
             triggerPolicy: \(input.triggerPolicy.rawValue)
             deterministicHint: \(String(describing: fallback))
@@ -293,8 +315,24 @@ public struct BatchedConditionClauseResolver: Sendable {
         Capability attributes:
         \(CapabilityAttributeCatalogTool.promptList(for: allCapabilities))
 
-        Return exactly \(inputs.count) items in the same order as the clauses above.
+        Return exactly \(inputs.count) items. Each item must include itemID copied from a clause above. Order does not matter; itemID is authoritative.
         """
+    }
+
+    private func validOutputsByItemID(
+        _ outputs: [BatchedConditionClauseItemOutput],
+        expectedIDs: Set<String>
+    ) -> [String: BatchedConditionClauseItemOutput] {
+        let grouped = Dictionary(grouping: outputs) { $0.itemID }
+        var valid: [String: BatchedConditionClauseItemOutput] = [:]
+        for (itemID, matches) in grouped {
+            guard expectedIDs.contains(itemID), matches.count == 1 else {
+                logger.debug("[BatchedCondition] Ignoring invalid itemID \(itemID, privacy: .public), count=\(matches.count).")
+                continue
+            }
+            valid[itemID] = matches[0]
+        }
+        return valid
     }
 
     // MARK: - Helpers

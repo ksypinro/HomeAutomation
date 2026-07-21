@@ -21,8 +21,7 @@ extension GraphScheduler {
                 runID: runID.uuidString,
                 operation: graph.goal.rawValue,
                 graphID: graph.id,
-                stage: stage,
-                runtimeMode: "graph"
+                stage: stage
             ),
             status: .completed,
             durationMs: duration * 1_000,

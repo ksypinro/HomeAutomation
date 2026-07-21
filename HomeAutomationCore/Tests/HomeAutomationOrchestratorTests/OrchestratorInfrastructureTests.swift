@@ -153,7 +153,7 @@ struct OrchestratorInfrastructureTests {
         _ = try await orchestrator.resolve("Turn on the bedroom lamp", executeLowRiskCommands: false)
         let metrics = try #require(await orchestrator.lastMetrics())
 
-        #expect(metrics.graphRun?.graphID == "direct-command-fallback-graph")
+        #expect(metrics.graphRun?.graphID == "direct-command-finalization-graph")
     }
 
     @Test
@@ -345,6 +345,192 @@ struct OrchestratorInfrastructureTests {
         #expect(metrics.foundationModelUsage.modelAvailabilityStatus == "unavailable")
         #expect(metrics.foundationModelUsage.modelCallCount == 0)
         #expect(metrics.foundationModelUsage.skippedModelCallCount > 0)
+        #expect(metrics.foundationModelUsageSnapshot?.summary.actualCallCount == 0)
+        #expect(metrics.foundationModelUsage.queueWaitTotalMs == 0)
+        #expect(metrics.foundationModelUsage.serviceTotalMs == 0)
+        #expect(metrics.metricsV2?.modelCalls.modelCallCount == 0)
+        #expect(metrics.metricsV2?.modelCalls.queueWaitTotalMs == 0)
+    }
+
+    @Test
+    func automationGraphMetricsIncludeFinalizationReceipt() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        _ = try await orchestrator.resolve("Turn on bedroom AC everyday at 7 AM", executeLowRiskCommands: true)
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        #expect(receipt.status == .completed)
+        #expect(receipt.graphID == "automation-creation-graph")
+        #expect(receipt.requiredGateIDs == [
+            AgentID.automationValidation.rawValue,
+            AgentID.smartThingsCompilation.rawValue,
+            AgentID.smartThingsRuleCreation.rawValue,
+            AgentID.automationResultAssembly.rawValue
+        ])
+        #expect(receipt.gateRecords.contains { $0.gateID == AgentID.automationValidation.rawValue && $0.status == GraphNodeRunStatus.completed.rawValue })
+        #expect(receipt.gateRecords.contains { $0.gateID == AgentID.smartThingsCompilation.rawValue && $0.status == GraphNodeRunStatus.completed.rawValue })
+        #expect(receipt.gateRecords.contains { $0.gateID == AgentID.smartThingsRuleCreation.rawValue })
+        #expect(receipt.missingGateIDs.isEmpty)
+        #expect(receipt.failedGateID == nil)
+    }
+
+    @Test
+    func directCommandGraphMetricsIncludeFinalizationReceipt() async throws {
+        let orchestrator = HomeCommandOrchestrator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+
+        let result = try await orchestrator.resolve(
+            "Turn on the bedroom lamp",
+            executeLowRiskCommands: false
+        )
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        guard case .readyToExecute = result.resolution else {
+            Issue.record("Expected ready-to-execute direct command, got \(result.resolution)")
+            return
+        }
+
+        #expect(receipt.status == .completed)
+        #expect(receipt.graphID == "direct-command-finalization-graph")
+        #expect(receipt.requiredGateIDs == [
+            AgentID.safetyValidation.rawValue,
+            AgentID.parameterValidation.rawValue,
+            AgentID.confirmationPolicy.rawValue,
+            AgentID.executionPlanning.rawValue,
+            AgentID.mockExecution.rawValue
+        ])
+        #expect(receipt.gateRecords.contains {
+            $0.gateID == AgentID.mockExecution.rawValue &&
+            $0.status == GraphNodeRunStatus.skipped.rawValue
+        })
+        #expect(receipt.missingGateIDs.isEmpty)
+        #expect(receipt.failedGateID == nil)
+    }
+
+    @Test
+    func verifierLoopEscalatedAutomationRunsResolutionFinalizerWhenGraphFallbackUnavailable() async throws {
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: MockHomeDeviceRegistry(),
+            foundationModelAvailability: { false }
+        )
+        let orchestrator = HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+        )
+
+        _ = try await orchestrator.resolve("When the entry contact sensor opens, turn on the porch light", executeLowRiskCommands: true)
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        #expect(metrics.loop != nil)
+        #expect(metrics.loop?.escalationReason == EscalationReason.verifierUnavailable.rawValue)
+        #expect(receipt.status == .completed)
+        #expect(receipt.graphID == "automation-finalization-graph")
+    }
+
+    @Test
+    func verifierLoopAcceptedAutomationRunsResolutionFinalizer() async throws {
+        let orchestrator = makeAcceptedVerifierLoopOrchestrator()
+
+        let result = try await orchestrator.resolve(
+            "When the entry contact sensor opens, turn on the porch light",
+            executeLowRiskCommands: true
+        )
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected automation draft, got \(result.resolution)")
+            return
+        }
+
+        #expect(plan.smartThingsRuleJSON != nil)
+        #expect(metrics.loop?.acceptedOnIteration == 1)
+        #expect(metrics.automationMetrics.graphID == "automation-finalization-graph")
+        #expect(receipt.status == .completed)
+        #expect(receipt.graphID == "automation-finalization-graph")
+        #expect(receipt.requiredGateIDs.contains(AgentID.automationResultAssembly.rawValue))
+    }
+
+    @Test
+    func verifierLoopAcceptedDirectCommandRunsResolutionFinalizer() async throws {
+        let orchestrator = makeAcceptedVerifierLoopOrchestrator()
+
+        let result = try await orchestrator.resolve(
+            "Turn on the bedroom lamp",
+            executeLowRiskCommands: false
+        )
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        guard case .readyToExecute = result.resolution else {
+            Issue.record("Expected ready-to-execute result, got \(result.resolution)")
+            return
+        }
+
+        #expect(metrics.loop?.acceptedOnIteration == 1)
+        #expect(receipt.status == .completed)
+        #expect(receipt.graphID == "direct-command-finalization-graph")
+        #expect(receipt.gateRecords.contains {
+            $0.gateID == AgentID.mockExecution.rawValue &&
+            $0.status == GraphNodeRunStatus.skipped.rawValue
+        })
+    }
+
+    @Test
+    func verifierLoopAcceptedAutomationCreateRunsBackendOnlyAfterFinalizerGates() async throws {
+        let creator = RecordingSmartThingsRuleCreator()
+        let orchestrator = makeAcceptedVerifierLoopOrchestrator(smartThingsRuleCreator: creator)
+
+        let result = try await orchestrator.resolve(
+            "Turn on bedroom AC every day at 7 AM",
+            executeLowRiskCommands: true,
+            automationCreationOptions: .create(locationID: "location-1")
+        )
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected created automation draft, got \(result.resolution)")
+            return
+        }
+
+        #expect(await creator.callCount == 1)
+        #expect(plan.backendResponse?.status == .created)
+        #expect(receipt.status == .completed)
+        #expect(receipt.gateRecords.first { $0.gateID == AgentID.automationValidation.rawValue }?.status == GraphNodeRunStatus.completed.rawValue)
+        #expect(receipt.gateRecords.first { $0.gateID == AgentID.smartThingsCompilation.rawValue }?.status == GraphNodeRunStatus.completed.rawValue)
+        #expect(receipt.gateRecords.first { $0.gateID == AgentID.smartThingsRuleCreation.rawValue }?.status == GraphNodeRunStatus.completed.rawValue)
+        #expect(receipt.gateRecords.first { $0.gateID == AgentID.automationResultAssembly.rawValue }?.status == GraphNodeRunStatus.completed.rawValue)
+    }
+
+    @Test
+    func verifierLoopAcceptedHighRiskAutomationDoesNotCallBackendWithoutConfirmation() async throws {
+        let creator = RecordingSmartThingsRuleCreator()
+        let orchestrator = makeAcceptedVerifierLoopOrchestrator(smartThingsRuleCreator: creator)
+
+        let result = try await orchestrator.resolve(
+            "Unlock front door every day at 7 AM",
+            executeLowRiskCommands: true,
+            automationCreationOptions: .create(locationID: "location-1")
+        )
+        let metrics = try #require(await orchestrator.lastMetrics())
+        let receipt = try #require(metrics.safetyMetrics.finalizationReceipt)
+
+        guard case .automationRequiresConfirmation(let plan) = result.resolution else {
+            Issue.record("Expected high-risk automation confirmation, got \(result.resolution)")
+            return
+        }
+
+        #expect(await creator.callCount == 0)
+        #expect(plan.backendResponse?.status == .confirmationRequired)
+        #expect(receipt.status == .completed)
     }
 
     @Test
@@ -550,6 +736,46 @@ struct OrchestratorInfrastructureTests {
 
         #expect(blockedDraft.targetDeviceID == "front_door_lock")
     }
+
+    private func makeAcceptedVerifierLoopOrchestrator(
+        smartThingsRuleCreator: (any SmartThingsRuleCreating)? = nil
+    ) -> HomeCommandOrchestrator {
+        let registry = MockHomeDeviceRegistry()
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: registry,
+            foundationModelAvailability: { false },
+            smartThingsRuleCreator: smartThingsRuleCreator
+        )
+        let loop = VerifierLoopOrchestrator(
+            pipeline: DeterministicDraftPipeline(registry: registry),
+            verifier: DraftVerifierWorkerSession(
+                verify: { _, _ in
+                    DraftVerdict(accepted: true, disputes: [], needsClarification: false)
+                },
+                foundationModelAvailability: { false }
+            ),
+            promptBuilder: VerifierPromptBuilder(),
+            planner: RepairPlanner(),
+            specialists: RepairSpecialistRegistry(execute: { _, _ in nil }),
+            policy: VerifierLoopPolicy()
+        )
+
+        return HomeCommandOrchestrator(
+            dependencies: HomeAutomationRuntimeDependencies(
+                agentRegistry: coordinator.makeAgentRegistry(),
+                graphPlanner: coordinator.graphPlanner,
+                policy: coordinator.policy,
+                scheduler: coordinator.scheduler,
+                metricsCollector: OrchestratorMetricsCollector(),
+                conversationMemory: ConversationMemory(),
+                circuitBreakers: coordinator.circuitBreakers,
+                deviceRegistry: registry,
+                smartThingsRuleCreator: smartThingsRuleCreator,
+                orchestrationMode: .verifierLoop,
+                loopOrchestrator: loop
+            )
+        )
+    }
 }
 
 private struct EmptyAgentRegistryFactory: HomeAutomationAgentRegistryFactory {
@@ -593,5 +819,26 @@ private struct SuccessfulAnyAgent: AnyHomeAgent {
 
     func run(context: ResolutionContext) async -> AgentRunResult {
         .success(ResolutionContextPatch(agentID: id))
+    }
+}
+
+private actor RecordingSmartThingsRuleCreator: SmartThingsRuleCreating {
+    private var requests: [SmartThingsRuleCreationRequest] = []
+
+    var callCount: Int {
+        requests.count
+    }
+
+    func createRule(_ request: SmartThingsRuleCreationRequest) async throws -> SmartThingsRuleCreationReceipt {
+        requests.append(request)
+        return SmartThingsRuleCreationReceipt(
+            status: .created,
+            ruleID: "rule-\(requests.count)",
+            locationID: request.locationID,
+            requestID: "request-\(requests.count)",
+            message: "Created by infrastructure test backend.",
+            createdAt: Date(),
+            rawResponse: #"{"ruleId":"rule-\#(requests.count)"}"#
+        )
     }
 }

@@ -6,10 +6,19 @@ import OSLog
 public struct GraphExecutionPlan: Sendable, Hashable {
     public let graph: OrchestrationGraph
     public let isFallbackOnly: Bool
+    public let compilationReport: GraphCompilationReport?
+    public let criticalPath: GraphCriticalPathMetadata?
 
-    public init(graph: OrchestrationGraph, isFallbackOnly: Bool = false) {
+    public init(
+        graph: OrchestrationGraph,
+        isFallbackOnly: Bool = false,
+        compilationReport: GraphCompilationReport? = nil,
+        criticalPath: GraphCriticalPathMetadata? = nil
+    ) {
         self.graph = graph
         self.isFallbackOnly = isFallbackOnly
+        self.compilationReport = compilationReport
+        self.criticalPath = criticalPath
     }
 }
 

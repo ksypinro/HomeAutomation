@@ -5,6 +5,13 @@ public struct ExitCriterionResult: Sendable, Codable {
     public let threshold: String
     public let actual: String
     public let passed: Bool
+
+    public init(name: String, threshold: String, actual: String, passed: Bool) {
+        self.name = name
+        self.threshold = threshold
+        self.actual = actual
+        self.passed = passed
+    }
 }
 
 public enum OrchestrationExitCriteria {

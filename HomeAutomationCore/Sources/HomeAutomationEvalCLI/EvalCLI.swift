@@ -13,6 +13,21 @@ struct HomeAutomationEvalCLI {
             return
         }
 
+        if options.exportPortfolioTraining {
+            try await runExportPortfolioTraining(options: options)
+            return
+        }
+
+        if options.evaluatePortfolioRouter {
+            try runEvaluatePortfolioRouter(options: options)
+            return
+        }
+
+        if options.adaptiveReleaseGates {
+            try runAdaptiveReleaseGates(options: options)
+            return
+        }
+
         if options.shadowVerify {
             try await runShadowVerify(options: options)
             return
@@ -77,11 +92,7 @@ struct HomeAutomationEvalCLI {
     }
 
     private static func runCompareOrchestration(options: EvaluationCLIOptions) async throws {
-        let runner = OrchestrationComparisonRunner(
-            caseLimit: options.caseLimit,
-            requireLiveModel: options.requireLiveModel
-        )
-        let report = await runner.run()
+        let report = try await makeComparisonReport(options: options)
         try OrchestrationComparisonRunner.writeReport(report, to: options.outputURL)
 
         print("Orchestration comparison: \(report.caseCount) case(s) across \(report.armSummaries.count) arm(s) [\(options.requireLiveModel ? "live model" : "deterministic")]")
@@ -96,6 +107,79 @@ struct HomeAutomationEvalCLI {
         if passCount < totalCount {
             throw EvaluationCLIError.failedCases(totalCount - passCount)
         }
+    }
+
+    private static func runExportPortfolioTraining(options: EvaluationCLIOptions) async throws {
+        let report = try await makeComparisonReport(options: options)
+        let dataset = PortfolioTrainingDataset.make(from: report)
+        let target = options.portfolioTrainingURL ?? options.outputURL.appendingPathComponent("portfolio-training-dataset.json")
+        try PortfolioTrainingDataset.write(dataset, to: target)
+
+        print("Portfolio training dataset: \(dataset.rows.count) row(s), \(dataset.datasetID)")
+        print("Dataset: \(target.path)")
+    }
+
+    private static func runEvaluatePortfolioRouter(options: EvaluationCLIOptions) throws {
+        guard let artifactURL = options.modelArtifactURL else {
+            throw EvaluationCLIError.missingRequiredArgument("--model-artifact-path")
+        }
+        let datasetURL = options.portfolioTrainingURL ?? options.outputURL.appendingPathComponent("portfolio-training-dataset.json")
+        let artifact = try PortfolioRouterEvaluator.loadArtifact(from: artifactURL)
+        let dataset = try PortfolioTrainingDataset.load(from: datasetURL)
+        let report = PortfolioRouterEvaluator(artifact: artifact).evaluate(dataset)
+        let target = options.outputURL.appendingPathComponent("portfolio-router-evaluation.json")
+        try PortfolioRouterEvaluator.write(report, to: target)
+
+        print("Portfolio router evaluation: \(report.caseCount) case(s), mean regret=\(String(format: "%.4f", report.meanRegret)), max regret=\(String(format: "%.4f", report.maxRegret))")
+        print("Report: \(target.path)")
+    }
+
+    private static func runAdaptiveReleaseGates(options: EvaluationCLIOptions) throws {
+        let routerReport: PortfolioRouterEvaluationReport?
+        if let path = options.portfolioRouterReportPath {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            routerReport = try decoder.decode(
+                PortfolioRouterEvaluationReport.self,
+                from: Data(contentsOf: URL(fileURLWithPath: path))
+            )
+        } else {
+            routerReport = nil
+        }
+        let report = AdaptiveReleaseGateReport.make(
+            router: routerReport,
+            configVersion: options.rolloutConfigVersion,
+            rolloutMode: options.rolloutModeLabel,
+            rollbackDrillPassed: options.rollbackDrillPassed,
+            hardwareGatePassed: options.hardwareGatePassed
+        )
+        let target = options.outputURL.appendingPathComponent("adaptive-release-gates.json")
+        try AdaptiveReleaseGateReport.write(report, to: target)
+        print("Adaptive release gates: \(report.results.filter(\.passed).count)/\(report.results.count) passed")
+        print("Report: \(target.path)")
+        if !report.passed {
+            throw EvaluationCLIError.failedCases(report.results.filter { !$0.passed }.count)
+        }
+    }
+
+
+    private static func makeComparisonReport(options: EvaluationCLIOptions) async throws -> OrchestrationComparisonReport {
+        let runner = OrchestrationComparisonRunner(
+            caseLimit: options.caseLimit,
+            requireLiveModel: options.requireLiveModel,
+            seed: options.seed,
+            repetitions: options.repetitions,
+            warmups: options.warmups,
+            gateConcurrency: options.gateConcurrency,
+            prewarmMode: options.prewarmMode
+        )
+        let cases: [EvaluationCase]
+        if let dataset = try options.loadDatasetIfRequested() {
+            cases = Self.comparisonCases(from: dataset)
+        } else {
+            cases = EvaluationCorpus.defaultCases
+        }
+        return await runner.run(cases: cases)
     }
 
     private static func runShadowVerify(options: EvaluationCLIOptions) async throws {
@@ -113,6 +197,32 @@ struct HomeAutomationEvalCLI {
         print("False-accept rate: \(String(format: "%.1f%%", report.falseAcceptRate * 100))")
         print("False-reject rate: \(String(format: "%.1f%%", report.falseRejectRate * 100))")
         print("Report: \(options.outputURL.appendingPathComponent("verifier-shadow-report.json").path)")
+    }
+
+    private static func comparisonCases(from dataset: GeneratedEvaluationDataset) -> [EvaluationCase] {
+        let fixturesByID = Dictionary(uniqueKeysWithValues: dataset.fixtures.map { ($0.id, $0) })
+        return dataset.cases.map { generated in
+            let fixture = fixturesByID[generated.fixtureID]
+            return EvaluationCase(
+                id: generated.id,
+                suite: generated.suite,
+                tags: generated.tags,
+                input: generated.input,
+                fixture: EvaluationFixture(devices: fixture?.devices ?? []),
+                expected: EvaluationExpectedOutput(
+                    operation: generated.expected.operation,
+                    domain: generated.expected.domain,
+                    languageCode: generated.expected.languageCode,
+                    expectedDeviceIDs: generated.expected.expectedDeviceIDs,
+                    capability: generated.expected.capability,
+                    command: generated.expected.command,
+                    actionCount: generated.expected.actionCount,
+                    conditionCount: generated.expected.conditionCount,
+                    smartThingsJSONContains: generated.expected.smartThingsJSONContains,
+                    allowedOutcome: generated.expected.allowedOutcome
+                )
+            )
+        }
     }
 
     private static func makeParaphraseProvider(
@@ -144,6 +254,21 @@ private struct EvaluationCLIOptions {
     let generationMode: EvaluationCommandGenerationMode
     let shadowVerify: Bool
     let compareOrchestration: Bool
+    let exportPortfolioTraining: Bool
+    let evaluatePortfolioRouter: Bool
+    let modelArtifactPath: String?
+    let portfolioTrainingPath: String?
+    let adaptiveReleaseGates: Bool
+    let portfolioRouterReportPath: String?
+    let rollbackDrillPassed: Bool
+    let hardwareGatePassed: Bool
+    let rolloutConfigVersion: String
+    let rolloutModeLabel: String
+    let seed: UInt64
+    let repetitions: Int
+    let warmups: Int
+    let gateConcurrency: Int
+    let prewarmMode: String
 
     static func parse(_ arguments: ArraySlice<String>) throws -> EvaluationCLIOptions {
         var mode: EvaluationMode = .deterministic
@@ -160,6 +285,21 @@ private struct EvaluationCLIOptions {
         var generationMode: EvaluationCommandGenerationMode = .codex
         var shadowVerify = false
         var compareOrchestration = false
+        var exportPortfolioTraining = false
+        var evaluatePortfolioRouter = false
+        var modelArtifactPath: String?
+        var portfolioTrainingPath: String?
+        var adaptiveReleaseGates = false
+        var portfolioRouterReportPath: String?
+        var rollbackDrillPassed = false
+        var hardwareGatePassed = false
+        var rolloutConfigVersion = "local"
+        var rolloutModeLabel = "disabled"
+        var seed: UInt64 = 0
+        var repetitions = 1
+        var warmups = 0
+        var gateConcurrency = 2
+        var prewarmMode = "default"
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -228,6 +368,72 @@ private struct EvaluationCLIOptions {
                 shadowVerify = true
             case "--compare-orchestration":
                 compareOrchestration = true
+            case "--export-portfolio-training":
+                exportPortfolioTraining = true
+            case "--evaluate-portfolio-router":
+                evaluatePortfolioRouter = true
+            case "--model-artifact-path":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--model-artifact-path")
+                }
+                modelArtifactPath = value
+            case "--portfolio-training-path":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--portfolio-training-path")
+                }
+                portfolioTrainingPath = value
+            case "--adaptive-release-gates":
+                adaptiveReleaseGates = true
+            case "--portfolio-router-report-path":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--portfolio-router-report-path")
+                }
+                portfolioRouterReportPath = value
+            case "--rollback-drill-passed":
+                guard let value = iterator.next() else {
+                    throw EvaluationCLIError.invalidArgument("--rollback-drill-passed")
+                }
+                rollbackDrillPassed = parseBool(value)
+            case "--hardware-gate-passed":
+                guard let value = iterator.next() else {
+                    throw EvaluationCLIError.invalidArgument("--hardware-gate-passed")
+                }
+                hardwareGatePassed = parseBool(value)
+            case "--rollout-config-version":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--rollout-config-version")
+                }
+                rolloutConfigVersion = value
+            case "--rollout-mode":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--rollout-mode")
+                }
+                rolloutModeLabel = value
+            case "--seed":
+                guard let value = iterator.next(), let parsed = UInt64(value) else {
+                    throw EvaluationCLIError.invalidArgument("--seed")
+                }
+                seed = parsed
+            case "--repetitions":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    throw EvaluationCLIError.invalidArgument("--repetitions")
+                }
+                repetitions = parsed
+            case "--warmups":
+                guard let value = iterator.next(), let parsed = Int(value), parsed >= 0 else {
+                    throw EvaluationCLIError.invalidArgument("--warmups")
+                }
+                warmups = parsed
+            case "--gate-concurrency":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    throw EvaluationCLIError.invalidArgument("--gate-concurrency")
+                }
+                gateConcurrency = parsed
+            case "--prewarm-mode":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw EvaluationCLIError.invalidArgument("--prewarm-mode")
+                }
+                prewarmMode = value
             case "--help", "-h":
                 print(Self.help)
                 Foundation.exit(0)
@@ -250,7 +456,22 @@ private struct EvaluationCLIOptions {
             generateDataset: generateDataset,
             generationMode: generationMode,
             shadowVerify: shadowVerify,
-            compareOrchestration: compareOrchestration
+            compareOrchestration: compareOrchestration,
+            exportPortfolioTraining: exportPortfolioTraining,
+            evaluatePortfolioRouter: evaluatePortfolioRouter,
+            modelArtifactPath: modelArtifactPath,
+            portfolioTrainingPath: portfolioTrainingPath,
+            adaptiveReleaseGates: adaptiveReleaseGates,
+            portfolioRouterReportPath: portfolioRouterReportPath,
+            rollbackDrillPassed: rollbackDrillPassed,
+            hardwareGatePassed: hardwareGatePassed,
+            rolloutConfigVersion: rolloutConfigVersion,
+            rolloutModeLabel: rolloutModeLabel,
+            seed: seed,
+            repetitions: repetitions,
+            warmups: warmups,
+            gateConcurrency: gateConcurrency,
+            prewarmMode: prewarmMode
         )
     }
 
@@ -263,6 +484,14 @@ private struct EvaluationCLIOptions {
             return try loader.loadBuiltInDataset(named: dataset)
         }
         return nil
+    }
+
+    var modelArtifactURL: URL? {
+        modelArtifactPath.map { URL(fileURLWithPath: $0) }
+    }
+
+    var portfolioTrainingURL: URL? {
+        portfolioTrainingPath.map { URL(fileURLWithPath: $0) }
     }
 
     private static func parseBool(_ value: String) -> Bool {
@@ -291,14 +520,18 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --generate-dataset true --generation-mode template --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-template
       swift run home-automation-eval --generate-dataset true --generation-mode foundation-model --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-live
       swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
-      swift run home-automation-eval --compare-orchestration --output .build/evaluation-comparison --case-limit 50
+      swift run home-automation-eval --compare-orchestration --dataset seed-v1 --seed 20260713 --warmups 1 --repetitions 3 --output .build/evaluation-comparison --case-limit 50
       HOME_AUTOMATION_EVAL_LIVE=1 swift run home-automation-eval --compare-orchestration --require-live-model true --output .build/evaluation-comparison-live
+      swift run home-automation-eval --export-portfolio-training --dataset seed-v1 --output .build/portfolio-training
+      swift run home-automation-eval --evaluate-portfolio-router --portfolio-training-path .build/portfolio-training/portfolio-training-dataset.json --model-artifact-path .build/portfolio-model.json --output .build/portfolio-router-eval
+      swift run home-automation-eval --adaptive-release-gates --portfolio-router-report-path .build/portfolio-router-eval/portfolio-router-evaluation.json --rollback-drill-passed true --hardware-gate-passed false --output .build/adaptive-release
     """
 }
 
 private enum EvaluationCLIError: Error, CustomStringConvertible {
     case invalidArgument(String)
     case failedCases(Int)
+    case missingRequiredArgument(String)
 
     var description: String {
         switch self {
@@ -306,6 +539,8 @@ private enum EvaluationCLIError: Error, CustomStringConvertible {
             return "Invalid evaluation CLI argument: \(argument)"
         case .failedCases(let count):
             return "\(count) evaluation case(s) failed"
+        case .missingRequiredArgument(let argument):
+            return "Missing required evaluation CLI argument: \(argument)"
         }
     }
 }
