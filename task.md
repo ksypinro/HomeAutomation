@@ -188,12 +188,12 @@ Ready for testing and validation. Phase 1 delivers ~30% reduction in FM calls fo
 - [x] Do NOT raise global gate concurrency as the primary fix
 
 ### Prompt/session cleanup (PR 4)
-- [ ] Single and batch share session-factory dependencies
-- [ ] Distinct condition-batch job/session kind
-- [ ] Batch context = union of per-clause relevant devices with hard prompt budget
-- [ ] Retain each det candidate; close ambiguity alternatives
-- [ ] Remove tool-selection telemetry for unattached tools
-- [ ] Prewarm lazy/idempotent, residual session kinds only; record prewarm/reuse state
+- [x] Single and batch share session-factory dependencies
+- [x] Distinct condition-batch job/session kind
+- [x] Batch context = union of per-clause relevant devices with hard prompt budget
+- [x] Retain each det candidate; close ambiguity alternatives
+- [x] Remove tool-selection telemetry for unattached tools
+- [x] Prewarm lazy/idempotent, residual session kinds only; record prewarm/reuse state
 
 - [ ] Tests: delayed admission doesn't consume service budget; admission vs service timeout distinct;
       cancel before/after admission frees resources; conditions start before long action pipelines under saturation;
