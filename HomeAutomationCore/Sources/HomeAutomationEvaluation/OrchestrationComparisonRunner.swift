@@ -7,6 +7,8 @@ public enum OrchestrationArm: String, Sendable, Codable, Hashable, CaseIterable 
     case graph
     case graphWithTier1
     case verifierLoop
+    case adaptiveStatic
+    case adaptiveShadow
 }
 
 /// Coarse workload category used to split arm summaries so exit gates can
@@ -51,6 +53,14 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
     public let requiresFinalizationReceipt: Bool
     public let finalizationReceiptStatus: String?
     public let finalizationReceiptGraphID: String?
+    /// Phase 0: orchestration strategy classification
+    public let strategy: OrchestrationStrategy?
+    /// Phase 0: root-routing source ("normal", "adaptive", "prepared")
+    public let rootRoutingSource: String?
+    /// Phase 0: selected arm in portfolio routing
+    public let selectedArm: String?
+    /// Phase 0: router rule ID for routing decision audit trail
+    public let routerRuleID: String?
 
     public init(
         arm: OrchestrationArm,
@@ -77,7 +87,11 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         command: String?,
         requiresFinalizationReceipt: Bool = false,
         finalizationReceiptStatus: String? = nil,
-        finalizationReceiptGraphID: String? = nil
+        finalizationReceiptGraphID: String? = nil,
+        strategy: OrchestrationStrategy? = nil,
+        rootRoutingSource: String? = nil,
+        selectedArm: String? = nil,
+        routerRuleID: String? = nil
     ) {
         self.arm = arm
         self.caseID = caseID
@@ -98,6 +112,10 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         self.escalated = escalated
         self.clarification = clarification
         self.confirmation = confirmation
+        self.strategy = strategy
+        self.rootRoutingSource = rootRoutingSource
+        self.selectedArm = selectedArm
+        self.routerRuleID = routerRuleID
         self.selectedDeviceIDs = selectedDeviceIDs
         self.capability = capability
         self.command = command

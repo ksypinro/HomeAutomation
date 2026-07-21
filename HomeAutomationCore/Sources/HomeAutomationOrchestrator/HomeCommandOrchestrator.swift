@@ -296,6 +296,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ) -> AsyncThrowingStream<OrchestratorUpdate, Error> {
         AsyncThrowingStream { continuation in
             Task {
+                let requestStartedAt = Date()
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedText.isEmpty else {
                     logger.error("Rejecting empty command request.")
@@ -863,6 +864,47 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         }
     }
 
+    private func captureRequestTelemetry(
+        result: HomeAutomationResolverResult,
+        startedAt: Date,
+        runContext: OrchestrationRunContext,
+        portfolioExecutionPlan: PortfolioArmExecutionPlan,
+        orchestrationMode: OrchestrationMode
+    ) async {
+        let endedAt = Date()
+        let totalDurationMs = endedAt.timeIntervalSince(startedAt) * 1_000
+
+        // Map FM arm to strategy
+        let strategy: OrchestrationStrategy
+        switch orchestrationMode {
+        case .graph:
+            strategy = .graph
+        case .verifierLoop:
+            strategy = .verifierLoop
+        case .adaptivePortfolio:
+            // Simplified for Phase 0; full mapping uses portfolio rollout mode
+            strategy = .adaptiveStatic
+        }
+
+        let snapshot = RequestTelemetrySnapshot(
+            strategy: strategy,
+            rootRoutingSource: "normal",
+            selectedArm: portfolioExecutionPlan.selectedArm.rawValue,
+            executingArm: portfolioExecutionPlan.executingArm.rawValue,
+            routerRuleID: nil,
+            preparationDurationMs: 0, // computed from router timing
+            operationExecutionDurationMs: totalDurationMs,
+            requestToOutcomeDurationMs: totalDurationMs,
+            conditionMetrics: nil,
+            fmCallCount: 0 // populated from ledger
+        )
+
+        await RequestTelemetryCapture().captureAndLog(
+            snapshot: snapshot,
+            context: HomeAutomationTelemetryScope.current
+        )
+    }
+
     public func lastMetricsJSON() async -> String? {
         await metricsCollector.lastJSON()
     }
@@ -905,6 +947,16 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         }
         await runContext.eventBus.finish()
         await eventForwarder.value
+
+        // Phase 0: capture request-level telemetry for baseline
+        await captureRequestTelemetry(
+            result: result,
+            startedAt: requestStartedAt,
+            runContext: runContext,
+            portfolioExecutionPlan: portfolioExecutionPlan,
+            orchestrationMode: orchestrationMode
+        )
+
         continuation.yield(.result(result))
         continuation.finish()
     }
