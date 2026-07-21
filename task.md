@@ -102,33 +102,34 @@ Decision (both config-driven, neither a release threshold until live p95/p99 jus
 
 Goal: measure and attribute condition overhead (queue / service / repair / routing / action contention) before changing behavior.
 
-### Production telemetry
+### Production telemetry (✓ Part 1 & 2a DONE)
 - [x] Telemetry types: `ConditionTelemetryMetrics` (leaf/tree/depth/shape, completeness, confidence, residual reasons, resolution mode, prompt/output, queue/service/total timing, critical-path flag, component ID) ✓ `ConditionTelemetry.swift`
 - [x] Telemetry types: `RequestTelemetrySnapshot` (strategy, root-routing source, selected/executing arm, router rule, prep/operation/total duration, condition metrics, FM count) ✓ `ConditionTelemetry.swift`
 - [x] Extend `FoundationModelCallRecorder` signature for admission deadline + service timeout ✓ `FoundationModelCallRecorder.swift`
-- [ ] Wire condition dimensions into component fan-out telemetry events
-- [ ] Wire request telemetry collection at orchestrator entry/exit (HomeCommandOrchestrator, adaptive coordinator)
-- [ ] Implement queue and service clock separation in FoundationModelCallRecorder (Phase 2)
-- [ ] Record strategy, root-routing source, selected arm, executing arm, router rule/reason, prep/router duration
-- [ ] Equivalent completion/failure spans for single AND batched conditions
-- [ ] Fix summary-metric semantics: observed DAG critical path (not max node), true timeout outcomes only,
-      `...Ms` unit correctness, separate leaf / tree-node / device-trigger counts
+- [x] Wire condition dimensions into component fan-out telemetry events ✓ `ConditionTelemetryCollector.swift`, `AutomationComponentFanOutRunner.swift`
+- [x] Add request telemetry capture helper ✓ `RequestTelemetryCapture.swift`
+- [ ] Wire request telemetry collection at orchestrator entry/exit (HomeCommandOrchestrator, adaptive coordinator) ← Part 2c
+- [ ] Implement queue and service clock separation in FoundationModelCallRecorder ← Phase 2
+- [ ] Equivalent completion/failure spans for single AND batched conditions ← Part 2c
+- [ ] Fix summary-metric semantics (DAG critical path, timeout classification, unit correctness) ← Part 2c
 
-Files: `FoundationModelUsageLedger.swift`, `FoundationModelCallRecorder.swift` (✓ started), `AutomationComponentFanOutRunner.swift`, `HomeCommandOrchestrator.swift`, `OrchestratorMetrics.swift`, `OrchestratorMetricsV2.swift`
+Files done: `FoundationModelCallRecorder.swift`, `AutomationComponentFanOutRunner.swift`, `ConditionTelemetryCollector.swift`, `RequestTelemetryCapture.swift`
+Files remaining: `HomeCommandOrchestrator.swift`, `OrchestratorMetrics.swift`, `OrchestratorMetricsV2.swift` (Part 2c)
 
-### Evaluation harness
+### Evaluation harness (✓ Part 1 & 2b DONE; 2c NEXT)
 - [x] Introduce `OrchestrationStrategy` enum (graph, graphWithTier1, verifierLoop, adaptiveStatic, adaptiveShadow) ✓ `ConditionTelemetry.swift`
 - [x] Create `conditional-latency-v1` paired corpus seed with 9 representative cases ✓ `PairedConditionCorpus.swift`
-- [ ] Extend `OrchestrationComparisonRunner` to 5 strategies: Graph, Graph+Tier-1, Verifier Loop, Adaptive Static (`adaptivePortfolio`+`activeStatic`), Adaptive Shadow (`adaptivePortfolio`+`shadowStatic`)
-- [ ] Require explicit live-model opt-in + `.available`; fail artifact if availability lost / ledger nonterminal
-- [ ] Configure (not just label) gate capacity and prewarm lifecycle
-- [ ] Support cold coordinators AND production-like retained warm coordinators
-- [ ] External monotonic end-to-end timing
-- [ ] Raw JSONL per run + JSON + Markdown summaries
-- [ ] Compare only correct paired runs for latency; report correctness failures separately
-- [ ] Expand corpus dimensions: condition count 0–3, forms (state/numeric/range/changes), resolution (unique/ambiguous/missing/unsupported), tree (leaf/AND/OR/NOT/mixed), actions 1–3, trigger (schedule/device), risk, registry size
-- [ ] Correctness checks: action count/targets, exact condition tree+order, device/cap/attr/operator/value/units, trigger policy, risk+confirmation, canonical compiled SmartThings JSON
-- [ ] Run tiers wired: PR deterministic (3 reps, no wall-clock gate), Live smoke (5 reps), Release (≥8 families, warm+cold, ≥10 reps, Latin-square order)
+- [x] Strategy mapping and model availability check ✓ `ConditionalLatencyHarnessSupport.swift`
+- [x] Harness extension specification (scope, priority, files, deferred work) ✓ `ConditionalLatencyHarnessExtension.md`
+- [ ] Extend `OrchestrationComparisonRunner` to 5 strategies (add adaptiveStatic, adaptiveShadow to arm enum) ← Part 2c
+- [ ] Extend `OrchestrationArmResult` to carry strategy, rootRoutingSource, selectedArm, routerRuleID, conditionMetrics ← Part 2c
+- [ ] Integrate paired corpus into test harness (base + conditioned runs) ← Part 2c
+- [ ] Implement live-model gate (explicit opt-in + .available check) ← Part 2c
+- [ ] Correctness checks wired (action/condition/compilation parity) ← Part 2c
+- [ ] Run tier wiring (PR deterministic, Live smoke, Release) ← Phase 0 Part 2c
+- [ ] External monotonic end-to-end timing integration ← Part 2c
+- [ ] Cold vs. warm coordinator lifecycle ← Part 2c
+- [ ] Report generation (raw JSONL + JSON + Markdown) ← Part 2c
 
 **Exit gate:** checked-in live baseline proving model availability, nonzero condition FM usage where expected, all 5 strategies covered, exact condition/compiled-rule correctness.
 
