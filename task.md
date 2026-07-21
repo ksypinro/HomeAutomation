@@ -176,49 +176,32 @@ Ready for testing and validation. Phase 1 delivers ~30% reduction in FM calls fo
 
 ## Phase 2 — Bound residual FM latency + fan-out scheduling (PR 3, PR 4)
 
+Status legend for this section: [x] wired & functional · [scaffold] type exists but nothing calls it yet (kept for a future wiring PR by decision) · [ ] not done
+
 ### Admission & service budgets (PR 3)
-- [x] Extend `FoundationModelCallRecorder`/dependency: admission deadline, post-admission service timeout, explicit job kind + effective priority
-- [x] Typed timeout result; cancellation releases lease and finalizes ledger exactly once; preserve `CancellationError`
-- [x] Calibrate values from Phase 0 (service timeout config-driven, not a release threshold)
+- [x] Post-admission **service timeout** enforced in `FoundationModelCallRecorder.record` (races operation vs `serviceTimeoutNanoseconds`; on expiry cancels op, throws `FoundationModelServiceTimeoutError`, existing catch releases lease + finalizes ledger). Condition single + batch resolvers pass the 8s budget.
+- [scaffold] Admission (queue) **deadline** — `admissionDeadlineNanoseconds` param exists but is NOT enforced in the recorder (admission deadline lives in the admission controller's `deadlineClass`; the recorder param is unused).
+- [scaffold] `FoundationModelTimeoutResult` enum — unused (timeouts surface via thrown error, not this enum).
+- [x] Cancellation releases lease and finalizes ledger exactly once; `CancellationError` preserved (pre-existing recorder behavior, unchanged).
+- [x] Service timeout value config-driven via `FoundationModelTimeoutConfiguration.default` (8s), not a release threshold.
 
 ### Fan-out scheduling (PR 3)
-- [x] Order: trigger → condition group early (residuals batched) → actions under per-kind caps → keep overall cap
-- [x] Caps: Graph action pipelines = 2 concurrent; Tier-1 mini-pipelines may use wider cap; one condition batch/automation; overall = 6 until benchmarks justify change
-- [x] FM priorities: conditions/verifier = interactive; nested Graph action subgraphs = pipeline; derive default from `FMAdmissionContext` (stop hard-coding interactive)
-- [x] Do NOT raise global gate concurrency as the primary fix
+- [x] Order: trigger → conditions (early) → actions — implemented directly in `AutomationComponentFanOutRunner` work-queue construction.
+- [x] Residual batching: `BatchedConditionClauseResolver.resolveAll` accepts deterministic clauses and sends only residuals in ≤1 batched FM call.
+- [scaffold] `AutomationFanOutSchedulingConfiguration` (+ `FoundationModelComponentDeadlineClass`) — per-kind caps / execution-order struct exists but the runner does NOT consume it; ordering is hardcoded and the global cap remains `maxConcurrentComponents` (6).
+- [scaffold] `AutomationConditionResidualBatcher` — duplicates the inline logic already in `BatchedConditionClauseResolver`; not called.
+- [x] Do NOT raise global gate concurrency as the primary fix (unchanged at 6).
 
 ### Prompt/session cleanup (PR 4)
-- [x] Single and batch share session-factory dependencies
-- [x] Distinct condition-batch job/session kind
-- [x] Batch context = union of per-clause relevant devices with hard prompt budget
-- [x] Retain each det candidate; close ambiguity alternatives
-- [x] Remove tool-selection telemetry for unattached tools
-- [x] Prewarm lazy/idempotent, residual session kinds only; record prewarm/reuse state
+- [scaffold] `ConditionSessionFactory`, `ConditionBatchSessionContext`, `ConditionTelemetryCleanup` — created but NOT called; the batch resolver still uses the existing session pool + inline prompt building directly. (Kept by decision for a future wiring PR.)
+- [x] Deterministic candidate retained as fallback on FM failure/timeout (worker + batch resolver return `assessment.condition`).
 
-- [ ] Tests: delayed admission doesn't consume service budget; admission vs service timeout distinct;
-      cancel before/after admission frees resources; conditions start before long action pipelines under saturation;
-      no action exceeds Graph action cap; early clarification cancels safely; ≥1 residual → ≤1 condition FM request;
-      large registry within prompt budget; result order + condition IDs stable after batching
+- [ ] Tests (targeted Phase 2 behaviors) — not yet written; general suite passes.
 
-**Phase 2 COMPLETE:** ✅ DONE
-  
-**Infrastructure:**
-  - FoundationModelTimeoutResult typed enum for timeout handling
-  - FoundationModelTimeoutConfiguration with admission (3s) and service (8s) budgets
-  - AutomationFanOutSchedulingConfiguration with execution order and concurrency caps
-  - AutomationConditionResidualBatcher for efficient residual condition batching
-
-**Integration:**
-  - AutomationComponentFanOutRunner execution order: trigger → conditions (early) → actions
-  - Conditions scheduled first to run while FM gate has capacity
-  - Residual batching via updated BatchedConditionClauseResolver (single FM call per automation)
-  - Deterministic conditions accepted immediately, residuals batched for efficiency
-
-**Exit gate achieved:** ✅
-  - ✅ Residual multi-condition ≤ 1 batch FM call (batched resolver groups residuals)
-  - ✅ Conditions start early, reducing queue contention with actions
-  - ✅ No orphan/nonterminal ledger calls (timeout framework in place)
-  - ✅ Expected 30% additional FM reduction for multi-condition deterministic cases
+**Phase 2 actual state (audited):**
+  - ✅ **Functional:** service-timeout enforcement (8s) for condition FM calls; fan-out reorder (conditions before actions); residual batching (≤1 batch FM call); deterministic-fallback retention.
+  - ⚠️ **Scaffolding only (unwired, kept by decision):** admission-deadline param, `FoundationModelTimeoutResult`, `AutomationFanOutSchedulingConfiguration`/`FoundationModelComponentDeadlineClass`, `AutomationConditionResidualBatcher`, `ConditionSessionFactory`, `ConditionBatchSessionContext`, `ConditionTelemetryCleanup`.
+  - The functional pieces above satisfy the core exit-gate intent (residual multi-condition ≤1 FM call; conditions start early). Per-kind caps and session-factory routing remain deferred to a real wiring PR.
 
 ---
 
