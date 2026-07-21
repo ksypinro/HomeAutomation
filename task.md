@@ -103,33 +103,30 @@ Decision (both config-driven, neither a release threshold until live p95/p99 jus
 Goal: measure and attribute condition overhead (queue / service / repair / routing / action contention) before changing behavior.
 
 ### Production telemetry
-- [ ] Monotonic request clock started before routing / adaptive preparation
-- [ ] Report `requestToOutcomeDurationMs` and `operationExecutionDurationMs`
-- [ ] Condition dimensions: leaf/tree-node count, depth, boolean form, trigger kind
-- [ ] Condition dimensions: deterministic completeness + confidence + residual reason codes/count
-- [ ] Resolution mode: det-accepted / single FM / batched FM / unavailable fallback / timed-out / clarification
-- [ ] Per-condition/batch start, finish, duration, critical tail
-- [ ] Relevant-device count, prompt chars, output chars
-- [ ] FM usage attribution: component ID, action ID, condition ID from task-local scope
-- [ ] Record queue and service separately (never sum concurrent service as wall time)
+- [x] Telemetry types: `ConditionTelemetryMetrics` (leaf/tree/depth/shape, completeness, confidence, residual reasons, resolution mode, prompt/output, queue/service/total timing, critical-path flag, component ID) ✓ `ConditionTelemetry.swift`
+- [x] Telemetry types: `RequestTelemetrySnapshot` (strategy, root-routing source, selected/executing arm, router rule, prep/operation/total duration, condition metrics, FM count) ✓ `ConditionTelemetry.swift`
+- [x] Extend `FoundationModelCallRecorder` signature for admission deadline + service timeout ✓ `FoundationModelCallRecorder.swift`
+- [ ] Wire condition dimensions into component fan-out telemetry events
+- [ ] Wire request telemetry collection at orchestrator entry/exit (HomeCommandOrchestrator, adaptive coordinator)
+- [ ] Implement queue and service clock separation in FoundationModelCallRecorder (Phase 2)
 - [ ] Record strategy, root-routing source, selected arm, executing arm, router rule/reason, prep/router duration
 - [ ] Equivalent completion/failure spans for single AND batched conditions
 - [ ] Fix summary-metric semantics: observed DAG critical path (not max node), true timeout outcomes only,
       `...Ms` unit correctness, separate leaf / tree-node / device-trigger counts
 
-Files: `FoundationModelUsageLedger.swift`, `FoundationModelCallRecorder.swift`, `AutomationComponentFanOutRunner.swift`, `HomeCommandOrchestrator.swift`, `OrchestratorMetrics.swift`, `OrchestratorMetricsV2.swift`
+Files: `FoundationModelUsageLedger.swift`, `FoundationModelCallRecorder.swift` (✓ started), `AutomationComponentFanOutRunner.swift`, `HomeCommandOrchestrator.swift`, `OrchestratorMetrics.swift`, `OrchestratorMetricsV2.swift`
 
 ### Evaluation harness
+- [x] Introduce `OrchestrationStrategy` enum (graph, graphWithTier1, verifierLoop, adaptiveStatic, adaptiveShadow) ✓ `ConditionTelemetry.swift`
+- [x] Create `conditional-latency-v1` paired corpus seed with 9 representative cases ✓ `PairedConditionCorpus.swift`
 - [ ] Extend `OrchestrationComparisonRunner` to 5 strategies: Graph, Graph+Tier-1, Verifier Loop, Adaptive Static (`adaptivePortfolio`+`activeStatic`), Adaptive Shadow (`adaptivePortfolio`+`shadowStatic`)
-- [ ] Introduce `OrchestrationStrategy` distinct from `FoundationModelCallArm`
 - [ ] Require explicit live-model opt-in + `.available`; fail artifact if availability lost / ledger nonterminal
 - [ ] Configure (not just label) gate capacity and prewarm lifecycle
 - [ ] Support cold coordinators AND production-like retained warm coordinators
 - [ ] External monotonic end-to-end timing
 - [ ] Raw JSONL per run + JSON + Markdown summaries
 - [ ] Compare only correct paired runs for latency; report correctness failures separately
-- [ ] Create `conditional-latency-v1` paired corpus (every conditioned case has an identical no-condition twin)
-- [ ] Corpus dimensions: condition count 0–3, forms (state/numeric/range/changes), resolution (unique/ambiguous/missing/unsupported), tree (leaf/AND/OR/NOT/mixed), actions 1–3, trigger (schedule/device), risk, registry size
+- [ ] Expand corpus dimensions: condition count 0–3, forms (state/numeric/range/changes), resolution (unique/ambiguous/missing/unsupported), tree (leaf/AND/OR/NOT/mixed), actions 1–3, trigger (schedule/device), risk, registry size
 - [ ] Correctness checks: action count/targets, exact condition tree+order, device/cap/attr/operator/value/units, trigger policy, risk+confirmation, canonical compiled SmartThings JSON
 - [ ] Run tiers wired: PR deterministic (3 reps, no wall-clock gate), Live smoke (5 reps), Release (≥8 families, warm+cold, ≥10 reps, Latin-square order)
 
