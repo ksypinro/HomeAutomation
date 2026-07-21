@@ -182,12 +182,12 @@ public struct AutomationComponentFanOutRunner: Sendable {
             case condition(AutomationConditionComponent)
             case batchedConditions([AutomationConditionComponent])
         }
+
+        // Phase 2 scheduling order: trigger → conditions (early) → actions
+        // This ensures conditions run while FM gate has capacity, reducing queue contention
         var workQueue: [ComponentWork] = []
         if let trigger = plan.trigger {
             workQueue.append(.trigger(trigger))
-        }
-        for action in plan.actions {
-            workQueue.append(.action(action))
         }
         if useBatchedConditions {
             workQueue.append(.batchedConditions(plan.conditions))
@@ -195,6 +195,9 @@ public struct AutomationComponentFanOutRunner: Sendable {
             for condition in plan.conditions {
                 workQueue.append(.condition(condition))
             }
+        }
+        for action in plan.actions {
+            workQueue.append(.action(action))
         }
 
         let outcomes = await withTaskGroup(of: [AutomationComponentOutcome].self) { group in
