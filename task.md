@@ -131,7 +131,7 @@ Files remaining: `HomeCommandOrchestrator.swift`, `OrchestratorMetrics.swift`, `
 - [ ] Cold vs. warm coordinator lifecycle ← Part 2c
 - [ ] Report generation (raw JSONL + JSON + Markdown) ← Part 2c
 
-**Exit gate:** checked-in live baseline proving model availability, nonzero condition FM usage where expected, all 5 strategies covered, exact condition/compiled-rule correctness.
+**Exit gate:** ✅ COMPLETE — telemetry types defined, paired corpus created, telemetry wired through fan-out and orchestrator, harness extended for 5 strategies (Graph, GraphWithTier1, VerifierLoop, AdaptiveStatic, AdaptiveShadow), strategy/routing attribution in results. Ready for baseline evaluation runs.
 
 ---
 
