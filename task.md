@@ -22,13 +22,79 @@ Objective: reduce condition-related p50/p95 latency without weakening condition 
 
 ---
 
-## Pre-work decisions (resolve before starting)
+## Pre-work decisions (RESOLVED)
 
-- [ ] Make `isSafeToAccept` consumer-aware (Graph `HomeAutomationCondition` vs Verifier `ConditionLeafDraft`),
-      not a single Bool, so Phase 1 does not under-deliver for Graph before Phase 4B lands
-- [ ] Confirm ROI checkpoint: after Phase 0 baseline, if single-condition automations are rare,
-      re-prioritize Phase 2 (scheduling/bounds) ahead of the assessor
-- [ ] Set initial admission deadline (tighter) vs service timeout (~8s experimental, config-driven)
+- [x] **D1 — `isSafeToAccept` is consumer-aware, not a single Bool.** Round-trip safety is
+      evaluated against the representation the resolved condition is actually stored in.
+- [x] **D2 — ROI checkpoint defined and bound to the Phase 0 exit gate** (decides Phase 1-vs-2 order).
+- [x] **D3 — Two clocks pinned:** admission (queue) deadline `3s`, service timeout `8s`, both config-driven.
+
+### D1 — Consumer-aware safe-accept (resolves the "under-deliver for Graph" risk)
+
+Evidence: Graph consumes `HomeAutomationCondition` natively (round-trips every form). Verifier
+consumes `ConditionLeafDraft` (`DraftEnvelope.swift:227`) + `ConditionTreeDraft` (`:263`), which
+**cannot** represent: `.changes`, `.literalRange`, unit separation, right-hand device operand
+(cross-device), `locationMode`, or per-comparison trigger policy; tree is AND/OR/NOT only.
+A single baked-in `isSafeToAccept` would force Graph to the verifier's restricted denominator and
+send Graph-safe conditions (ranges, changes, cross-device) to FM needlessly.
+
+Decision — the shared assessor stays consumer-agnostic; each consumer applies its own round-trip predicate:
+
+```swift
+public protocol AutomationConditionRoundTripTarget: Sendable {
+    // nil == round-trips losslessly; otherwise the reason it cannot.
+    func roundTripResidual(for condition: HomeAutomationCondition) -> AutomationConditionResidualReason?
+}
+
+struct AutomationConditionDeterministicAssessment: Sendable {
+    let condition: HomeAutomationCondition?              // resolved candidate, or nil
+    let records: [AutomationConditionResolutionRecord]
+    let completeness: AutomationConditionCompleteness    // complete/partial/ambiguous/unsupported
+    let confidence: Double
+    let residualReasons: [AutomationConditionResidualReason] // consumer-INDEPENDENT reasons only
+}
+
+extension AutomationConditionDeterministicAssessment {
+    func isSafeToAccept(for target: some AutomationConditionRoundTripTarget) -> Bool {
+        guard completeness == .complete, let condition else { return false }
+        return target.roundTripResidual(for: condition) == nil
+    }
+}
+```
+
+Rules:
+- `residualReasons` holds only consumer-independent reasons (parse/target/capability/attribute/operator/value/tree). `.notRoundTripSafe` is produced by the consumer's `roundTripResidual` and appended at the call site so telemetry attributes it to the right consumer.
+- Graph target = identity round-trip → `isSafeToAccept` true whenever `.complete`. **Phase 1 ships for Graph/Adaptive-Static without waiting on Phase 4B.**
+- Verifier target = `ConditionLeaf`/`ConditionTree` round-trip → returns `.notRoundTripSafe` for changes/range/cross-device/locationMode/non-AON trees/non-default trigger policy.
+- Phase 4B seam: adding `structuredCondition` to the envelope only changes the verifier target's `roundTripResidual` to start returning `nil` for newly representable forms — no assessor change.
+
+### D2 — ROI checkpoint (evaluated at Phase 0 exit gate, before starting Phase 1)
+
+From the Phase 0 paired baseline compute:
+- `S` = share of conditional automations with exactly one condition leaf.
+- `D` = share of those whose condition is deterministically complete (would skip FM under the new assessor).
+
+Re-prioritize **Phase 2 (scheduling/bounds) ahead of Phase 1** if either holds:
+- `S × D < 0.30` (fewer than ~30% of conditional automations benefit from the assessor), or
+- Phase 0 attribution shows **queue-wait, not service time, dominates** the condition tail even for single-condition cases (⇒ the gate/scheduling is the bottleneck, not the extra call).
+
+Otherwise proceed in the documented order (Phase 1 first). Phase 0 always ships first regardless.
+
+### D3 — Two-clock timeout values (calibrated against existing budgets)
+
+Existing budgets: NLU soft timeout `4s` (`NLUModelSoftTimeout.swift:15`), verifier soft timeout `8s`
+(`DraftVerifierWorkerSession.swift:17`), node agent timeout `60s + 5s` grace (`AgentTimeoutRunner.swift`).
+Existing soft timeouts wrap the whole op (queue + service) — the §3.4 defect.
+
+Decision (both config-driven, neither a release threshold until live p95/p99 justifies):
+- **Admission (queue) deadline = 3s.** Conditions run in the interactive lane with a reserved slot
+  (`FoundationModelGate.shouldReserveSlotForInteractive`), so normal admission is sub-second; 3s
+  catches pathological 2-wide saturation without prematurely abandoning. On expiry → complete
+  deterministic candidate if available, else unresolved/clarification (never finalize ambiguous).
+- **Service timeout = 8s** (starts only after lease acquired), matching the verifier's single-call
+  budget; condition prompt carries a device list so it sits above the 4s NLU class.
+- Worst-case wall ≈ 11s, well under the 60s node timeout and its 5s grace.
+- Recalibration rule: drop service timeout toward ~6s if Phase 0 shows condition service p95 < ~4s.
 
 ---
 
