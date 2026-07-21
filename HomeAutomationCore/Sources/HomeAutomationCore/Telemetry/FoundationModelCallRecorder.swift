@@ -18,6 +18,8 @@ public struct FoundationModelCallRecorder: Sendable {
         jobKind: FoundationModelJobKind? = nil,
         sessionReuse: FoundationModelSessionReuse = .unknown,
         escalationChain: [FoundationModelEscalationStep]? = nil,
+        admissionDeadlineNanoseconds: UInt64? = nil,
+        serviceTimeoutNanoseconds: UInt64? = nil,
         admissionController: any FoundationModelAdmissionControlling = FoundationModelGate.shared,
         clock: any FoundationModelMonotonicClock = SystemFoundationModelMonotonicClock(),
         operation: @Sendable () async throws -> Value
