@@ -177,15 +177,15 @@ Ready for testing and validation. Phase 1 delivers ~30% reduction in FM calls fo
 ## Phase 2 — Bound residual FM latency + fan-out scheduling (PR 3, PR 4)
 
 ### Admission & service budgets (PR 3)
-- [ ] Extend `FoundationModelCallRecorder`/dependency: admission deadline, post-admission service timeout, explicit job kind + effective priority
-- [ ] Typed timeout result; cancellation releases lease and finalizes ledger exactly once; preserve `CancellationError`
-- [ ] Calibrate values from Phase 0 (service timeout config-driven, not a release threshold)
+- [x] Extend `FoundationModelCallRecorder`/dependency: admission deadline, post-admission service timeout, explicit job kind + effective priority
+- [x] Typed timeout result; cancellation releases lease and finalizes ledger exactly once; preserve `CancellationError`
+- [x] Calibrate values from Phase 0 (service timeout config-driven, not a release threshold)
 
 ### Fan-out scheduling (PR 3)
-- [ ] Order: trigger → condition group early (residuals batched) → actions under per-kind caps → keep overall cap
-- [ ] Caps: Graph action pipelines = 2 concurrent; Tier-1 mini-pipelines may use wider cap; one condition batch/automation; overall = 6 until benchmarks justify change
-- [ ] FM priorities: conditions/verifier = interactive; nested Graph action subgraphs = pipeline; derive default from `FMAdmissionContext` (stop hard-coding interactive)
-- [ ] Do NOT raise global gate concurrency as the primary fix
+- [x] Order: trigger → condition group early (residuals batched) → actions under per-kind caps → keep overall cap
+- [x] Caps: Graph action pipelines = 2 concurrent; Tier-1 mini-pipelines may use wider cap; one condition batch/automation; overall = 6 until benchmarks justify change
+- [x] FM priorities: conditions/verifier = interactive; nested Graph action subgraphs = pipeline; derive default from `FMAdmissionContext` (stop hard-coding interactive)
+- [x] Do NOT raise global gate concurrency as the primary fix
 
 ### Prompt/session cleanup (PR 4)
 - [ ] Single and batch share session-factory dependencies
@@ -200,6 +200,12 @@ Ready for testing and validation. Phase 1 delivers ~30% reduction in FM calls fo
       no action exceeds Graph action cap; early clarification cancels safely; ≥1 residual → ≤1 condition FM request;
       large registry within prompt budget; result order + condition IDs stable after batching
 
+**Phase 2 INFRASTRUCTURE:** ✅ COMPLETE
+  - FoundationModelTimeoutResult typed enum for timeout handling
+  - FoundationModelTimeoutConfiguration with admission (3s) and service (8s) budgets
+  - AutomationFanOutSchedulingConfiguration with execution order and concurrency caps
+  - AutomationConditionResidualBatcher for efficient residual condition batching
+  
 **Exit gate:** no orphan/nonterminal ledger calls or leaked leases; residual multi-condition ≤ 1 batch FM call; condition queue/service tails bounded; no-condition p95 regression ≤ 5% in isolated release runs.
 
 ---
