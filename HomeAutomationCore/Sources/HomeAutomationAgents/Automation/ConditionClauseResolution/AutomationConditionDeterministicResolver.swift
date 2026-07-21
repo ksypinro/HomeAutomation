@@ -96,6 +96,20 @@ public struct AutomationConditionDeterministicResolver: Sendable {
             resolved: resolved
         )
 
+        // A device operand that is still unresolved (empty deviceID) means the
+        // condition is only partially resolved deterministically and must go to FM.
+        // Modeling this as `.complete` would make `isSafeToAccept` and any residual
+        // classification incorrect; the confidence gate alone previously masked it.
+        if hasUnresolvedDeviceOperand(resolved) {
+            return AutomationConditionDeterministicAssessment(
+                condition: resolved,
+                records: records,
+                completeness: .partial,
+                confidence: confidence,
+                residualReasons: [.deviceNotResolved]
+            )
+        }
+
         return AutomationConditionDeterministicAssessment(
             condition: resolved,
             records: records,
@@ -256,6 +270,25 @@ public struct AutomationConditionDeterministicResolver: Sendable {
     private func operandHasDevice(_ operand: HomeAutomationConditionOperand) -> Bool {
         if case .deviceAttribute(_, let deviceID, _, _) = operand {
             return deviceID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        return false
+    }
+
+    /// Detects a `.deviceAttribute` operand that still lacks a resolved deviceID.
+    private func hasUnresolvedDeviceOperand(_ condition: HomeAutomationCondition) -> Bool {
+        switch condition {
+        case .comparison(let comparison):
+            return operandIsUnresolvedDevice(comparison.left) || operandIsUnresolvedDevice(comparison.right)
+        case .and(let children), .or(let children):
+            return children.contains { hasUnresolvedDeviceOperand($0) }
+        case .not(let child), .changes(let child):
+            return hasUnresolvedDeviceOperand(child)
+        }
+    }
+
+    private func operandIsUnresolvedDevice(_ operand: HomeAutomationConditionOperand) -> Bool {
+        if case .deviceAttribute(_, let deviceID, _, _) = operand {
+            return deviceID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
         }
         return false
     }

@@ -22,7 +22,7 @@ public struct FoundationModelCallRecorder: Sendable {
         serviceTimeoutNanoseconds: UInt64? = nil,
         admissionController: any FoundationModelAdmissionControlling = FoundationModelGate.shared,
         clock: any FoundationModelMonotonicClock = SystemFoundationModelMonotonicClock(),
-        operation: @Sendable () async throws -> Value
+        operation: @Sendable @escaping () async throws -> Value
     ) async throws -> Value {
         let parent = HomeAutomationTelemetryScope.current
         let ledger = FoundationModelUsageLedgerScope.current
@@ -187,7 +187,13 @@ public struct FoundationModelCallRecorder: Sendable {
 
             do {
                 let value = try await HomeAutomationTelemetryScope.$current.withValue(context) {
-                    try await operation()
+                    if let serviceTimeoutNanoseconds {
+                        return try await Self.withServiceTimeout(
+                            nanoseconds: serviceTimeoutNanoseconds,
+                            operation: operation
+                        )
+                    }
+                    return try await operation()
                 }
                 let serviceCompletedAtNanoseconds = clock.nowNanoseconds()
                 await admissionController.release(leaseID: lease.leaseID)
@@ -380,5 +386,38 @@ public struct FoundationModelCallRecorder: Sendable {
     private static func milliseconds(from start: UInt64, to end: UInt64) -> Double {
         guard end >= start else { return 0 }
         return Double(end - start) / 1_000_000
+    }
+
+    /// Races the post-admission service operation against a deadline. On expiry the
+    /// operation task is cancelled and a `FoundationModelServiceTimeoutError` is thrown,
+    /// which the caller's catch path handles (lease release, ledger failure, fallback).
+    private static func withServiceTimeout<Value: Sendable>(
+        nanoseconds: UInt64,
+        operation: @Sendable @escaping () async throws -> Value
+    ) async throws -> Value {
+        try await withThrowingTaskGroup(of: Value.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: nanoseconds)
+                throw FoundationModelServiceTimeoutError.timedOut(timeoutNanoseconds: nanoseconds)
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw FoundationModelServiceTimeoutError.timedOut(timeoutNanoseconds: nanoseconds)
+            }
+            return result
+        }
+    }
+}
+
+/// Error thrown when a Foundation Model call exceeds its post-admission service budget.
+public enum FoundationModelServiceTimeoutError: LocalizedError {
+    case timedOut(timeoutNanoseconds: UInt64)
+
+    public var errorDescription: String? {
+        switch self {
+        case .timedOut(let timeoutNanoseconds):
+            return "Foundation Model service call exceeded \(timeoutNanoseconds / 1_000_000)ms budget"
+        }
     }
 }

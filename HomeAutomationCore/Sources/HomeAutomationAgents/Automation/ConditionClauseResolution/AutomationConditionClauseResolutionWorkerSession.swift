@@ -9,6 +9,7 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
     private let resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)?
     private let deterministicAcceptThreshold: Double
     private let sessionPool: FoundationModelSessionPool?
+    private let timeoutConfiguration: FoundationModelTimeoutConfiguration
     private let deterministicResolver = AutomationConditionDeterministicResolver()
     private let roundTripTarget: AutomationConditionGraphTarget
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ConditionClauseResolution")
@@ -19,13 +20,19 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
         },
         resolve: (@Sendable (AutomationConditionClauseResolutionInput) async throws -> AutomationConditionClauseFMOutput)? = nil,
         deterministicAcceptThreshold: Double = 0.8,
-        sessionPool: FoundationModelSessionPool? = nil
+        sessionPool: FoundationModelSessionPool? = nil,
+        timeoutConfiguration: FoundationModelTimeoutConfiguration = .default
     ) {
         self.foundationModelAvailability = foundationModelAvailability
         self.resolve = resolve
         self.deterministicAcceptThreshold = deterministicAcceptThreshold
         self.sessionPool = sessionPool
+        self.timeoutConfiguration = timeoutConfiguration
         self.roundTripTarget = AutomationConditionGraphTarget()
+    }
+
+    private var serviceTimeoutNanoseconds: UInt64 {
+        UInt64(max(0, timeoutConfiguration.serviceTimeoutMs) * 1_000_000)
     }
 
     public func resolve(
@@ -76,7 +83,8 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
                 policyMode: "model-first-with-fallback",
                 modelAvailability: "available",
                 promptCharacterCount: AutomationConditionClauseResolutionPromptBuilder.instructions.count + prompt.count,
-                selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"]
+                selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"],
+                serviceTimeoutNanoseconds: serviceTimeoutNanoseconds
             ) {
                 try await session.respond(
                     to: Prompt(prompt),

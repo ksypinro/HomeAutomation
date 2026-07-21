@@ -82,8 +82,14 @@ struct ResidualBatchingTests {
         #expect(results.count == 2)
         #expect(results[0].id == "cond_1")
         #expect(results[1].id == "cond_2")
-        #expect(results[0].confidence == 0.72)
-        #expect(results[1].confidence == 0.72)
+        // FM output is unusable (duplicate + unknown itemIDs), so each clause falls back to
+        // its deterministic assessment. "front door is locked" parses and resolves to the
+        // lock device (confidence 0.84); "motion sensor is inactive" has no deterministic
+        // parse rule, so it yields no condition (confidence 0.0).
+        #expect(results[0].confidence == 0.84)
+        #expect(results[0].condition != nil)
+        #expect(results[1].confidence == 0.0)
+        #expect(results[1].condition == nil)
     }
 
     @Test("Batched action capability preserves item IDs and falls back missing items")
