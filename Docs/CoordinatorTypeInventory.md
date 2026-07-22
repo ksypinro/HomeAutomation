@@ -629,6 +629,8 @@ Generated from `HomeAutomationCore/Sources/**/*.swift`. This inventory is intent
 | `Phase0BaselineConfiguration` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/Phase0RunTierConfiguration.swift` | evaluation setup | pure model | Local construction | Phase 0 baseline run configuration (tier, corpus, validation). |
 | `Phase0ExitGateThresholds` | struct | HomeAutomationEvaluation | `HomeAutomationCore/Sources/HomeAutomationEvaluation/Phase0RunTierConfiguration.swift` | evaluation setup | pure model | Local construction | Phase 0 exit-gate latency/parity/regression thresholds. |
 
+| `AutomationPortfolioEligibilityAssessment` | struct | HomeAutomationOrchestrator | `HomeAutomationCore/Sources/HomeAutomationOrchestrator/Adaptive/AutomationPortfolioEligibilityAssessment.swift` | local | pure model | Local construction | Reason-coded Phase 3 conditional Tier-1 eligibility result. |
+
 ## Classification Rules
 
 - `dependency`: services, agents, workers, resolvers, registries, clients, factories, validators, mappers, RAG infrastructure, telemetry infrastructure, graph infrastructure, and coordinators.

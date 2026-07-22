@@ -101,6 +101,13 @@ public struct StaticPortfolioRouter: Sendable {
             return (.graphWithTier1, "static.automation.simpleSchedule.tier1", .simpleScheduleAutomation)
         }
 
+        // Phase 3: a narrowly eligible one-condition schedule automation may use Graph + Tier-1.
+        // Must run before the device-trigger and generic `conditionCount > 0 → graph` fallbacks.
+        if policy.isEligibleConditionalTier1Automation(prepared),
+           eligible.contains(where: { $0.arm == .graphWithTier1 }) {
+            return (.graphWithTier1, "static.automation.conditionalSchedule.tier1", .conditionalScheduleAutomation)
+        }
+
         if prepared.deterministicEnvelope.automation?.trigger?.type == .device {
             return (.graph, "static.automation.deviceTrigger.graph", .graphFallback)
         }
@@ -143,6 +150,9 @@ public struct StaticPortfolioRouter: Sendable {
             return "would choose verifier loop: strong low-risk direct command, one action, no memory"
         case .graphWithTier1:
             let actions = features.actionCount.value ?? 0
+            if ruleID == "static.automation.conditionalSchedule.tier1" {
+                return "would choose Tier-1: eligible schedule with one complete condition, \(actions) confident actions, no memory, low/medium risk"
+            }
             return "would choose Tier-1: simple schedule, \(actions) confident actions, no memory, low risk"
         case .graph:
             if ruleID == "static.uncertain.graphFallback" {

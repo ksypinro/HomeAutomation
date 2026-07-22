@@ -215,26 +215,27 @@ Status legend for this section: [x] wired & functional · [scaffold] type exists
 
 Goal: allow a safe conditional subset to use Graph+Tier-1.
 
-- [ ] Add `AutomationPortfolioEligibilityAssessment`; centralize conditional routing rule; keep no-condition rule
-- [ ] Evaluate conditional Tier-1 before generic complex-automation Graph fallback
-- [ ] Eligible cohort: draft (not external mutation); schedule trigger; exactly one complete shared-assessor leaf;
-      no OR/NOT/mixed/grouping ambiguity; 1–3 Tier-1-resolvable actions; no unsupported fragments/memory refs;
-      fresh registry; low/medium risk; min-confidence + OOD pass; compilation preflight succeeds
-- [ ] Stay-on-Graph set enforced (device trigger, ambiguous/unsupported/non-round-trip condition, grouped trees, high risk, stale registry, memory-dependent, external mutation, non-Tier-1 action)
-- [ ] Add `conditionalTier1Enabled` feature switch (default OFF)
-- [ ] Distinct router rule ID + rejection reason; policy/schema version bump if persisted compat requires
-- [ ] Selected-arm and executing-arm assertions; E2E assertion that Tier-1 conditional action ran no action subgraph
-- [ ] Tests: no-condition still Tier-1; eligible 1-condition → Tier-1 when flag on; same request → Graph when off;
-      ambiguous/unsupported/grouped/device-trigger/memory/high-risk/OOD/stale/external → Graph;
-      active uses mini pipeline; shadow records Tier-1 selected + Graph executing;
-      `adaptivePortfolio+shadowStatic` covered; old learned-router artifacts fail compat safely → static
+### Routing rule + eligibility (PR 5 core — DONE)
+- [x] Add `AutomationPortfolioEligibilityAssessment` (reason-coded); centralize conditional routing rule; keep no-condition rule — `AutomationPortfolioEligibilityAssessment.swift`, `PortfolioEligibilityPolicy.conditionalTier1Assessment`
+- [x] Evaluate conditional Tier-1 before generic complex-automation Graph fallback — `StaticPortfolioRouter.selectArm` (before device-trigger / `conditionCount>0 → graph`)
+- [x] Eligible cohort: draft (not external mutation); schedule trigger; exactly one complete **shared-assessor** leaf (runs Phase 1 `AutomationConditionDeterministicResolver` at the 0.80 gate); single-leaf tree (no OR/NOT/mixed/grouping); 1–3 actions; no unsupported fragments/memory refs; fresh registry; low/medium risk; min-confidence + OOD pass
+  - [ ] compilation preflight succeeds — NOT run (matches the shipped no-condition Tier-1 rule, which also trusts the deterministic envelope + confidence); deferred hardening
+- [x] Stay-on-Graph set enforced (device trigger, incomplete/ambiguous condition, grouped trees, high risk, memory-dependent, external mutation, out-of-range actions; stale registry + OOD via shared generic reasons)
+- [x] Add `conditionalTier1Enabled` feature switch (default OFF) — `PortfolioEligibilityPolicy`; when off, routing is byte-identical to pre-Phase-3
+- [x] Distinct router rule ID (`static.automation.conditionalSchedule.tier1`) + selection reason (`.conditionalScheduleAutomation`) + reason-coded rejection enum (`AutomationConditionalTier1RejectionReason`)
+- [ ] policy/schema version bump — NOT required (flag default-off, feature schema unchanged, backward compatible); revisit only if persisted compat changes
+- [~] Selected-arm asserted in tests; executing-arm handled by existing `AdaptivePortfolioController.executionPlan` (graphWithTier1 → Tier-1 registry). E2E "no action subgraph ran" live assertion deferred to canary.
+- [x] Tests (`Phase3ConditionalTier1Tests`, 9): no-condition still Tier-1; eligible 1-condition → Tier-1 when flag on; same request → Graph when off; high-risk/device-trigger/two-leaf/incomplete/memory/too-many-actions → Graph
+  - [ ] shadow records Tier-1 selected + Graph executing; `adaptivePortfolio+shadowStatic` E2E; stale/OOD/external dedicated cases — deferred to rollout
 
-### Rollout
+### Rollout (PR 6 — DEFERRED; requires live canary infra + production flag plumbing)
 - [ ] 1. Shadow: compute decision, execute Graph
 - [ ] 2. Offline Graph vs Graph+Tier-1 exact parity
 - [ ] 3. Active Static small canary + Graph holdback
 - [ ] 4. Expand 5% → 25% → 50% → 100% with p95 hold at each stage
 - [ ] 5. Consider deterministic AND conditions only after single-leaf cohort passes
+
+**Phase 3 state:** ✅ Routing rule, reason-coded eligibility assessment, shared-assessor completeness gate, feature flag (default off), distinct rule ID/selection/rejection, and unit tests are complete and green. ⚠️ Deferred: compilation preflight, production flag plumbing (config → policy), and live canary rollout + E2E executing-arm assertions.
 
 **Exit gate:** 100% semantic/compiled-rule parity for eligible cohort; Adaptive Static selects+executes Graph+Tier-1 for eligible; lower FM count + p50/p95 vs conditional-Graph baseline; no unsafe confirmation/finalization increase.
 

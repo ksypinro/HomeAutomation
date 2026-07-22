@@ -4,6 +4,7 @@ import HomeAutomationCore
 public enum PortfolioSelectionReason: String, Sendable, Codable, Hashable {
     case directLowRisk
     case simpleScheduleAutomation
+    case conditionalScheduleAutomation
     case graphFallback
     case highUncertainty
     case noEligibleArm
