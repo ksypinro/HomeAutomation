@@ -344,6 +344,9 @@ public enum EnvelopeMerger {
             attribute: attr,
             operatorName: op,
             value: val,
+            // Phase 4B: carry the repaired clause's structured condition losslessly so the
+            // merged envelope compiles the exact resolved form, not the flat approximation.
+            structuredCondition: result.condition ?? existingLeaf.structuredCondition,
             confidence: result.confidence
         )
 

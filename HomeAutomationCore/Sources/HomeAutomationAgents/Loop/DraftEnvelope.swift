@@ -233,6 +233,13 @@ public struct ConditionLeafDraft: Sendable, Hashable, Codable {
     public let attribute: String?
     public let operatorName: HomeAutomationComparisonOperator?
     public let value: String?
+    /// Phase 4B: the fully-resolved structured condition for this clause, when the
+    /// deterministic assessor (or a repair) produced one. This is the lossless carrier —
+    /// the flat `capability/attribute/operator/value` fields can only represent a single
+    /// device-attribute comparison, so numeric ranges, `.changes`, unit-bearing values, and
+    /// cross-device operands are preserved here and round-trip exactly through compilation.
+    /// `nil` for a residual clause the assessor could not complete (schema-version ≥ 2).
+    public let structuredCondition: HomeAutomationCondition?
     public let confidence: Double
 
     public init(
@@ -244,6 +251,7 @@ public struct ConditionLeafDraft: Sendable, Hashable, Codable {
         attribute: String? = nil,
         operatorName: HomeAutomationComparisonOperator? = nil,
         value: String? = nil,
+        structuredCondition: HomeAutomationCondition? = nil,
         confidence: Double
     ) {
         self.id = id
@@ -254,6 +262,7 @@ public struct ConditionLeafDraft: Sendable, Hashable, Codable {
         self.attribute = attribute
         self.operatorName = operatorName
         self.value = value
+        self.structuredCondition = structuredCondition
         self.confidence = confidence
     }
 }
@@ -348,7 +357,9 @@ public struct AutomationDraftSection: Sendable, Hashable, Codable {
 // MARK: - DraftEnvelope
 
 public struct DraftEnvelope: Sendable, Hashable, Codable {
-    public static let currentVersion = 1
+    /// v2 adds the optional `ConditionLeafDraft.structuredCondition` carrier. Decoding is
+    /// backward-compatible: a v1 payload simply lacks the key and decodes it as `nil`.
+    public static let currentVersion = 2
 
     public let version: Int
     public let userText: String

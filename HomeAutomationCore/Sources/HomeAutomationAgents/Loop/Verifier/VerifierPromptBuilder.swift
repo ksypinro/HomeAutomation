@@ -156,7 +156,12 @@ public struct VerifierPromptBuilder: Sendable {
             lines.append("  Conditions:")
             for (i, leaf) in auto.conditionLeaves.enumerated() {
                 let targetFlag = lowConfIDs.contains(.conditionLeaf(i, .target)) ? " ⚠" : ""
-                lines.append("    [\(i)] \"\(leaf.rawText)\" → target=\(leaf.target ?? "?")\(targetFlag) cap=\(leaf.capability ?? "?") attr=\(leaf.attribute ?? "?") op=\(leaf.operatorName?.rawValue ?? "?") val=\(leaf.value ?? "?")")
+                // Phase 4B: a range/`.changes` clause has no flat `value`, but its resolved form
+                // lives in `structuredCondition` — surface it so the verifier sees the real clause.
+                let valueDisplay = leaf.value
+                    ?? leaf.structuredCondition.flatMap(Self.structuredSummary)
+                    ?? "?"
+                lines.append("    [\(i)] \"\(leaf.rawText)\" → target=\(leaf.target ?? "?")\(targetFlag) cap=\(leaf.capability ?? "?") attr=\(leaf.attribute ?? "?") op=\(leaf.operatorName?.rawValue ?? "?") val=\(valueDisplay)")
             }
         }
 
@@ -187,6 +192,40 @@ public struct VerifierPromptBuilder: Sendable {
 
     private func formatted(_ value: Double) -> String {
         String(format: "%.2f", value)
+    }
+
+    /// Compact human-readable summary of a structured condition's right-hand form, used when the
+    /// flat `value` field is absent (numeric range, `.changes`, unit-bearing, cross-device).
+    static func structuredSummary(_ condition: HomeAutomationCondition) -> String? {
+        switch condition {
+        case .comparison(let comparison):
+            return operandSummary(comparison.right)
+        case .changes(let child):
+            if case .comparison(let comparison) = child {
+                return "changes to \(operandSummary(comparison.right) ?? "?")"
+            }
+            return "changes"
+        case .and, .or, .not:
+            return nil
+        }
+    }
+
+    private static func operandSummary(_ operand: HomeAutomationConditionOperand) -> String? {
+        switch operand {
+        case .literalString(let string):
+            return string
+        case .literalNumber(let number, let unit):
+            return unit.map { "\(number) \($0)" } ?? "\(number)"
+        case .literalRange(let start, let end, let unit):
+            let suffix = unit.map { " \($0)" } ?? ""
+            return "between \(start) and \(end)\(suffix)"
+        case .locationMode(let mode):
+            return "location \(mode)"
+        case .deviceAttribute(let description, _, _, _):
+            return description
+        case .unsupported(let raw):
+            return raw
+        }
     }
 
     private func treeInterpretation(_ tree: ConditionTreeDraft, leaves: [ConditionLeafDraft]) -> String {

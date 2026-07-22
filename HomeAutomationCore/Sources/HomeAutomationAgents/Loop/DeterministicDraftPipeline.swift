@@ -449,34 +449,37 @@ public struct DeterministicDraftPipeline: Sendable {
                 }
             }
 
-            // Phase 4A: reuse the shared deterministic assessor instead of the loop's narrow
-            // state parser. Populate structured leaf fields only when the resolved condition
-            // round-trips losslessly through `ConditionLeafDraft` (verifier target); otherwise
-            // leave them for pre-verify repair so the envelope never carries a lossy condition.
+            // Phase 4A/4B: reuse the shared deterministic assessor instead of the loop's narrow
+            // state parser. A *complete* clause is carried losslessly in `structuredCondition`
+            // (Phase 4B), so numeric ranges, `.changes`, units, and cross-device operands survive
+            // compilation. The flat fields are additionally populated only for the round-trip-safe
+            // subset the verifier target recognizes, so the prompt stays human-readable.
             let assessment = resolver.assess(input: AutomationConditionClauseResolutionInput(
                 component: component,
                 fullUserText: fullUserText,
                 availableDevices: devices,
                 triggerPolicy: .never
             ))
-            if assessment.isSafeToAccept(for: verifierTarget),
-               let condition = assessment.condition,
-               let fields = Self.representableLeafFields(condition) {
+            if assessment.completeness == .complete, let condition = assessment.condition {
+                let flat = assessment.isSafeToAccept(for: verifierTarget)
+                    ? Self.representableLeafFields(condition)
+                    : nil
                 return ConditionLeafDraft(
                     id: component.id,
                     rawText: component.rawText,
-                    target: fields.target,
+                    target: flat?.target ?? target,
                     candidateTable: candidateTable,
-                    capability: fields.capability,
-                    attribute: fields.attribute,
-                    operatorName: fields.op,
-                    value: fields.value,
+                    capability: flat?.capability,
+                    attribute: flat?.attribute,
+                    operatorName: flat?.op,
+                    value: flat?.value,
+                    structuredCondition: condition,
                     confidence: max(confidence, assessment.confidence)
                 )
             }
 
             // Residual: retain the deterministic target ranking and the narrow state hint (if any)
-            // so the verifier/repair path can still make progress.
+            // so the verifier/repair path can still make progress. No structured condition yet.
             let stateValue = parseConditionStateValue(leafNormalized)
             return ConditionLeafDraft(
                 id: component.id,

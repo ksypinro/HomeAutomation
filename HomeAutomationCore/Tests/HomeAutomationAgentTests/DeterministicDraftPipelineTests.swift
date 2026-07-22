@@ -217,6 +217,39 @@ struct DeterministicDraftPipelineTests {
         #expect(zeroConditionFields.isEmpty)
     }
 
+    @Test("Phase 4B: numeric range condition carries a lossless structured condition")
+    func rangeConditionCarriesStructuredCondition() async {
+        let pipeline = makePipeline()
+        let envelope = await pipeline.makeAutomationEnvelope(
+            text: "turn on the bedroom AC every day at 7 AM if the temperature sensor is between 20 and 26"
+        )
+
+        let auto = envelope.automation!
+        #expect(auto.conditionLeaves.count == 1)
+        let leaf = auto.conditionLeaves[0]
+
+        // A range cannot be expressed by the flat value field...
+        #expect(leaf.value == nil)
+        // ...but the structured condition preserves it exactly for lossless compilation.
+        guard case .comparison(let comparison)? = leaf.structuredCondition else {
+            Issue.record("Expected a structured comparison, got \(String(describing: leaf.structuredCondition))")
+            return
+        }
+        #expect(comparison.operatorName == .between)
+        guard case .deviceAttribute(_, let deviceID, let capability, _) = comparison.left else {
+            Issue.record("Expected a resolved device-attribute left operand")
+            return
+        }
+        #expect(deviceID == "bedroom_temperature_sensor")
+        #expect(capability == "temperatureMeasurement")
+        guard case .literalRange(let start, let end, _) = comparison.right else {
+            Issue.record("Expected a literal range right operand")
+            return
+        }
+        #expect(start == 20)
+        #expect(end == 26)
+    }
+
     @Test("Phase 4A: unresolved-device condition stays residual with narrow hint retained")
     func unresolvedConditionStaysResidual() async {
         let pipeline = makePipeline()

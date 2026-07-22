@@ -254,10 +254,16 @@ Goal: allow a safe conditional subset to use Graph+Tier-1.
 - [ ] Hard prompt budget — deferred (`VerifierPromptBuilder`).
 - [ ] Reuse already-prepared request/envelope where available — deferred.
 
-### 4B. Full structured-condition parity (PR 8 — DEFERRED, large versioned-envelope migration)
-- [ ] Add optional structured condition rep to `ConditionLeafDraft` (versioned envelope field)
-- [ ] Update: `DraftEnvelope` versioning/decoding, `DeterministicDraftPipeline`, `StructuralDraftBuilder`, `EnvelopeMerger`, `VerifierPromptBuilder`, repair specialists + field IDs, exact tree tests
-- [ ] Do NOT mark numeric range / changes / complex right operands / mixed trees complete until 4B done — **honored**: `representableLeafFields` returns nil for range/changes/tree/cross-device, so those stay residual.
+### 4B. Full structured-condition parity (PR 8 — DONE)
+- [x] Add optional structured condition rep to `ConditionLeafDraft.structuredCondition` (the lossless carrier for range/changes/units/cross-device forms).
+- [x] `DraftEnvelope` versioning/decoding — `currentVersion` bumped 1 → 2; the field is optional so v1 payloads decode with `structuredCondition == nil` (back-compat test added).
+- [x] `DeterministicDraftPipeline` — populates `structuredCondition` for every *complete* clause (flat fields only for the round-trip-safe subset via the verifier target).
+- [x] `StructuralDraftBuilder` — `comparisonCondition` prefers `structuredCondition`, so the exact resolved form compiles instead of the flat approximation.
+- [x] `EnvelopeMerger` — repaired clauses carry `result.condition` into `structuredCondition`.
+- [x] `VerifierPromptBuilder` — renders a structured summary (range/changes) when the flat `value` is absent, so the verifier sees the real clause instead of `val=?`.
+- [~] Repair specialists + field IDs — no new field ID needed; repairs already flow their `HomeAutomationCondition` result into `structuredCondition` via the merger.
+- [x] Exact-condition tests: v1 back-compat decode, structural-builder lossless round-trip (range), and a pipeline test proving a `between 20 and 26` clause carries a `.literalRange` structured condition.
+- [x] Numeric range / changes / units / cross-device now round-trip losslessly (no longer forced residual).
 
 ### Loop budget & escalation
 - [x] No repair on final iteration (see 4A)
@@ -273,7 +279,7 @@ Goal: allow a safe conditional subset to use Graph+Tier-1.
 - [x] Existing loop suites (`VerifierLoopOrchestrator`, `ParallelRepairTests`, `RepairPlanner`) still green with the final-iteration skip.
 - [ ] Remaining targeted tests (prompt-within-budget, structured numeric/between/changes after 4B, distinct escalation policies, verifier-timeout second-pipeline guard, prepared-envelope reuse) — deferred with their features.
 
-**Phase 4 state:** ✅ 4A core (shared-assessor reuse + round-trip-safe leaf population + verifier-target bug fix) and the final-iteration repair skip are done, wired, and tested. ⚠️ Deferred: prompt budgeting/grounding, requiredness metadata, prepared-envelope reuse, all of 4B (structured-condition schema), and the escalation-strategy/run-budget/preflight refactor.
+**Phase 4 state:** ✅ 4A (shared-assessor reuse + round-trip-safe leaf population + verifier-target bug fix), ✅ 4B (structured-condition schema: versioned envelope, lossless carrier wired through pipeline → merger → builder → prompt), the final-iteration repair skip, and the preflight suitability gate are done, wired, and tested. ⚠️ Still deferred (lower-value / infra-bound): verifier-prompt hard budget + low-confidence target grounding, requiredness metadata for optional trigger fields, prepared-envelope reuse, escalation-strategy (`clarify` vs `legacyGraph`) coordinator plumbing, and the live run-level FM/time budget.
 
 **Exit gate:** simple complete conditions same pre-repair count as no-condition twins; no silent semantic loss across draft/merge/validation/compilation; loop→Graph escalation rate flat; conditional Verifier Loop p95 improves without reducing acceptance accuracy.
 
