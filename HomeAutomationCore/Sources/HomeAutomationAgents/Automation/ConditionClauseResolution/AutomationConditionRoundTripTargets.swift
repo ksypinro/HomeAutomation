@@ -11,13 +11,16 @@ public struct AutomationConditionGraphTarget: AutomationConditionRoundTripTarget
 }
 
 /// Restricted round-trip target for Verifier Loop: only losslessly representable forms accepted.
-/// The Verifier consumes ConditionLeafDraft + ConditionTreeDraft which cannot represent:
-/// - .changes operator
-/// - .literalRange operands
-/// - unit separation
-/// - right-hand device operand (cross-device operands)
-/// - locationMode
-/// - per-comparison trigger policy (only AON trees)
+/// The Verifier consumes `ConditionLeafDraft` + `ConditionTreeDraft`, which cannot represent:
+/// - `.changes` operator
+/// - `.literalRange` operands (numeric range / between)
+/// - `.locationMode` operands
+/// - a right-hand device operand (cross-device comparisons)
+/// - a per-comparison trigger policy other than the default gating policy (`.never`)
+///
+/// A gating (`.never`) comparison whose left operand is a resolved device attribute and whose
+/// right operand is a scalar literal (string/number) round-trips losslessly; AND/OR/NOT trees of
+/// such comparisons also round-trip.
 public struct AutomationConditionVerifierTarget: AutomationConditionRoundTripTarget {
     public init() {}
 
@@ -30,7 +33,9 @@ public struct AutomationConditionVerifierTarget: AutomationConditionRoundTripTar
         case .changes:
             return false
         case .comparison(let comp):
-            return isANDONPolicy(comp.triggerPolicy) && operandIsRepresentable(comp.left) && operandIsRepresentable(comp.right)
+            return isRepresentableTriggerPolicy(comp.triggerPolicy) &&
+                operandIsRepresentable(comp.left) &&
+                operandIsRepresentable(comp.right)
         case .and(let children), .or(let children):
             return children.allSatisfy { canRepresent($0) }
         case .not(let child):
@@ -55,7 +60,9 @@ public struct AutomationConditionVerifierTarget: AutomationConditionRoundTripTar
         }
     }
 
-    private func isANDONPolicy(_ policy: HomeAutomationConditionTriggerPolicy) -> Bool {
-        policy == .always
+    /// The draft representation does not carry a per-comparison trigger policy, so only the
+    /// default gating policy (`.never`) round-trips; a non-default policy (`.always`) is lossy.
+    private func isRepresentableTriggerPolicy(_ policy: HomeAutomationConditionTriggerPolicy) -> Bool {
+        policy == .never
     }
 }

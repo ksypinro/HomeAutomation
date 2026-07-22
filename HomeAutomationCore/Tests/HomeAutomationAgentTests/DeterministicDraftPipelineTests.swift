@@ -192,6 +192,48 @@ struct DeterministicDraftPipelineTests {
         #expect(envelope.fieldConfidence[.action(1, .targetDeviceID)] != nil)
     }
 
+    @Test("Phase 4A: motion condition (unsupported by narrow parser) enters fully populated")
+    func motionConditionFullyPopulated() async {
+        let pipeline = makePipeline()
+        let envelope = await pipeline.makeAutomationEnvelope(
+            text: "turn on the porch light every day at 7 PM if the hallway motion sensor detects motion"
+        )
+
+        let auto = envelope.automation!
+        #expect(auto.conditionLeaves.count == 1)
+        let leaf = auto.conditionLeaves[0]
+        // The shared assessor resolves a form the narrow loop parser never handled.
+        #expect(leaf.target == "hallway_motion_sensor")
+        #expect(leaf.capability == "motionSensor")
+        #expect(leaf.attribute != nil)
+        #expect(leaf.operatorName == .equals)
+        #expect(leaf.value == "active")
+        #expect(leaf.confidence >= 0.8)
+
+        // Fully populated → no zero-confidence condition field → no pre-verify repair needed.
+        let zeroConditionFields = envelope.fieldConfidence.filter {
+            $0.key.rawValue.hasPrefix("automation.conditionLeaves") && $0.value == 0.0
+        }
+        #expect(zeroConditionFields.isEmpty)
+    }
+
+    @Test("Phase 4A: unresolved-device condition stays residual with narrow hint retained")
+    func unresolvedConditionStaysResidual() async {
+        let pipeline = makePipeline()
+        let envelope = await pipeline.makeAutomationEnvelope(
+            text: "turn on the bedroom lamp every day at 7 PM if the flux capacitor is on"
+        )
+
+        let auto = envelope.automation!
+        #expect(auto.conditionLeaves.count == 1)
+        let leaf = auto.conditionLeaves[0]
+        // Device did not resolve → structured target left for repair, narrow state hint retained.
+        #expect(leaf.target == nil)
+        #expect(leaf.capability == "switch")
+        #expect(leaf.value == "on")
+        #expect(envelope.fieldConfidence[.conditionLeaf(0, .target)] == 0.0)
+    }
+
     @Test("Stress example with mixed AND/OR conditions flags precedence ambiguity")
     func stressExamplePrecedenceAmbiguity() async {
         let pipeline = makePipeline()

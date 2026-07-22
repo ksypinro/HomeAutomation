@@ -243,32 +243,36 @@ Goal: allow a safe conditional subset to use Graph+Tier-1.
 
 ## Phase 4 — Verifier Loop condition handling (PR 7 reuse, PR 8 schema)
 
-### 4A. Round-trip-safe reuse (PR 7)
-- [ ] Replace narrow loop condition-state parser with shared assessor
-- [ ] Populate `ConditionLeafDraft` only for losslessly representable forms
-- [ ] Requiredness metadata so absent optional trigger fields skip pre-repair
-- [ ] Record pre-repair specialist count separately from fields changed
-- [ ] No identical no-op repair; no repair on final iteration (no subsequent verify)
-- [ ] Ground low-confidence targets in verifier prompt (compact name/ID/room)
-- [ ] Hard prompt budget (preserve user text, disputed fields, conditions, safety first)
-- [ ] Reuse already-prepared request/envelope where available
+### 4A. Round-trip-safe reuse (PR 7 — core DONE)
+- [x] Replace narrow loop condition-state parser with the shared deterministic assessor — `DeterministicDraftPipeline.conditionLeafDrafts` now runs `AutomationConditionDeterministicResolver`; the narrow `parseConditionStateValue` is retained only as a residual hint when the assessor can't fully resolve.
+- [x] Populate `ConditionLeafDraft` only for losslessly representable forms — gated by `AutomationConditionVerifierTarget`; `representableLeafFields` extracts a single gating comparison (device attribute + scalar literal). Also **fixed a latent bug** in the verifier target (it accepted only `.always` policy; corrected to the default gating `.never`, so normal `if`-clause conditions are recognized).
+- [x] No repair on final iteration (no subsequent verify) — `VerifierLoopOrchestrator` escalates (`iterationCap`) on the last iteration instead of paying wasted repair calls.
+- [ ] Requiredness metadata so absent optional trigger fields skip pre-repair — deferred (trigger fields).
+- [~] Record pre-repair specialist count separately from fields changed — `preVerifyRepairCount` already tracked; unchanged.
+- [~] No identical no-op repair — existing field latching covers it; unchanged.
+- [ ] Ground low-confidence targets in verifier prompt (compact name/ID/room) — deferred (`VerifierPromptBuilder`).
+- [ ] Hard prompt budget — deferred (`VerifierPromptBuilder`).
+- [ ] Reuse already-prepared request/envelope where available — deferred.
 
-### 4B. Full structured-condition parity (PR 8)
+### 4B. Full structured-condition parity (PR 8 — DEFERRED, large versioned-envelope migration)
 - [ ] Add optional structured condition rep to `ConditionLeafDraft` (versioned envelope field)
 - [ ] Update: `DraftEnvelope` versioning/decoding, `DeterministicDraftPipeline`, `StructuralDraftBuilder`, `EnvelopeMerger`, `VerifierPromptBuilder`, repair specialists + field IDs, exact tree tests
-- [ ] Do NOT mark numeric range / changes / complex right operands / mixed trees complete until 4B done
+- [ ] Do NOT mark numeric range / changes / complex right operands / mixed trees complete until 4B done — **honored**: `representableLeafFields` returns nil for range/changes/tree/cross-device, so those stay residual.
 
 ### Loop budget & escalation
-- [ ] Make `VerifierLoopPolicy.escalation` operational
-- [ ] Distinguish: model unavailable / verifier timeout / no-progress / repair exhaustion / iteration cap
-- [ ] Run-level FM/time budget before launching legacy Graph
-- [ ] Preflight suitability gate: structurally unsupported / precedence-ambiguous → Graph directly
+- [x] No repair on final iteration (see 4A)
+- [~] Distinguish failure modes — `EscalationReason` already distinguishes iterationCap / noProgress / repairLatch / verifierUnavailable.
+- [ ] Make `VerifierLoopPolicy.escalation` (clarify vs legacyGraph) operational — still not consumed by the coordinator; deferred.
+- [ ] Run-level FM/time budget before launching legacy Graph — deferred.
+- [ ] Preflight suitability gate (structurally unsupported / precedence-ambiguous → Graph directly) — deferred.
 
-- [ ] Tests: complete simple → 0 pre-repair + 1 verifier call; incomplete single → 1 repair then verify;
-      multiple incomplete → 1 batched repair; disputed → 1 material repair then re-verify;
-      final iteration no unverified repair; optional absent no pre-repair; prompt within budget;
-      structured numeric/between/changes round-trip after 4B; escalation policies distinct;
-      verifier timeout can't launch unlimited 2nd pipeline; prepared envelope avoids rebuild
+### Tests
+- [x] Round-trip-safe form the narrow parser couldn't handle (motion) enters fully populated → 0 zero-confidence condition fields → no pre-repair — `DeterministicDraftPipelineTests`.
+- [x] Unresolved-device condition stays residual (narrow hint retained, target zero-confidence) — `DeterministicDraftPipelineTests`.
+- [x] Existing loop suites (`VerifierLoopOrchestrator`, `ParallelRepairTests`, `RepairPlanner`) still green with the final-iteration skip.
+- [ ] Remaining targeted tests (prompt-within-budget, structured numeric/between/changes after 4B, distinct escalation policies, verifier-timeout second-pipeline guard, prepared-envelope reuse) — deferred with their features.
+
+**Phase 4 state:** ✅ 4A core (shared-assessor reuse + round-trip-safe leaf population + verifier-target bug fix) and the final-iteration repair skip are done, wired, and tested. ⚠️ Deferred: prompt budgeting/grounding, requiredness metadata, prepared-envelope reuse, all of 4B (structured-condition schema), and the escalation-strategy/run-budget/preflight refactor.
 
 **Exit gate:** simple complete conditions same pre-repair count as no-condition twins; no silent semantic loss across draft/merge/validation/compilation; loop→Graph escalation rate flat; conditional Verifier Loop p95 improves without reducing acceptance accuracy.
 

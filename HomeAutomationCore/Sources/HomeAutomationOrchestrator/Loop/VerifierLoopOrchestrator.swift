@@ -193,6 +193,22 @@ public struct VerifierLoopOrchestrator: Sendable {
                 }
             }
 
+            // Final iteration: no verification follows, so any repair here can never be
+            // re-verified or accepted. Escalate instead of paying wasted repair calls.
+            if iteration == policy.maxIterations {
+                return LoopOutput(
+                    exit: .escalated(envelope: currentEnvelope, reason: .iterationCap),
+                    metrics: makeMetrics(
+                        iterations: iteration,
+                        verifierCallCount: verifierCallCount,
+                        repairCallCount: repairCallCount,
+                        disputedFieldIDsPerIteration: disputedFieldIDsPerIteration,
+                        escalationReason: .iterationCap,
+                        preVerifyRepairCount: preVerifyRepairCount
+                    )
+                )
+            }
+
             let repairPlan = planner.plan(
                 disputes: verdict.disputes,
                 envelope: currentEnvelope,
