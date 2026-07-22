@@ -287,12 +287,14 @@ Goal: allow a safe conditional subset to use Graph+Tier-1.
 
 ## Phase 5 — Consolidation & rollout completion (PR 9)
 
-- [ ] Legacy confidence + adaptive policies behind independent rollback switches during rollout
-- [ ] Compare Phase 0 baseline to every phase on same live corpus/environment
-- [ ] Remove duplicate deterministic condition code once all consumers use shared assessor
-- [ ] Update `Docs/AutomationParallelismStrategy.md` (current-state gap list is stale)
-- [ ] Document final timeout/prompt/concurrency/eligibility values + justifying baseline artifact
-- [ ] Enable conditional Tier-1 by default only after full release gates pass
+- [x] Legacy confidence + adaptive policies behind independent rollback switches — documented in [Docs/ConditionalAutomationLatencyTunedValues.md](Docs/ConditionalAutomationLatencyTunedValues.md#rollback-switches); switches exist (`conditionalTier1Enabled` default off, `PortfolioRolloutConfiguration.*`, per-resolver `FoundationModelTimeoutConfiguration` + acceptance threshold).
+- [ ] Compare Phase 0 baseline to every phase on same live corpus/environment — needs a live foundation model + the Phase 0 harness; **deferred (infra-bound)**.
+- [x] Remove duplicate deterministic condition code — consolidated the triplicated `validAttribute` into `AutomationConditionDeterministicResolver.validAttribute` (single/batch/shared now share it). The Graph-path `AutomationConditionOperandResolver` still has its own divergent operand-level scorer; unifying it changes Graph resolution outcomes and is a separate validated migration (the plan sequences dedup "once all consumers use the shared assessor", and that operand-level consumer is not yet migrated) — **deferred with reason**.
+- [x] Update `Docs/AutomationParallelismStrategy.md` — §2.2 gap list now carries a per-finding Status column reflecting Phases 0–4B (P1/P2/P5/P6/P7 resolved, P3/P4 partial).
+- [x] Document final timeout/prompt/concurrency/eligibility values — new [Docs/ConditionalAutomationLatencyTunedValues.md](Docs/ConditionalAutomationLatencyTunedValues.md); the justifying live baseline artifact itself is deferred (infra-bound, noted in the doc).
+- [ ] Enable conditional Tier-1 by default — **intentionally NOT done**; gated on live release gates passing (flag stays default-off).
+
+**Phase 5 state:** ✅ Consolidation (dedup + both docs + rollback-switch inventory) done and green. ⚠️ Correctly gated/deferred: the live baseline comparison, the operand-resolver scorer unification, and the default-on flip — each needs a live harness or a separately-validated migration, not a code toggle.
 
 ---
 

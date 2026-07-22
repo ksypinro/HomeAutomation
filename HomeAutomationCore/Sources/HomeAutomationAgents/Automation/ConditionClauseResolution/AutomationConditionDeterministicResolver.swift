@@ -245,6 +245,13 @@ public struct AutomationConditionDeterministicResolver: Sendable {
     }
 
     private func validAttribute(_ attribute: String?, capability: String) -> String {
+        Self.validAttribute(attribute, capability: capability)
+    }
+
+    /// Shared attribute validation: keeps a caller-supplied attribute when the catalog lists it,
+    /// otherwise falls back to the capability's first attribute. Reused by the single and batch
+    /// resolvers so the deterministic condition logic has one source of truth.
+    static func validAttribute(_ attribute: String?, capability: String) -> String {
         guard let definition = HomeCapabilityRegistry.definitions[capability] else {
             return attribute ?? capability
         }

@@ -213,13 +213,7 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
     }
 
     private func validAttribute(_ attribute: String?, capability: String) -> String {
-        guard let definition = HomeCapabilityRegistry.definitions[capability] else {
-            return attribute ?? capability
-        }
-        if let attribute, definition.attributeNames.contains(attribute) {
-            return attribute
-        }
-        return definition.attributeNames.first ?? attribute ?? capability
+        AutomationConditionDeterministicResolver.validAttribute(attribute, capability: capability)
     }
 
     private func isEmpty(_ value: String?) -> Bool {
