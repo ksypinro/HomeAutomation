@@ -54,6 +54,24 @@ public struct VerifierLoopOrchestrator: Sendable {
 
         await publishEvent(eventBus, runID: runID, stage: "verifierLoop/envelope", detail: "Stage 0 envelope built")
 
+        // Preflight suitability gate: a precedence-ambiguous automation cannot be safely
+        // repaired field-by-field, so escalate to Graph immediately instead of paying
+        // verifier/repair calls that cannot recover it.
+        if envelope.automation?.precedenceAmbiguous == true {
+            await publishEvent(eventBus, runID: runID, stage: "verifierLoop/preflight", detail: "Precedence-ambiguous automation; escalating before verification")
+            return LoopOutput(
+                exit: .escalated(envelope: envelope, reason: .preflightUnsupported),
+                metrics: makeMetrics(
+                    iterations: 0,
+                    verifierCallCount: 0,
+                    repairCallCount: 0,
+                    disputedFieldIDsPerIteration: [],
+                    escalationReason: .preflightUnsupported,
+                    preVerifyRepairCount: 0
+                )
+            )
+        }
+
         var currentEnvelope = envelope
         var latchedFieldIDs: Set<FieldID> = []
 

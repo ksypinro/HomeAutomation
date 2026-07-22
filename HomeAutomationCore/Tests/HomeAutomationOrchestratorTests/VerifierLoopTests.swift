@@ -63,6 +63,39 @@ struct VerifierLoopTests {
         #expect(output.metrics.acceptedOnIteration == 1)
     }
 
+    @Test("precedence-ambiguous automation escalates before any verifier call")
+    func preflightEscalatesPrecedenceAmbiguous() async {
+        let orchestrator = makeOrchestrator(
+            verifyBehavior: { _, _ in
+                // Would accept if ever called — so a nonzero verifierCallCount proves the
+                // preflight gate did not short-circuit.
+                DraftVerdict(accepted: true, disputes: [], needsClarification: false)
+            }
+        )
+
+        let text = "turn on the bedroom AC and turn off the living room blinds every day at 7 PM if the living room ceiling light is on and the bedroom AC is off or the living room TV is off"
+        let output = await orchestrator.run(
+            request: makeRequest(text),
+            operationHint: HomeOperationDetectionResult(
+                domain: .homeAutomation,
+                operation: .automationCreation,
+                confidence: 0.9,
+                reason: "test"
+            ),
+            eventBus: AgentEventBus(),
+            runID: UUID()
+        )
+
+        guard case .escalated(_, let reason) = output.exit else {
+            Issue.record("Expected .escalated, got \(output.exit)")
+            return
+        }
+        #expect(reason == .preflightUnsupported)
+        #expect(output.metrics.verifierCallCount == 0)
+        #expect(output.metrics.repairCallCount == 0)
+        #expect(output.metrics.preVerifyRepairCount == 0)
+    }
+
     @Test("accepted verdict with disputes is normalized into repair before acceptance")
     func acceptedWithDisputesRequiresRepair() async {
         let callCount = CallCounter()

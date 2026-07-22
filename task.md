@@ -261,14 +261,15 @@ Goal: allow a safe conditional subset to use Graph+Tier-1.
 
 ### Loop budget & escalation
 - [x] No repair on final iteration (see 4A)
-- [~] Distinguish failure modes — `EscalationReason` already distinguishes iterationCap / noProgress / repairLatch / verifierUnavailable.
-- [ ] Make `VerifierLoopPolicy.escalation` (clarify vs legacyGraph) operational — still not consumed by the coordinator; deferred.
-- [ ] Run-level FM/time budget before launching legacy Graph — deferred.
-- [ ] Preflight suitability gate (structurally unsupported / precedence-ambiguous → Graph directly) — deferred.
+- [x] Preflight suitability gate — `VerifierLoopOrchestrator` escalates a precedence-ambiguous automation (`EscalationReason.preflightUnsupported`) before any verifier/repair call.
+- [x] Distinguish failure modes — `EscalationReason` distinguishes iterationCap / noProgress / repairLatch / verifierUnavailable / preflightUnsupported.
+- [ ] Make `VerifierLoopPolicy.escalation` (clarify vs legacyGraph) operational — coordinator-level wiring; deferred.
+- [ ] Run-level FM/time budget before launching legacy Graph — needs live latency; deferred.
 
 ### Tests
 - [x] Round-trip-safe form the narrow parser couldn't handle (motion) enters fully populated → 0 zero-confidence condition fields → no pre-repair — `DeterministicDraftPipelineTests`.
 - [x] Unresolved-device condition stays residual (narrow hint retained, target zero-confidence) — `DeterministicDraftPipelineTests`.
+- [x] Precedence-ambiguous automation escalates (`preflightUnsupported`) with 0 verifier/repair calls — `VerifierLoopTests`.
 - [x] Existing loop suites (`VerifierLoopOrchestrator`, `ParallelRepairTests`, `RepairPlanner`) still green with the final-iteration skip.
 - [ ] Remaining targeted tests (prompt-within-budget, structured numeric/between/changes after 4B, distinct escalation policies, verifier-timeout second-pipeline guard, prepared-envelope reuse) — deferred with their features.
 
