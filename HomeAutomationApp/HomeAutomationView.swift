@@ -219,6 +219,10 @@ struct HomeAutomationView: View {
                         isShowingAutomationJSON = true
                     }
                 }
+
+                if let deviceCommandResult = viewModel.deviceCommandResult {
+                    DeviceCommandResultCard(display: deviceCommandResult)
+                }
             }
         }
     }
@@ -564,6 +568,117 @@ private struct AutomationResultCard: View {
         .padding(18)
         .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 28))
         .foregroundStyle(.white)
+    }
+}
+
+private struct DeviceCommandResultCard: View {
+    let display: DeviceCommandResultDisplay
+
+    private var accentColor: Color {
+        switch display.status {
+        case .executed: return .green
+        case .ready: return .blue
+        case .confirmationRequired: return .orange
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.16))
+                    Image(systemName: display.statusSystemImage)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(accentColor)
+                }
+                .frame(width: 52, height: 52)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(display.title)
+                        .font(.title3.weight(.bold))
+                    Text(display.summary)
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.68))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Command")
+                    .font(.title2.weight(.bold))
+
+                ForEach(display.steps) { step in
+                    DeviceCommandStepRow(step: step, accentColor: accentColor)
+                }
+            }
+
+            if !display.stateItems.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Current state")
+                        .font(.headline)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], spacing: 10) {
+                        ForEach(display.stateItems) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.58))
+                                    .lineLimit(1)
+                                Text(item.value)
+                                    .font(.callout.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
+                        }
+                    }
+                }
+            }
+
+            Label(display.statusLabel, systemImage: display.statusSystemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(accentColor)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(accentColor.opacity(0.14), in: Capsule())
+        }
+        .padding(18)
+        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 28))
+        .foregroundStyle(.white)
+    }
+}
+
+private struct DeviceCommandStepRow: View {
+    let step: DeviceCommandStepDisplay
+    let accentColor: Color
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: step.systemImage)
+                .font(.title3)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(accentColor)
+                .frame(width: 34)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.deviceName)
+                    .font(.headline)
+                Text(step.action)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(accentColor)
+                Text("\(step.room) · \(step.capability)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 
