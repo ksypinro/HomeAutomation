@@ -17,6 +17,7 @@ public enum AutomationConditionResidualReason: String, Sendable, Codable, Hashab
     case unsupportedClauseForm
     case deviceNotResolved
     case deviceNotUnique
+    case capabilityNotExplicit
     case capabilityNotAdvertised
     case attributeNotValid
     case operatorNotValid
@@ -51,6 +52,22 @@ public struct AutomationConditionDeterministicAssessment: Sendable {
     public func isSafeToAccept(for target: some AutomationConditionRoundTripTarget) -> Bool {
         guard completeness == .complete, let condition else { return false }
         return target.roundTripResidual(for: condition) == nil
+    }
+
+    /// A residual condition can still be useful when it preserves the user's clause shape
+    /// with unresolved operands, allowing validation to ask a targeted clarification instead
+    /// of failing draft assembly. This is intentionally limited to device disambiguation
+    /// residuals; semantic residuals such as unsupported units or implicit capabilities are
+    /// not returned as actionable fallback conditions.
+    public var isClarificationSafeFallback: Bool {
+        guard condition != nil else { return false }
+        guard completeness == .ambiguous || completeness == .partial else { return false }
+        let allowedReasons: Set<AutomationConditionResidualReason> = [
+            .deviceNotResolved,
+            .deviceNotUnique
+        ]
+        return !residualReasons.isEmpty &&
+            residualReasons.allSatisfy { allowedReasons.contains($0) }
     }
 }
 
@@ -87,7 +104,8 @@ public struct AutomationConditionDeterministicResolver: Sendable {
             )
         }
 
-        let resolved = resolveDeterministically(condition, devices: input.availableDevices)
+        let resolvedOutput = resolveDeterministically(condition, devices: input.availableDevices)
+        let resolved = resolvedOutput.condition
         let hasDevice = hasResolvedDevice(resolved)
         let confidence = hasDevice ? 0.84 : 0.72
         let records = buildRecords(
@@ -95,18 +113,20 @@ public struct AutomationConditionDeterministicResolver: Sendable {
             original: condition,
             resolved: resolved
         )
+        let residualReasons = stableReasons(
+            resolvedOutput.residualReasons + validateDeterministicCondition(
+                resolved,
+                expectedTriggerPolicy: input.triggerPolicy
+            )
+        )
 
-        // A device operand that is still unresolved (empty deviceID) means the
-        // condition is only partially resolved deterministically and must go to FM.
-        // Modeling this as `.complete` would make `isSafeToAccept` and any residual
-        // classification incorrect; the confidence gate alone previously masked it.
-        if hasUnresolvedDeviceOperand(resolved) {
+        if !residualReasons.isEmpty {
             return AutomationConditionDeterministicAssessment(
                 condition: resolved,
                 records: records,
-                completeness: .partial,
+                completeness: completeness(for: residualReasons),
                 confidence: confidence,
-                residualReasons: [.deviceNotResolved]
+                residualReasons: residualReasons
             )
         }
 
@@ -121,28 +141,72 @@ public struct AutomationConditionDeterministicResolver: Sendable {
 
     // MARK: - Device Resolution
 
+    private struct ConditionResolutionOutput {
+        let condition: HomeAutomationCondition
+        let residualReasons: [AutomationConditionResidualReason]
+    }
+
+    private struct OperandResolutionOutput {
+        let operand: HomeAutomationConditionOperand
+        let residualReasons: [AutomationConditionResidualReason]
+    }
+
+    private struct DeviceSelection {
+        let device: HomeCandidateRecord?
+        let reason: AutomationConditionResidualReason?
+    }
+
     private func resolveDeterministically(
         _ condition: HomeAutomationCondition,
         devices: [HomeCandidateRecord]
-    ) -> HomeAutomationCondition {
+    ) -> ConditionResolutionOutput {
         switch condition {
         case .comparison(let comparison):
-            return .comparison(
-                HomeAutomationComparisonCondition(
-                    left: resolveDeterministicOperand(comparison.left, comparison: comparison, devices: devices),
-                    operatorName: comparison.operatorName,
-                    right: resolveDeterministicOperand(comparison.right, comparison: comparison, devices: devices),
-                    triggerPolicy: comparison.triggerPolicy
-                )
+            let left = resolveDeterministicOperand(
+                comparison.left,
+                comparison: comparison,
+                devices: devices
+            )
+            let right = resolveDeterministicOperand(
+                comparison.right,
+                comparison: comparison,
+                devices: devices
+            )
+            return ConditionResolutionOutput(
+                condition: .comparison(
+                    HomeAutomationComparisonCondition(
+                        left: left.operand,
+                        operatorName: comparison.operatorName,
+                        right: right.operand,
+                        triggerPolicy: comparison.triggerPolicy
+                    )
+                ),
+                residualReasons: left.residualReasons + right.residualReasons
             )
         case .and(let children):
-            return .and(children.map { resolveDeterministically($0, devices: devices) })
+            let outputs = children.map { resolveDeterministically($0, devices: devices) }
+            return ConditionResolutionOutput(
+                condition: .and(outputs.map(\.condition)),
+                residualReasons: outputs.flatMap(\.residualReasons)
+            )
         case .or(let children):
-            return .or(children.map { resolveDeterministically($0, devices: devices) })
+            let outputs = children.map { resolveDeterministically($0, devices: devices) }
+            return ConditionResolutionOutput(
+                condition: .or(outputs.map(\.condition)),
+                residualReasons: outputs.flatMap(\.residualReasons)
+            )
         case .not(let child):
-            return .not(resolveDeterministically(child, devices: devices))
+            let output = resolveDeterministically(child, devices: devices)
+            return ConditionResolutionOutput(
+                condition: .not(output.condition),
+                residualReasons: output.residualReasons
+            )
         case .changes(let child):
-            return .changes(resolveDeterministically(child, devices: devices))
+            let output = resolveDeterministically(child, devices: devices)
+            return ConditionResolutionOutput(
+                condition: .changes(output.condition),
+                residualReasons: output.residualReasons
+            )
         }
     }
 
@@ -150,23 +214,52 @@ public struct AutomationConditionDeterministicResolver: Sendable {
         _ operand: HomeAutomationConditionOperand,
         comparison: HomeAutomationComparisonCondition,
         devices: [HomeCandidateRecord]
-    ) -> HomeAutomationConditionOperand {
-        guard case .deviceAttribute(let description, let deviceID, let capability, let attribute) = operand,
-              isEmpty(deviceID) || isEmpty(capability) || isEmpty(attribute),
-              let device = bestDevice(for: description, devices: devices),
-              let resolvedCapability = bestCapability(for: description, device: device, comparison: comparison) else {
-            return operand
+    ) -> OperandResolutionOutput {
+        guard case .deviceAttribute(let description, let deviceID, let capability, let attribute) = operand else {
+            return OperandResolutionOutput(operand: operand, residualReasons: [])
+        }
+        guard isEmpty(deviceID) || isEmpty(capability) || isEmpty(attribute) else {
+            return OperandResolutionOutput(operand: operand, residualReasons: [])
+        }
+
+        var reasons: [AutomationConditionResidualReason] = []
+        let capabilityCandidates = explicitCapabilityCandidates(
+            for: description,
+            comparison: comparison
+        )
+        if capabilityCandidates.isEmpty {
+            reasons.append(.capabilityNotExplicit)
+        }
+
+        let candidateDevices = capabilityCandidates.isEmpty
+            ? devices
+            : devices.filter { device in
+                capabilityCandidates.contains { device.capabilities.contains($0) }
+            }
+        let selected = bestDevice(for: description, devices: candidateDevices)
+        guard let device = selected.device else {
+            reasons.append(selected.reason ?? .deviceNotResolved)
+            return OperandResolutionOutput(operand: operand, residualReasons: stableReasons(reasons))
+        }
+
+        let resolvedCapability = capabilityCandidates.first { device.capabilities.contains($0) }
+        guard let resolvedCapability else {
+            reasons.append(.capabilityNotAdvertised)
+            return OperandResolutionOutput(operand: operand, residualReasons: stableReasons(reasons))
         }
         let resolvedAttribute = validAttribute(nil, capability: resolvedCapability)
-        return .deviceAttribute(
-            description: description,
-            deviceID: device.id,
-            capability: resolvedCapability,
-            attribute: resolvedAttribute
+        return OperandResolutionOutput(
+            operand: .deviceAttribute(
+                description: description,
+                deviceID: device.id,
+                capability: resolvedCapability,
+                attribute: resolvedAttribute
+            ),
+            residualReasons: stableReasons(reasons)
         )
     }
 
-    private func bestDevice(for description: String, devices: [HomeCandidateRecord]) -> HomeCandidateRecord? {
+    private func bestDevice(for description: String, devices: [HomeCandidateRecord]) -> DeviceSelection {
         let query = normalize(description)
         let scored: [(device: HomeCandidateRecord, score: Int)] = devices.map { device in
             (device: device, score: score(device, query: query))
@@ -178,15 +271,21 @@ public struct AutomationConditionDeterministicResolver: Sendable {
                     ? $0.device.displayName < $1.device.displayName
                     : $0.score > $1.score
             }
-        guard let best = sorted.first else { return nil }
-        if sorted.dropFirst().contains(where: { $0.score == best.score }) {
-            return nil
+        guard let best = sorted.first else {
+            return DeviceSelection(device: nil, reason: .deviceNotResolved)
         }
-        return best.device
+        guard best.score >= 6 else {
+            return DeviceSelection(device: nil, reason: .deviceNotResolved)
+        }
+        if let second = sorted.dropFirst().first, best.score - second.score < 2 {
+            return DeviceSelection(device: nil, reason: .deviceNotUnique)
+        }
+        return DeviceSelection(device: best.device, reason: nil)
     }
 
     private func score(_ device: HomeCandidateRecord, query: String) -> Int {
         var total = 0
+        let query = meaningfulQuery(query)
         let name = normalize(device.displayName)
         let type = normalize(device.deviceType)
         let room = device.room.map(normalize)
@@ -204,44 +303,60 @@ public struct AutomationConditionDeterministicResolver: Sendable {
         if query.contains("motion"), device.capabilities.contains("motionSensor") { total += 6 }
         if query.contains("temperature"), device.capabilities.contains("temperatureMeasurement") { total += 6 }
         if query.contains("contact"), device.capabilities.contains("contactSensor") { total += 6 }
+        if (query.contains("presence") || query.contains("home")),
+           device.capabilities.contains("presenceSensor") {
+            total += 6
+        }
         return total
     }
 
-    private func bestCapability(
+    private func explicitCapabilityCandidates(
         for description: String,
-        device: HomeCandidateRecord,
         comparison: HomeAutomationComparisonCondition
-    ) -> String? {
+    ) -> [String] {
         let query = normalize(description)
+        var candidates: [String] = []
+        func append(_ capability: String) {
+            if !candidates.contains(capability) {
+                candidates.append(capability)
+            }
+        }
         if query.contains("brightness") || query.contains("level") || query.contains("dim") {
-            if device.capabilities.contains("switchLevel") { return "switchLevel" }
+            append("switchLevel")
         }
         if query.contains("color temperature") || query.contains("colour temperature") {
-            if device.capabilities.contains("colorTemperature") { return "colorTemperature" }
+            append("colorTemperature")
         }
-        if query.contains("motion"), device.capabilities.contains("motionSensor") { return "motionSensor" }
-        if query.contains("temperature"), device.capabilities.contains("temperatureMeasurement") { return "temperatureMeasurement" }
-        if query.contains("contact"), device.capabilities.contains("contactSensor") { return "contactSensor" }
+        if query.contains("motion") { append("motionSensor") }
+        if query.contains("temperature") { append("temperatureMeasurement") }
+        if query.contains("humidity") { append("relativeHumidityMeasurement") }
+        if query.contains("contact") { append("contactSensor") }
+        if query.contains("presence") || query.contains("someone is home") || query.contains("home") {
+            append("presenceSensor")
+        }
+        if query.contains("battery") { append("battery") }
+        if query.contains("power") { append("powerMeter") }
+        if query.contains("energy") { append("energyMeter") }
         if case .literalString(let value) = comparison.right {
             switch value {
             case "locked", "unlocked":
-                if device.capabilities.contains("lock") { return "lock" }
+                append("lock")
             case "open", "closed":
-                if device.capabilities.contains("contactSensor") { return "contactSensor" }
-                if device.capabilities.contains("garageDoorControl") { return "garageDoorControl" }
-                if device.capabilities.contains("doorControl") { return "doorControl" }
-                if device.capabilities.contains("windowShade") { return "windowShade" }
+                append("contactSensor")
+                append("garageDoorControl")
+                append("doorControl")
+                append("windowShade")
             case "on", "off":
-                if device.capabilities.contains("switch") { return "switch" }
+                append("switch")
             case "active", "inactive":
-                if device.capabilities.contains("motionSensor") { return "motionSensor" }
+                append("motionSensor")
+            case "present", "not present":
+                append("presenceSensor")
             default:
                 break
             }
         }
-        return device.capabilities.first { capability in
-            HomeCapabilityRegistry.definitions[capability]?.attributeNames.isEmpty == false
-        }
+        return candidates
     }
 
     private func validAttribute(_ attribute: String?, capability: String) -> String {
@@ -300,6 +415,154 @@ public struct AutomationConditionDeterministicResolver: Sendable {
         return false
     }
 
+    // MARK: - Semantic Validation
+
+    private func validateDeterministicCondition(
+        _ condition: HomeAutomationCondition,
+        expectedTriggerPolicy: HomeAutomationConditionTriggerPolicy
+    ) -> [AutomationConditionResidualReason] {
+        switch condition {
+        case .comparison(let comparison):
+            return validateComparison(comparison, expectedTriggerPolicy: expectedTriggerPolicy)
+        case .and(let children), .or(let children):
+            return children.flatMap {
+                validateDeterministicCondition($0, expectedTriggerPolicy: expectedTriggerPolicy)
+            }
+        case .not(let child), .changes(let child):
+            return validateDeterministicCondition(child, expectedTriggerPolicy: expectedTriggerPolicy)
+        }
+    }
+
+    private func validateComparison(
+        _ comparison: HomeAutomationComparisonCondition,
+        expectedTriggerPolicy: HomeAutomationConditionTriggerPolicy
+    ) -> [AutomationConditionResidualReason] {
+        var reasons: [AutomationConditionResidualReason] = []
+        if comparison.triggerPolicy != expectedTriggerPolicy {
+            reasons.append(.triggerPolicyNotPreserved)
+        }
+
+        guard case .deviceAttribute(_, let deviceID, let capability, let attribute) = comparison.left,
+              deviceID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+              let capability,
+              !capability.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let attribute,
+              !attribute.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            reasons.append(.deviceNotResolved)
+            return stableReasons(reasons)
+        }
+
+        guard let definition = HomeCapabilityRegistry.definitions[capability] else {
+            reasons.append(.capabilityNotAdvertised)
+            return stableReasons(reasons)
+        }
+        if !definition.attributeNames.contains(attribute) {
+            reasons.append(.attributeNotValid)
+        }
+        reasons.append(contentsOf: validateOperatorAndValue(comparison, definition: definition))
+        return stableReasons(reasons)
+    }
+
+    private func validateOperatorAndValue(
+        _ comparison: HomeAutomationComparisonCondition,
+        definition: HomeCapabilityDefinition
+    ) -> [AutomationConditionResidualReason] {
+        switch comparison.operatorName {
+        case .between:
+            guard case .literalRange(let start, let end, let unit) = comparison.right else {
+                return [.operatorNotValid]
+            }
+            guard start <= end else { return [.valueTypeInvalid] }
+            return validateNumericValues([start, end], unit: unit, definition: definition)
+
+        case .greaterThan, .lessThan, .greaterThanOrEquals, .lessThanOrEquals:
+            guard case .literalNumber(let value, let unit) = comparison.right else {
+                return [.operatorNotValid]
+            }
+            return validateNumericValues([value], unit: unit, definition: definition)
+
+        case .equals:
+            switch comparison.right {
+            case .literalString(let value):
+                guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return [.valueTypeInvalid]
+                }
+                if !definition.enumValues.isEmpty && !definition.enumValues.contains(value) {
+                    return [.enumValueNotFound]
+                }
+                return []
+            case .literalNumber(let value, let unit):
+                return validateNumericValues([value], unit: unit, definition: definition)
+            case .locationMode:
+                return []
+            default:
+                return [.valueTypeInvalid]
+            }
+
+        case .changes:
+            return [.operatorNotValid]
+        }
+    }
+
+    private func validateNumericValues(
+        _ values: [Double],
+        unit: String?,
+        definition: HomeCapabilityDefinition
+    ) -> [AutomationConditionResidualReason] {
+        if values.contains(where: { !$0.isFinite }) {
+            return [.valueTypeInvalid]
+        }
+        if let range = definition.numericRange,
+           values.contains(where: { !range.contains($0) }) {
+            return [.numberOutOfRange]
+        }
+        if let unit,
+           !isUnit(unit, compatibleWith: definition.id) {
+            return [.unitMismatch]
+        }
+        return []
+    }
+
+    private func isUnit(_ unit: String, compatibleWith capability: String) -> Bool {
+        let normalized = normalize(unit)
+        guard !normalized.isEmpty else { return true }
+        switch capability {
+        case "temperatureMeasurement",
+             "thermostatCoolingSetpoint",
+             "thermostatHeatingSetpoint",
+             "ovenSetpoint":
+            return ["celsius", "fahrenheit", "degree", "degrees"].contains(normalized)
+        case "switchLevel",
+             "windowShadeLevel",
+             "battery",
+             "audioVolume",
+             "colorControl":
+            return ["percent", "percentage"].contains(normalized)
+        case "colorTemperature":
+            return ["k", "kelvin"].contains(normalized)
+        default:
+            return false
+        }
+    }
+
+    private func completeness(
+        for reasons: [AutomationConditionResidualReason]
+    ) -> AutomationConditionCompleteness {
+        if reasons.contains(.deviceNotUnique) { return .ambiguous }
+        if reasons.contains(.parseFailure) ||
+            reasons.contains(.unsupportedTreeForm) ||
+            reasons.contains(.unsupportedClauseForm) {
+            return .unsupported
+        }
+        return .partial
+    }
+
+    private func stableReasons(
+        _ reasons: [AutomationConditionResidualReason]
+    ) -> [AutomationConditionResidualReason] {
+        Array(Set(reasons)).sorted { $0.rawValue < $1.rawValue }
+    }
+
     // MARK: - Record Building
 
     private func buildRecords(
@@ -350,6 +613,15 @@ public struct AutomationConditionDeterministicResolver: Sendable {
 
     private func isEmpty(_ value: String?) -> Bool {
         value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+    }
+
+    private func meaningfulQuery(_ value: String) -> String {
+        let stopWords: Set<String> = ["a", "an", "the", "it", "its", "is"]
+        return value
+            .split(separator: " ")
+            .map(String.init)
+            .filter { !stopWords.contains($0) }
+            .joined(separator: " ")
     }
 
     private func triggerPolicyOutput(

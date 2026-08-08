@@ -83,11 +83,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.featureExtractor = OrchestrationFeatureExtractor(registry: dependencies.deviceRegistry)
         self.portfolioRolloutMode = dependencies.portfolioRolloutMode
         self.portfolioRolloutConfiguration = dependencies.portfolioRolloutConfiguration
-        let staticPortfolioRouter = StaticPortfolioRouter(rolloutMode: dependencies.portfolioRolloutMode)
+        let staticPortfolioRouter = StaticPortfolioRouter(
+            policy: dependencies.portfolioEligibilityPolicy,
+            rolloutMode: dependencies.portfolioRolloutMode
+        )
         self.staticPortfolioRouter = staticPortfolioRouter
         let learnedRouter = dependencies.portfolioModelArtifact.map {
             LearnedPortfolioRouter(
                 artifact: $0,
+                policy: dependencies.portfolioEligibilityPolicy,
                 staticRouter: staticPortfolioRouter,
                 rolloutMode: dependencies.portfolioRolloutMode
             )
@@ -879,6 +883,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     private func captureRequestTelemetry(
         result: HomeAutomationResolverResult,
         startedAt: Date,
+        metrics: OrchestratorMetrics,
         runContext: OrchestrationRunContext,
         portfolioExecutionPlan: PortfolioArmExecutionPlan,
         orchestrationMode: OrchestrationMode
@@ -886,29 +891,33 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         let endedAt = Date()
         let totalDurationMs = endedAt.timeIntervalSince(startedAt) * 1_000
 
-        // Map FM arm to strategy
         let strategy: OrchestrationStrategy
         switch orchestrationMode {
         case .graph:
-            strategy = .graph
+            strategy = portfolioExecutionPlan.executingArm == .graphWithTier1 ? .graphWithTier1 : .graph
         case .verifierLoop:
             strategy = .verifierLoop
         case .adaptivePortfolio:
-            // Simplified for Phase 0; full mapping uses portfolio rollout mode
-            strategy = .adaptiveStatic
+            strategy = portfolioRolloutMode == .shadowStatic || portfolioRolloutMode == .shadowLearned
+                ? .adaptiveShadow
+                : .adaptiveStatic
         }
+        let preparationDurationMs = (metrics.stageDurations["adaptivePreparation"] ?? 0) * 1_000
+        let routerDurationMs = (metrics.stageDurations["portfolioRouter"] ?? 0) * 1_000
+        let totalPreparationMs = preparationDurationMs + routerDurationMs
+        let operationExecutionMs = max(0, totalDurationMs - totalPreparationMs)
 
         let snapshot = RequestTelemetrySnapshot(
             strategy: strategy,
-            rootRoutingSource: "normal",
+            rootRoutingSource: orchestrationMode == .adaptivePortfolio ? "adaptive" : "normal",
             selectedArm: portfolioExecutionPlan.selectedArm.rawValue,
             executingArm: portfolioExecutionPlan.executingArm.rawValue,
-            routerRuleID: nil,
-            preparationDurationMs: 0, // computed from router timing
-            operationExecutionDurationMs: totalDurationMs,
+            routerRuleID: metrics.portfolioDecision?.ruleID,
+            preparationDurationMs: totalPreparationMs,
+            operationExecutionDurationMs: operationExecutionMs,
             requestToOutcomeDurationMs: totalDurationMs,
             conditionMetrics: nil,
-            fmCallCount: 0 // populated from ledger
+            fmCallCount: metrics.foundationModelUsage.modelCallCount
         )
 
         await RequestTelemetryCapture().captureAndLog(
@@ -966,6 +975,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
             await captureRequestTelemetry(
                 result: result,
                 startedAt: requestStartedAt,
+                metrics: metrics,
                 runContext: runContext,
                 portfolioExecutionPlan: portfolioExecutionPlan,
                 orchestrationMode: orchestrationMode

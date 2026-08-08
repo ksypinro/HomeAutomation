@@ -236,6 +236,42 @@ struct FoundationModelUsageLedgerTests {
         #expect(snapshot.entries.first?.queueWaitMs == 7)
     }
 
+    @Test("Recorder admission deadline cancels queued call before inference")
+    func recorderAdmissionDeadlineDoesNotInfer() async throws {
+        let clock = ManualFoundationModelClock(initialNanoseconds: 9_500_000_000)
+        let gate = FoundationModelGate(maxConcurrent: 1, clock: clock)
+        let ledger = FoundationModelUsageLedger(runID: "run-admission-timeout")
+        let calls = InvocationCounter()
+        _ = await gate.admitRequest(priority: .interactive)
+
+        await #expect(throws: FoundationModelAdmissionTimeoutError.self) {
+            try await FoundationModelUsageLedgerScope.$current.withValue(ledger) {
+                try await FoundationModelCallRecorder.record(
+                    agentID: "verifier",
+                    modelCallID: "admission-timeout-call",
+                    promptCharacterCount: 5,
+                    admissionDeadlineNanoseconds: 5_000_000,
+                    admissionController: gate,
+                    clock: clock
+                ) {
+                    await calls.increment()
+                    return "unexpected"
+                }
+            }
+        }
+
+        #expect(await calls.value == 0)
+        #expect(await gate.queuedCount == 0)
+        #expect(await gate.admittedCount == 1)
+        await gate.release()
+        #expect(await gate.admittedCount == 0)
+
+        let snapshot = await ledger.snapshot()
+        #expect(snapshot.summary.actualCallCount == 0)
+        #expect(snapshot.summary.cancelledBeforeInferenceCount == 1)
+        #expect(snapshot.entries.first?.cancellationReason == .admissionDeadlineExceeded)
+    }
+
     @Test("Recorder failure releases its permit and records a failed actual call")
     func recorderFailureReleasesPermit() async throws {
         let clock = ManualFoundationModelClock(initialNanoseconds: 10_000_000_000)

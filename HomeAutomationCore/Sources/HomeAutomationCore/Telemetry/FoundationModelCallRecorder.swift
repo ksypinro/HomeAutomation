@@ -81,7 +81,35 @@ public struct FoundationModelCallRecorder: Sendable {
             prefixAffinityKey: admissionContext.prefixAffinityKey,
             workflowScopeID: admissionContext.workflowScopeID
         )
-        let admission = await admissionController.admit(admissionRequest)
+        let admission: FMAdmissionDecision
+        do {
+            admission = try await admit(
+                admissionRequest,
+                admissionController: admissionController,
+                deadlineNanoseconds: admissionDeadlineNanoseconds
+            )
+        } catch let error as FoundationModelAdmissionTimeoutError {
+            let timedOutAt = clock.nowNanoseconds()
+            let queueWaitMs = milliseconds(from: enqueuedAtNanoseconds, to: timedOutAt)
+            if let ledger {
+                await measureLedgerOverhead(ledger: ledger, clock: clock) {
+                    try? await ledger.cancel(
+                        modelCallID: modelCallID,
+                        atNanoseconds: timedOutAt,
+                        reason: .admissionDeadlineExceeded,
+                        queueWaitMs: queueWaitMs
+                    )
+                }
+            }
+            await logCancellation(
+                modelCallID: modelCallID,
+                agentID: agentID,
+                parent: parent,
+                queueWaitMs: queueWaitMs,
+                reason: .admissionDeadlineExceeded
+            )
+            throw error
+        }
         switch admission {
         case .cancelled(let queueWaitMs):
             let cancelledAt = clock.nowNanoseconds()
@@ -383,6 +411,30 @@ public struct FoundationModelCallRecorder: Sendable {
         )
     }
 
+    private static func admit(
+        _ request: FMAdmissionRequest,
+        admissionController: any FoundationModelAdmissionControlling,
+        deadlineNanoseconds: UInt64?
+    ) async throws -> FMAdmissionDecision {
+        guard let deadlineNanoseconds, deadlineNanoseconds > 0 else {
+            return await admissionController.admit(request)
+        }
+        return try await withThrowingTaskGroup(of: FMAdmissionDecision.self) { group in
+            group.addTask {
+                await admissionController.admit(request)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: deadlineNanoseconds)
+                throw FoundationModelAdmissionTimeoutError.timedOut(timeoutNanoseconds: deadlineNanoseconds)
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw FoundationModelAdmissionTimeoutError.timedOut(timeoutNanoseconds: deadlineNanoseconds)
+            }
+            return result
+        }
+    }
+
     private static func milliseconds(from start: UInt64, to end: UInt64) -> Double {
         guard end >= start else { return 0 }
         return Double(end - start) / 1_000_000
@@ -418,6 +470,18 @@ public enum FoundationModelServiceTimeoutError: LocalizedError {
         switch self {
         case .timedOut(let timeoutNanoseconds):
             return "Foundation Model service call exceeded \(timeoutNanoseconds / 1_000_000)ms budget"
+        }
+    }
+}
+
+/// Error thrown when a Foundation Model call cannot acquire an admission lease before its queue deadline.
+public enum FoundationModelAdmissionTimeoutError: LocalizedError {
+    case timedOut(timeoutNanoseconds: UInt64)
+
+    public var errorDescription: String? {
+        switch self {
+        case .timedOut(let timeoutNanoseconds):
+            return "Foundation Model admission exceeded \(timeoutNanoseconds / 1_000_000)ms queue budget"
         }
     }
 }

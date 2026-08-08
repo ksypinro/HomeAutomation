@@ -214,11 +214,19 @@ public struct DeterministicDraftPipeline: Sendable {
         }
 
         for (i, leaf) in conditionLeaves.enumerated() {
-            fieldConfidence[.conditionLeaf(i, .target)] = leaf.target != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .capability)] = leaf.capability != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .attribute)] = leaf.attribute != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .operatorName)] = leaf.operatorName != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .value)] = leaf.value != nil ? leaf.confidence : 0.0
+            if leaf.structuredCondition != nil {
+                fieldConfidence[.conditionLeaf(i, .target)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .capability)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .attribute)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .operatorName)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .value)] = leaf.confidence
+            } else {
+                fieldConfidence[.conditionLeaf(i, .target)] = leaf.target != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .capability)] = leaf.capability != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .attribute)] = leaf.attribute != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .operatorName)] = leaf.operatorName != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .value)] = leaf.value != nil ? leaf.confidence : 0.0
+            }
         }
 
         if let conditionTree {

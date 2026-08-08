@@ -37,6 +37,17 @@ struct AutomationDraftAgentTests {
     }
 
     @Test
+    func parserSeparatesMixedVerbScheduleActions() throws {
+        let output = try #require(
+            AutomationPatternParser().parse("Turn on the AC and open the blinds at 7 AM")
+        )
+
+        #expect(output.actionDescriptions == ["Turn on the AC", "Open the blinds"])
+        let draft = try output.makeRuleDraft()
+        #expect(draft.actionDescriptions.count == 2)
+    }
+
+    @Test
     func parserRearrangesScheduleTargetSyntaxIntoCommandText() throws {
         let output = try #require(
             AutomationPatternParser().parse("Schedule bedroom AC to turn on daily at 7 AM")
@@ -72,6 +83,55 @@ struct AutomationDraftAgentTests {
         #expect(comparison.operatorName == .equals)
         #expect(comparison.right == .literalString("on"))
         #expect(comparison.triggerPolicy == .always)
+    }
+
+    @Test
+    func parserExtractsInlineDeviceTrigger() throws {
+        let output = try #require(
+            AutomationPatternParser().parse("Turn on the lights when motion is detected")
+        )
+
+        #expect(output.actionDescriptions == ["Turn on the lights"])
+        #expect(output.condition == nil)
+
+        let draft = try output.makeRuleDraft()
+        guard case .device(let trigger) = draft.trigger else {
+            Issue.record("Expected device trigger")
+            return
+        }
+        guard case .comparison(let comparison) = trigger.condition else {
+            Issue.record("Expected comparison trigger condition")
+            return
+        }
+        #expect(comparison.left == .deviceAttribute(
+            description: "motion is detected",
+            deviceID: nil,
+            capability: nil,
+            attribute: nil
+        ))
+        #expect(comparison.operatorName == .equals)
+        #expect(comparison.right == .literalString("active"))
+        #expect(comparison.triggerPolicy == .always)
+    }
+
+    @Test
+    func parserKeepsUnsupportedInlineDevicePreconditionBlocking() throws {
+        let output = try #require(
+            AutomationPatternParser().parse("Turn on the lights when motion is detected but only if it is after 10 PM")
+        )
+
+        #expect(output.actionDescriptions == ["Turn on the lights"])
+        let draft = try output.makeRuleDraft()
+        guard case .device = draft.trigger else {
+            Issue.record("Expected device trigger")
+            return
+        }
+        guard case .comparison(let comparison) = draft.condition else {
+            Issue.record("Expected unsupported precondition")
+            return
+        }
+        #expect(comparison.left == .unsupported(rawValue: "it is after 10 PM"))
+        #expect(comparison.triggerPolicy == .never)
     }
 
     @Test

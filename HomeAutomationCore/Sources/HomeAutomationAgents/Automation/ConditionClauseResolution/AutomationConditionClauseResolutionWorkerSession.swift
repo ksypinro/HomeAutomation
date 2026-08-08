@@ -59,7 +59,7 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
             return AutomationConditionClauseResolutionResult(
                 id: input.component.id,
                 rawText: input.component.rawText,
-                condition: assessment.condition,
+                condition: fallbackCondition(from: assessment),
                 records: assessment.records,
                 confidence: assessment.confidence
             )
@@ -106,11 +106,24 @@ public struct AutomationConditionClauseResolutionWorkerSession: Sendable {
             return AutomationConditionClauseResolutionResult(
                 id: input.component.id,
                 rawText: input.component.rawText,
-                condition: assessment.condition,
+                condition: fallbackCondition(from: assessment),
                 records: assessment.records,
                 confidence: assessment.confidence
             )
         }
+    }
+
+    private func fallbackCondition(
+        from assessment: AutomationConditionDeterministicAssessment
+    ) -> HomeAutomationCondition? {
+        if assessment.isSafeToAccept(for: roundTripTarget),
+           assessment.confidence >= deterministicAcceptThreshold {
+            return assessment.condition
+        }
+        if assessment.isClarificationSafeFallback {
+            return assessment.condition
+        }
+        return nil
     }
 
     private func result(

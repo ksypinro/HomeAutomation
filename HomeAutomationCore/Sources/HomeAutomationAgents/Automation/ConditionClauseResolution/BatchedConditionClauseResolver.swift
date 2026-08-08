@@ -90,7 +90,11 @@ public struct BatchedConditionClauseResolver: Sendable {
             logger.debug("[BatchedCondition] FM unavailable; returning deterministic fallbacks for \(inputs.count) residuals.")
             return inputs.map { input in
                 let assessment = deterministicResolver.assess(input: input)
-                return makeResult(condition: assessment.condition, input: input, confidence: assessment.confidence)
+                return makeResult(
+                    condition: fallbackCondition(from: assessment),
+                    input: input,
+                    confidence: assessment.confidence
+                )
             }
         }
 
@@ -146,15 +150,36 @@ public struct BatchedConditionClauseResolver: Sendable {
                         fallback: assessment.condition
                     )
                 }
-                return makeResult(condition: assessment.condition, input: input, confidence: assessment.confidence)
+                return makeResult(
+                    condition: fallbackCondition(from: assessment),
+                    input: input,
+                    confidence: assessment.confidence
+                )
             }
         } catch {
             logger.error("[BatchedConditionError] \(error.localizedDescription, privacy: .public); returning deterministic fallbacks.")
             return inputs.map { input in
                 let assessment = deterministicResolver.assess(input: input)
-                return makeResult(condition: assessment.condition, input: input, confidence: assessment.confidence)
+                return makeResult(
+                    condition: fallbackCondition(from: assessment),
+                    input: input,
+                    confidence: assessment.confidence
+                )
             }
         }
+    }
+
+    private func fallbackCondition(
+        from assessment: AutomationConditionDeterministicAssessment
+    ) -> HomeAutomationCondition? {
+        if assessment.isSafeToAccept(for: roundTripTarget),
+           assessment.confidence >= deterministicAcceptThreshold {
+            return assessment.condition
+        }
+        if assessment.isClarificationSafeFallback {
+            return assessment.condition
+        }
+        return nil
     }
 
 

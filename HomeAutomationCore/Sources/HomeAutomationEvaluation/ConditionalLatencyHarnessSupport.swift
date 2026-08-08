@@ -24,6 +24,8 @@ public struct ConditionalLatencyHarnessSupport: Sendable {
                 return .adaptiveStatic
             case .shadowStatic:
                 return .adaptiveShadow
+            case .disabled:
+                return .graph
             case nil:
                 // Fallback if rollout mode not specified
                 return .adaptiveStatic

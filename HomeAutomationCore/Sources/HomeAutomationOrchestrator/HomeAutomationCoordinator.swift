@@ -534,6 +534,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
     public let foundationModelArm: FoundationModelCallArm
     public let portfolioRolloutMode: PortfolioRolloutMode
     public let portfolioRolloutConfiguration: PortfolioRolloutConfiguration
+    public let portfolioEligibilityPolicy: PortfolioEligibilityPolicy
     public let portfolioModelArtifact: PortfolioModelArtifact?
     public let graphCompilationMode: GraphCompilationMode
 
@@ -553,6 +554,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         foundationModelArm: FoundationModelCallArm = .graph,
         portfolioRolloutMode: PortfolioRolloutMode = .disabled,
         portfolioRolloutConfiguration: PortfolioRolloutConfiguration = PortfolioRolloutConfiguration(),
+        portfolioEligibilityPolicy: PortfolioEligibilityPolicy = PortfolioEligibilityPolicy(),
         portfolioModelArtifact: PortfolioModelArtifact? = nil,
         graphCompilationMode: GraphCompilationMode = .disabled
     ) {
@@ -571,6 +573,7 @@ public struct HomeAutomationRuntimeDependencies: Sendable {
         self.foundationModelArm = foundationModelArm
         self.portfolioRolloutMode = portfolioRolloutMode
         self.portfolioRolloutConfiguration = portfolioRolloutConfiguration
+        self.portfolioEligibilityPolicy = portfolioEligibilityPolicy
         self.portfolioModelArtifact = portfolioModelArtifact
         self.graphCompilationMode = graphCompilationMode
     }
@@ -696,6 +699,7 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
         useMiniPipeline: Bool = false,
         portfolioRolloutMode: PortfolioRolloutMode = .disabled,
         portfolioRolloutConfiguration: PortfolioRolloutConfiguration = PortfolioRolloutConfiguration(),
+        portfolioEligibilityPolicy: PortfolioEligibilityPolicy = PortfolioEligibilityPolicy(),
         portfolioModelArtifact: PortfolioModelArtifact? = nil,
         graphCompilationMode: GraphCompilationMode = .disabled
     ) -> HomeAutomationRuntimeDependencies {
@@ -728,6 +732,7 @@ public final class HomeAutomationCoordinator: HomeAutomationCoordinating, Sendab
             foundationModelArm: useMiniPipeline ? .graphWithTier1 : orchestrationMode.foundationModelArm,
             portfolioRolloutMode: portfolioRolloutMode,
             portfolioRolloutConfiguration: portfolioRolloutConfiguration,
+            portfolioEligibilityPolicy: portfolioEligibilityPolicy,
             portfolioModelArtifact: portfolioModelArtifact,
             graphCompilationMode: graphCompilationMode
         )

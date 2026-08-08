@@ -145,6 +145,7 @@ public struct ExpectedResolvedOutput: Sendable, Codable, Hashable {
     public let conditionCount: Int?
     public let conditionTreeKind: String?
     public let smartThingsJSONContains: [String]
+    public let expectedSmartThingsRuleJSON: String?
 
     public init(
         operation: HomeAutomationOperationKind? = nil,
@@ -159,7 +160,8 @@ public struct ExpectedResolvedOutput: Sendable, Codable, Hashable {
         actionCount: Int? = nil,
         conditionCount: Int? = nil,
         conditionTreeKind: String? = nil,
-        smartThingsJSONContains: [String] = []
+        smartThingsJSONContains: [String] = [],
+        expectedSmartThingsRuleJSON: String? = nil
     ) {
         self.operation = operation
         self.domain = domain
@@ -174,6 +176,7 @@ public struct ExpectedResolvedOutput: Sendable, Codable, Hashable {
         self.conditionCount = conditionCount
         self.conditionTreeKind = conditionTreeKind
         self.smartThingsJSONContains = smartThingsJSONContains
+        self.expectedSmartThingsRuleJSON = expectedSmartThingsRuleJSON
     }
 }
 

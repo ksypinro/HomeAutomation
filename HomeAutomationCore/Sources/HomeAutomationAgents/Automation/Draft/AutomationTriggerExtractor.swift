@@ -85,6 +85,56 @@ extension AutomationPatternParser {
         )
     }
 
+    internal func parseInlineDeviceTrigger(_ text: String, normalized: String) -> AutomationDraftOutput? {
+        guard normalized.range(of: #"\s+when(?:ever)?\s+"#, options: .regularExpression) != nil else {
+            return nil
+        }
+
+        let split = Self.splitCondition(from: text)
+        guard let match = split.actionText.firstAutomationMatch(of: #"^(.+?)\s+when(?:ever)?\s+(.+)$"#) else {
+            return nil
+        }
+
+        let actionText = match[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        let triggerText = match[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !actionText.isEmpty, !triggerText.isEmpty else { return nil }
+
+        let actions = Self.actionDescriptions(from: Self.cleanedActionText(actionText))
+        guard !actions.isEmpty else { return nil }
+
+        let triggerCondition = Self.condition(from: triggerText, triggerPolicy: .always) ??
+            AutomationConditionOutput(
+                type: .comparison,
+                left: AutomationConditionOperandOutput(
+                    type: .unsupported,
+                    description: triggerText
+                ),
+                operatorName: .changes,
+                right: AutomationConditionOperandOutput(
+                    type: .literalString,
+                    stringValue: "changed"
+                ),
+                triggerPolicy: .always
+            )
+        let precondition = split.conditionText.flatMap {
+            Self.condition(from: $0, triggerPolicy: .never) ?? Self.unsupportedCondition(from: $0, triggerPolicy: .never)
+        }
+        let trigger = AutomationTriggerOutput(
+            type: .device,
+            description: triggerText,
+            condition: triggerCondition
+        )
+
+        return AutomationDraftOutput(
+            name: Self.name(for: actions, trigger: trigger),
+            trigger: trigger,
+            condition: precondition,
+            actionDescriptions: actions,
+            unsupportedFragments: [],
+            confidence: 0.88
+        )
+    }
+
     internal func parseConditionOnlyAction(
         actionText: String,
         conditionText: String?
@@ -113,7 +163,10 @@ extension AutomationPatternParser {
     }
 
     internal static func splitCondition(from text: String) -> (actionText: String, conditionText: String?) {
-        guard let range = text.range(of: #"(?i)\s+if\s+"#, options: .regularExpression) else {
+        guard let range = text.range(
+            of: #"(?i)\s+(?:but\s+only\s+if|only\s+if|provided\s+that|if)\s+"#,
+            options: .regularExpression
+        ) else {
             return (text, nil)
         }
         return (
@@ -150,6 +203,27 @@ extension AutomationPatternParser {
         ]
         return routineSignals.contains { normalized.contains($0) } &&
             actionSignals.contains { normalized.contains($0) }
+    }
+
+    internal static func unsupportedCondition(
+        from text: String,
+        triggerPolicy: AutomationConditionTriggerPolicyOutput
+    ) -> AutomationConditionOutput? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return AutomationConditionOutput(
+            type: .comparison,
+            left: AutomationConditionOperandOutput(
+                type: .unsupported,
+                description: trimmed
+            ),
+            operatorName: .equals,
+            right: AutomationConditionOperandOutput(
+                type: .literalString,
+                stringValue: "true"
+            ),
+            triggerPolicy: triggerPolicy
+        )
     }
 
     internal static func triggerDescription(for condition: AutomationConditionOutput) -> String {

@@ -18,6 +18,10 @@ public struct AutomationPatternParser: Sendable {
             return parseDeviceTrigger(commandText, normalized: normalized)
         }
 
+        if let inlineDeviceTrigger = parseInlineDeviceTrigger(commandText, normalized: normalized) {
+            return inlineDeviceTrigger
+        }
+
         let split = Self.splitCondition(from: commandText)
         guard let time = Self.extractTime(from: normalized) else {
             return parseConditionOnlyAction(actionText: split.actionText, conditionText: split.conditionText)

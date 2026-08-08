@@ -113,13 +113,19 @@ public actor CircuitBreakerRegistry {
     private let threshold: Int
     private let recoveryInterval: Double
 
-    private let persistenceKey = "com.homeautomation.circuitBreakers"
+    private let persistenceKey: String?
 
-    public init(threshold: Int = 3, recoveryInterval: Double = 30) {
+    public init(
+        threshold: Int = 3,
+        recoveryInterval: Double = 30,
+        persistenceKey: String? = "com.homeautomation.circuitBreakers"
+    ) {
         self.threshold = max(1, threshold)
         self.recoveryInterval = max(0, recoveryInterval)
+        self.persistenceKey = persistenceKey
         
-        if let data = UserDefaults.standard.data(forKey: "com.homeautomation.circuitBreakers"),
+        if let persistenceKey,
+           let data = UserDefaults.standard.data(forKey: persistenceKey),
            let snapshots = try? JSONDecoder().decode([CircuitBreakerSnapshot].self, from: data) {
             for snapshot in snapshots {
                 let id = AgentID(snapshot.agentID)
@@ -135,6 +141,7 @@ public actor CircuitBreakerRegistry {
     }
     
     public func persist() async {
+        guard let persistenceKey else { return }
         var snapshots: [CircuitBreakerSnapshot] = []
         for (_, breaker) in breakers {
             snapshots.append(await breaker.snapshot())

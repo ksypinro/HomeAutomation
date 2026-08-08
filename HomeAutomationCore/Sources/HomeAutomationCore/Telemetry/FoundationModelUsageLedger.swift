@@ -70,6 +70,7 @@ public enum FoundationModelEscalationStep: String, Sendable, Codable, Hashable {
 public enum FoundationModelCallCancellationReason: String, Sendable, Codable, Hashable {
     case taskCancelledBeforeAdmission
     case taskCancelledAfterAdmission
+    case admissionDeadlineExceeded
     case parentRunCancelled
     case unknown
 }

@@ -33,6 +33,11 @@ struct HomeAutomationEvalCLI {
             return
         }
 
+        if options.generateSwitchAutomationDataset {
+            try runGenerateSwitchAutomationDataset(options: options)
+            return
+        }
+
         if options.generateDataset {
             let fixtureLimit = options.fixtureLimit ?? 10
             let commandsPerFixture = options.caseLimit.map { max(1, $0 / max(fixtureLimit, 1)) } ?? 100
@@ -174,7 +179,9 @@ struct HomeAutomationEvalCLI {
             prewarmMode: options.prewarmMode
         )
         let cases: [EvaluationCase]
-        if let dataset = try options.loadDatasetIfRequested() {
+        if options.dataset == "conditional-latency-v1", options.datasetPath == nil {
+            cases = ConditionalLatencyV1Corpus.evaluationCases()
+        } else if let dataset = try options.loadDatasetIfRequested() {
             cases = Self.comparisonCases(from: dataset)
         } else {
             cases = EvaluationCorpus.defaultCases
@@ -197,6 +204,40 @@ struct HomeAutomationEvalCLI {
         print("False-accept rate: \(String(format: "%.1f%%", report.falseAcceptRate * 100))")
         print("False-reject rate: \(String(format: "%.1f%%", report.falseRejectRate * 100))")
         print("Report: \(options.outputURL.appendingPathComponent("verifier-shadow-report.json").path)")
+    }
+
+    private static func runGenerateSwitchAutomationDataset(options: EvaluationCLIOptions) throws {
+        let generator = SwitchAutomationDatasetGenerator()
+        let templates = options.switchTemplate.map { [$0] } ?? SwitchAutomationTemplate.allCases
+        let range = options.switchRangeCount.map {
+            SwitchAutomationDatasetRange(start: options.switchRangeStart ?? 0, count: $0)
+        }
+        let indexOnly = options.switchTemplate == nil && range == nil
+
+        for template in templates {
+            let dataset: GeneratedEvaluationDataset
+            if indexOnly || (template == .twoActionsTwoConditions && range == nil) {
+                dataset = generator.makeIndexDataset(for: template)
+            } else {
+                dataset = try generator.generateDataset(template: template, range: range)
+            }
+
+            let directory = options.outputURL.appendingPathComponent(dataset.manifest.name, isDirectory: true)
+            try EvaluationDatasetWriter().write(dataset, to: directory)
+            try writeSwitchAutomationIndex(generator.index(for: template), to: directory)
+            print("Generated \(dataset.manifest.name): \(dataset.cases.count) case(s), total available \(generator.totalCaseCount(for: template))")
+            print("Dataset: \(directory.path)")
+        }
+    }
+
+    private static func writeSwitchAutomationIndex(
+        _ index: SwitchAutomationDatasetIndex,
+        to directory: URL
+    ) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(index)
+        try data.write(to: directory.appendingPathComponent("switch-automation-index.json"))
     }
 
     private static func comparisonCases(from dataset: GeneratedEvaluationDataset) -> [EvaluationCase] {
@@ -251,6 +292,10 @@ private struct EvaluationCLIOptions {
     let caseLimit: Int?
     let fixtureLimit: Int?
     let generateDataset: Bool
+    let generateSwitchAutomationDataset: Bool
+    let switchTemplate: SwitchAutomationTemplate?
+    let switchRangeStart: Int?
+    let switchRangeCount: Int?
     let generationMode: EvaluationCommandGenerationMode
     let shadowVerify: Bool
     let compareOrchestration: Bool
@@ -282,6 +327,10 @@ private struct EvaluationCLIOptions {
         var caseLimit: Int?
         var fixtureLimit: Int?
         var generateDataset = false
+        var generateSwitchAutomationDataset = false
+        var switchTemplate: SwitchAutomationTemplate?
+        var switchRangeStart: Int?
+        var switchRangeCount: Int?
         var generationMode: EvaluationCommandGenerationMode = .codex
         var shadowVerify = false
         var compareOrchestration = false
@@ -359,6 +408,28 @@ private struct EvaluationCLIOptions {
                     throw EvaluationCLIError.invalidArgument("--generate-dataset")
                 }
                 generateDataset = parseBool(value)
+            case "--generate-switch-automation-dataset":
+                guard let value = iterator.next() else {
+                    throw EvaluationCLIError.invalidArgument("--generate-switch-automation-dataset")
+                }
+                generateSwitchAutomationDataset = parseBool(value)
+            case "--switch-template":
+                guard let value = iterator.next(),
+                      let rawValue = Int(value),
+                      let parsed = SwitchAutomationTemplate(rawValue: rawValue) else {
+                    throw EvaluationCLIError.invalidArgument("--switch-template")
+                }
+                switchTemplate = parsed
+            case "--switch-range-start":
+                guard let value = iterator.next(), let parsed = Int(value), parsed >= 0 else {
+                    throw EvaluationCLIError.invalidArgument("--switch-range-start")
+                }
+                switchRangeStart = parsed
+            case "--switch-range-count":
+                guard let value = iterator.next(), let parsed = Int(value), parsed >= 0 else {
+                    throw EvaluationCLIError.invalidArgument("--switch-range-count")
+                }
+                switchRangeCount = parsed
             case "--generation-mode":
                 guard let value = iterator.next(), let parsed = parseGenerationMode(value) else {
                     throw EvaluationCLIError.invalidArgument("--generation-mode")
@@ -454,6 +525,10 @@ private struct EvaluationCLIOptions {
             caseLimit: caseLimit,
             fixtureLimit: fixtureLimit,
             generateDataset: generateDataset,
+            generateSwitchAutomationDataset: generateSwitchAutomationDataset,
+            switchTemplate: switchTemplate,
+            switchRangeStart: switchRangeStart,
+            switchRangeCount: switchRangeCount,
             generationMode: generationMode,
             shadowVerify: shadowVerify,
             compareOrchestration: compareOrchestration,
@@ -519,6 +594,8 @@ private struct EvaluationCLIOptions {
       swift run home-automation-eval --generate-dataset true --generation-mode codex --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1
       swift run home-automation-eval --generate-dataset true --generation-mode template --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-template
       swift run home-automation-eval --generate-dataset true --generation-mode foundation-model --fixture-limit 10 --case-limit 1000 --output .build/generated-evals/seed-v1-live
+      swift run home-automation-eval --generate-switch-automation-dataset true --switch-template 1 --output .build/generated-evals/switch-automation
+      swift run home-automation-eval --generate-switch-automation-dataset true --switch-template 5 --switch-range-start 0 --switch-range-count 10000 --output .build/generated-evals/switch-automation
       swift run home-automation-eval --shadow-verify --output .build/evaluation-shadow --case-limit 50
       swift run home-automation-eval --compare-orchestration --dataset seed-v1 --seed 20260713 --warmups 1 --repetitions 3 --output .build/evaluation-comparison --case-limit 50
       HOME_AUTOMATION_EVAL_LIVE=1 swift run home-automation-eval --compare-orchestration --require-live-model true --output .build/evaluation-comparison-live

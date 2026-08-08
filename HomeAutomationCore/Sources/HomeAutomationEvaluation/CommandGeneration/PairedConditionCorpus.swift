@@ -1,4 +1,5 @@
 import Foundation
+import HomeAutomationCore
 
 /// Phase 0 paired-condition corpus: each conditioned automation paired with an identical no-condition twin.
 /// Used by OrchestrationComparisonRunner to measure condition-specific overhead.
@@ -116,7 +117,7 @@ public struct ConditionalLatencyV1Corpus {
             conditionTree: "leaf",
             actionCount: 1,
             triggerType: "schedule",
-            riskLevel: "low",
+            riskLevel: "high",
             registrySize: "medium",
             expectedCompleteness: "complete",
             expectedDeterministicAcceptance: true
@@ -179,22 +180,22 @@ public struct ConditionalLatencyV1Corpus {
             baseCommand: "turn on the lights when motion is detected",
             conditionedCommand: "turn on the lights when motion is detected but only if it is after 10 PM",
             conditionLeafCount: 1,
-            conditionForm: "state",
-            conditionResolution: "unique",
+            conditionForm: "unsupported-time",
+            conditionResolution: "unsupported",
             conditionTree: "leaf",
             actionCount: 1,
             triggerType: "device",
             riskLevel: "low",
             registrySize: "medium",
-            expectedCompleteness: "complete",
-            expectedDeterministicAcceptance: true
+            expectedCompleteness: "unsupported",
+            expectedDeterministicAcceptance: false
         ),
 
         // Multi-action with condition
         PairedConditionCase(
             id: "cond-008-multi-action",
-            baseCommand: "turn on the AC and open the blinds at 7 AM",
-            conditionedCommand: "turn on the AC and open the blinds at 7 AM but only if temperature is above 26",
+            baseCommand: "turn on the Bedroom AC and turn on the Living Room Lights at 7 AM",
+            conditionedCommand: "turn on the Bedroom AC and turn on the Living Room Lights at 7 AM but only if temperature is above 26",
             conditionLeafCount: 1,
             conditionForm: "comparison",
             conditionResolution: "unique",
@@ -210,8 +211,8 @@ public struct ConditionalLatencyV1Corpus {
         // High-risk condition
         PairedConditionCase(
             id: "cond-009-high-risk",
-            baseCommand: "unlock the front door at 7 AM",
-            conditionedCommand: "unlock the front door at 7 AM but only if someone is home",
+            baseCommand: "unlock the Front Door Lock at 7 AM",
+            conditionedCommand: "unlock the Front Door Lock at 7 AM but only if someone is home",
             conditionLeafCount: 1,
             conditionForm: "state",
             conditionResolution: "unique",
@@ -224,4 +225,188 @@ public struct ConditionalLatencyV1Corpus {
             expectedDeterministicAcceptance: true
         ),
     ]
+
+    public static func evaluationCases() -> [EvaluationCase] {
+        cases.flatMap { paired in
+            [
+                evaluationCase(for: paired, variant: .base),
+                evaluationCase(for: paired, variant: .conditioned)
+            ]
+        }
+    }
+
+    private enum Variant {
+        case base
+        case conditioned
+    }
+
+    private static func evaluationCase(
+        for paired: PairedConditionCase,
+        variant: Variant
+    ) -> EvaluationCase {
+        let isConditioned = variant == .conditioned
+        let suffix = isConditioned ? "conditioned" : "base"
+        return EvaluationCase(
+            id: "\(paired.id).\(suffix)",
+            suite: "conditional-latency",
+            tags: [
+                "automation",
+                "conditional-latency",
+                "pair:\(paired.id)",
+                suffix,
+                "conditionForm:\(paired.conditionForm)",
+                "conditionResolution:\(paired.conditionResolution)",
+                "conditionTree:\(paired.conditionTree)",
+                "conditionLeaves:\(paired.conditionLeafCount)",
+                "trigger:\(paired.triggerType)",
+                "risk:\(paired.riskLevel)",
+                "registry:\(paired.registrySize)"
+            ],
+            input: isConditioned ? paired.conditionedCommand : paired.baseCommand,
+            fixture: EvaluationFixture(devices: fixtureDevices(for: paired)),
+            expected: EvaluationExpectedOutput(
+                actionCount: paired.actionCount,
+                conditionCount: isConditioned ? paired.conditionLeafCount : 0,
+                allowedOutcome: allowedOutcome(for: paired, isConditioned: isConditioned)
+            )
+        )
+    }
+
+    private static func allowedOutcome(
+        for paired: PairedConditionCase,
+        isConditioned: Bool
+    ) -> EvaluationAllowedOutcome {
+        if isConditioned, paired.conditionResolution == "unsupported" {
+            return .unsupported
+        }
+        if isConditioned, paired.conditionResolution == "ambiguous" {
+            return .clarification
+        }
+        if paired.riskLevel == "high" {
+            return .confirmation
+        }
+        return .drafted
+    }
+
+    private static func fixtureDevices(for paired: PairedConditionCase) -> [HomeCandidateRecord] {
+        var devices = commonFixtureDevices()
+        if paired.conditionResolution == "ambiguous" || paired.registrySize == "large" {
+            devices.append(contentsOf: [
+                temperatureSensor(id: "latency_office_temperature_sensor", name: "Office Temperature Sensor", room: "office", temperature: "24"),
+                temperatureSensor(id: "latency_guest_temperature_sensor", name: "Guest Temperature Sensor", room: "guest room", temperature: "23")
+            ])
+        }
+        return devices
+    }
+
+    private static func commonFixtureDevices() -> [HomeCandidateRecord] {
+        [
+            HomeCandidateRecord(
+                id: "latency_bedroom_ac",
+                displayName: "Bedroom AC",
+                deviceType: "airConditioner",
+                room: "bedroom",
+                capabilities: [
+                    "switch",
+                    "temperatureMeasurement",
+                    "relativeHumidityMeasurement",
+                    "thermostatCoolingSetpoint",
+                    "airConditionerMode",
+                    "airConditionerFanMode"
+                ],
+                supportedCommands: [
+                    "switch": ["on", "off"],
+                    "thermostatCoolingSetpoint": ["setCoolingSetpoint"],
+                    "airConditionerMode": ["setAirConditionerMode"],
+                    "airConditionerFanMode": ["setFanMode"]
+                ],
+                currentState: [
+                    "switch": "off",
+                    "temperature": "25",
+                    "humidity": "55",
+                    "coolingSetpoint": "24"
+                ],
+                riskLevel: .medium
+            ),
+            HomeCandidateRecord(
+                id: "latency_living_room_lights",
+                displayName: "Living Room Lights",
+                deviceType: "light",
+                room: "living room",
+                capabilities: ["switch", "switchLevel"],
+                supportedCommands: ["switch": ["on", "off"]],
+                currentState: ["switch": "off", "level": "60"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_living_room_blinds",
+                displayName: "Living Room Blinds",
+                deviceType: "blind",
+                room: "living room",
+                capabilities: ["windowShade", "windowShadeLevel"],
+                supportedCommands: ["windowShade": ["open", "close"]],
+                currentState: ["windowShade": "closed", "shadeLevel": "0"],
+                riskLevel: .medium
+            ),
+            HomeCandidateRecord(
+                id: "latency_front_door_lock",
+                displayName: "Front Door Lock",
+                deviceType: "lock",
+                room: "entry",
+                capabilities: ["lock", "contactSensor", "battery"],
+                supportedCommands: ["lock": ["lock", "unlock"]],
+                currentState: ["lock": "locked", "contact": "closed", "battery": "85"],
+                riskLevel: .high
+            ),
+            HomeCandidateRecord(
+                id: "latency_entry_contact_sensor",
+                displayName: "Entry Contact Sensor",
+                deviceType: "contactSensor",
+                room: "entry",
+                capabilities: ["contactSensor", "battery"],
+                supportedCommands: [:],
+                currentState: ["contact": "closed", "battery": "90"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_hallway_motion_sensor",
+                displayName: "Hallway Motion Sensor",
+                deviceType: "motionSensor",
+                room: "hallway",
+                capabilities: ["motionSensor", "battery"],
+                supportedCommands: [:],
+                currentState: ["motion": "inactive", "battery": "86"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_home_presence_sensor",
+                displayName: "Home Presence Sensor",
+                deviceType: "presenceSensor",
+                room: "home",
+                capabilities: ["presenceSensor"],
+                supportedCommands: [:],
+                currentState: ["presence": "present"]
+            ),
+            temperatureSensor(
+                id: "latency_living_room_temperature_sensor",
+                name: "Living Room Temperature Sensor",
+                room: "living room",
+                temperature: "25"
+            )
+        ]
+    }
+
+    private static func temperatureSensor(
+        id: String,
+        name: String,
+        room: String,
+        temperature: String
+    ) -> HomeCandidateRecord {
+        HomeCandidateRecord(
+            id: id,
+            displayName: name,
+            deviceType: "temperatureSensor",
+            room: room,
+            capabilities: ["temperatureMeasurement", "battery"],
+            supportedCommands: [:],
+            currentState: ["temperature": temperature, "battery": "92"]
+        )
+    }
 }

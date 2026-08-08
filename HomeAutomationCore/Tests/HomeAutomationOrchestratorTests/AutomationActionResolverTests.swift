@@ -51,16 +51,17 @@ struct AutomationActionResolverTests {
     }
 
     @Test
-    func directGraphActionResolutionSeedsRoutingState() async throws {
+    func actionResolutionSeedsRoutingStateWhenModelsUnavailable() async throws {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { false })
         let scheduler = GraphScheduler()
         let resolver = AutomationActionResolver(
             registry: registry,
-            graphPlanner: GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { true })),
-            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            graphPlanner: GraphPlanner(policy: policy),
+            policy: policy,
             scheduler: scheduler,
             subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
-            circuitBreakers: CircuitBreakerRegistry()
+            circuitBreakers: CircuitBreakerRegistry(persistenceKey: nil)
         )
 
         let result = await resolver.resolve(
@@ -78,14 +79,15 @@ struct AutomationActionResolverTests {
     @Test
     func parallelDirectGraphActionResolutionScopesRepeatedSubAgentPipelineEvents() async throws {
         let registry = DefaultAgentRegistryFactory.make(foundationModelAvailability: { false })
+        let policy = OrchestratorPolicyEngine(isModelAvailable: { true })
         let scheduler = GraphScheduler()
         let resolver = AutomationActionResolver(
             registry: registry,
-            graphPlanner: GraphPlanner(policy: OrchestratorPolicyEngine(isModelAvailable: { true })),
-            policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
+            graphPlanner: GraphPlanner(policy: policy),
+            policy: policy,
             scheduler: scheduler,
             subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
-            circuitBreakers: CircuitBreakerRegistry()
+            circuitBreakers: CircuitBreakerRegistry(persistenceKey: nil)
         )
         let eventBus = AgentEventBus()
         let runID = UUID()
@@ -177,7 +179,7 @@ struct AutomationActionResolverTests {
             policy: OrchestratorPolicyEngine(isModelAvailable: { true }),
             scheduler: scheduler,
             subgraphRunner: GraphSubgraphRunner(scheduler: scheduler),
-            circuitBreakers: CircuitBreakerRegistry()
+            circuitBreakers: CircuitBreakerRegistry(persistenceKey: nil)
         )
         let eventBus = AgentEventBus()
         let runID = UUID()

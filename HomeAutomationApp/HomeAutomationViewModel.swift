@@ -228,6 +228,15 @@ enum OrchestratorChoice: String, CaseIterable, Identifiable {
     var usesMiniPipeline: Bool {
         self == .graphTier1
     }
+
+    var portfolioEligibilityPolicy: PortfolioEligibilityPolicy {
+        switch self {
+        case .adaptiveStatic, .adaptiveShadow:
+            return PortfolioEligibilityPolicy(conditionalTier1Enabled: true)
+        case .graph, .graphTier1, .verifierLoop:
+            return PortfolioEligibilityPolicy()
+        }
+    }
 }
 
 enum GraphCompilerChoice: String, CaseIterable, Identifiable {
@@ -343,6 +352,7 @@ final class HomeAutomationViewModel {
             orchestrationMode: orchestratorChoice.orchestrationMode,
             useMiniPipeline: orchestratorChoice.usesMiniPipeline,
             portfolioRolloutMode: orchestratorChoice.rolloutMode,
+            portfolioEligibilityPolicy: orchestratorChoice.portfolioEligibilityPolicy,
             graphCompilationMode: graphCompilerChoice.mode
         )
         orchestrator = HomeCommandOrchestrator(dependencies: dependencies)
