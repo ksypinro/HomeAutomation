@@ -175,7 +175,7 @@ public struct DeterministicDraftPipeline: Sendable {
         let conditionLeaves = conditionLeafDrafts(
             from: effectiveConditionComponents,
             devices: devices,
-            normalized: trimmed.agentNormalizedHomeTokenString
+            fullUserText: trimmed
         )
 
         let conditionTree = effectiveConditionTree.map { ConditionTreeDraft(from: $0) }
@@ -214,11 +214,19 @@ public struct DeterministicDraftPipeline: Sendable {
         }
 
         for (i, leaf) in conditionLeaves.enumerated() {
-            fieldConfidence[.conditionLeaf(i, .target)] = leaf.target != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .capability)] = leaf.capability != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .attribute)] = leaf.attribute != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .operatorName)] = leaf.operatorName != nil ? leaf.confidence : 0.0
-            fieldConfidence[.conditionLeaf(i, .value)] = leaf.value != nil ? leaf.confidence : 0.0
+            if leaf.structuredCondition != nil {
+                fieldConfidence[.conditionLeaf(i, .target)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .capability)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .attribute)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .operatorName)] = leaf.confidence
+                fieldConfidence[.conditionLeaf(i, .value)] = leaf.confidence
+            } else {
+                fieldConfidence[.conditionLeaf(i, .target)] = leaf.target != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .capability)] = leaf.capability != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .attribute)] = leaf.attribute != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .operatorName)] = leaf.operatorName != nil ? leaf.confidence : 0.0
+                fieldConfidence[.conditionLeaf(i, .value)] = leaf.value != nil ? leaf.confidence : 0.0
+            }
         }
 
         if let conditionTree {
@@ -423,11 +431,13 @@ public struct DeterministicDraftPipeline: Sendable {
     private func conditionLeafDrafts(
         from components: [AutomationConditionComponent],
         devices: [HomeCandidateRecord],
-        normalized: String
+        fullUserText: String
     ) -> [ConditionLeafDraft] {
-        components.map { component in
+        let resolver = AutomationConditionDeterministicResolver()
+        let verifierTarget = AutomationConditionVerifierTarget()
+
+        return components.map { component in
             let leafNormalized = component.rawText.agentNormalizedHomeTokenString
-            let stateValue = parseConditionStateValue(leafNormalized)
             let ruleIntent = AgentRuleIntent(normalized: leafNormalized)
 
             var candidateTable: [CompactCandidate] = []
@@ -447,6 +457,38 @@ public struct DeterministicDraftPipeline: Sendable {
                 }
             }
 
+            // Phase 4A/4B: reuse the shared deterministic assessor instead of the loop's narrow
+            // state parser. A *complete* clause is carried losslessly in `structuredCondition`
+            // (Phase 4B), so numeric ranges, `.changes`, units, and cross-device operands survive
+            // compilation. The flat fields are additionally populated only for the round-trip-safe
+            // subset the verifier target recognizes, so the prompt stays human-readable.
+            let assessment = resolver.assess(input: AutomationConditionClauseResolutionInput(
+                component: component,
+                fullUserText: fullUserText,
+                availableDevices: devices,
+                triggerPolicy: .never
+            ))
+            if assessment.completeness == .complete, let condition = assessment.condition {
+                let flat = assessment.isSafeToAccept(for: verifierTarget)
+                    ? Self.representableLeafFields(condition)
+                    : nil
+                return ConditionLeafDraft(
+                    id: component.id,
+                    rawText: component.rawText,
+                    target: flat?.target ?? target,
+                    candidateTable: candidateTable,
+                    capability: flat?.capability,
+                    attribute: flat?.attribute,
+                    operatorName: flat?.op,
+                    value: flat?.value,
+                    structuredCondition: condition,
+                    confidence: max(confidence, assessment.confidence)
+                )
+            }
+
+            // Residual: retain the deterministic target ranking and the narrow state hint (if any)
+            // so the verifier/repair path can still make progress. No structured condition yet.
+            let stateValue = parseConditionStateValue(leafNormalized)
             return ConditionLeafDraft(
                 id: component.id,
                 rawText: component.rawText,
@@ -459,6 +501,30 @@ public struct DeterministicDraftPipeline: Sendable {
                 confidence: confidence
             )
         }
+    }
+
+    /// Extracts `ConditionLeafDraft` fields from a single round-trip-safe comparison. Returns nil
+    /// for any form the leaf cannot represent (tree, changes, range, cross-device, unresolved).
+    private static func representableLeafFields(
+        _ condition: HomeAutomationCondition
+    ) -> (target: String, capability: String, attribute: String, op: HomeAutomationComparisonOperator, value: String)? {
+        guard case .comparison(let comparison) = condition,
+              case .deviceAttribute(_, let deviceID, let capability, let attribute) = comparison.left,
+              let deviceID, !deviceID.isEmpty,
+              let capability, !capability.isEmpty,
+              let attribute, !attribute.isEmpty else {
+            return nil
+        }
+        let value: String
+        switch comparison.right {
+        case .literalString(let string):
+            value = string
+        case .literalNumber(let number, _):
+            value = number == number.rounded() ? String(Int(number)) : String(number)
+        default:
+            return nil
+        }
+        return (deviceID, capability, attribute, comparison.operatorName, value)
     }
 
     private struct ConditionStateValue {

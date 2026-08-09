@@ -102,6 +102,37 @@ struct AutomationCardItem: Identifiable, Hashable {
     let systemImage: String
 }
 
+struct DeviceCommandResultDisplay: Hashable {
+    enum Status: Hashable {
+        case executed
+        case ready
+        case confirmationRequired
+    }
+
+    let status: Status
+    let title: String
+    let summary: String
+    let statusLabel: String
+    let statusSystemImage: String
+    let steps: [DeviceCommandStepDisplay]
+    let stateItems: [DeviceCommandStateItem]
+}
+
+struct DeviceCommandStepDisplay: Identifiable, Hashable {
+    let id: String
+    let deviceName: String
+    let room: String
+    let action: String
+    let capability: String
+    let systemImage: String
+}
+
+struct DeviceCommandStateItem: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let value: String
+}
+
 struct ArchitectureCardItem: Identifiable, Hashable {
     let id: String
     let title: String
@@ -197,6 +228,15 @@ enum OrchestratorChoice: String, CaseIterable, Identifiable {
     var usesMiniPipeline: Bool {
         self == .graphTier1
     }
+
+    var portfolioEligibilityPolicy: PortfolioEligibilityPolicy {
+        switch self {
+        case .adaptiveStatic, .adaptiveShadow:
+            return PortfolioEligibilityPolicy(conditionalTier1Enabled: true)
+        case .graph, .graphTier1, .verifierLoop:
+            return PortfolioEligibilityPolicy()
+        }
+    }
 }
 
 enum GraphCompilerChoice: String, CaseIterable, Identifiable {
@@ -258,6 +298,7 @@ final class HomeAutomationViewModel {
     var resultCore: ResultCoreDisplay?
     var resultDetailSections: [ResultDetailSection] = []
     var automationResult: AutomationResultDisplay?
+    var deviceCommandResult: DeviceCommandResultDisplay?
     var deviceItems: [HomeDeviceDashboardItem] = []
     var agentDashboard: [AgentDashboardItem] = []
     var commandHistory: [HomeCommandHistoryItem] = []
@@ -311,6 +352,7 @@ final class HomeAutomationViewModel {
             orchestrationMode: orchestratorChoice.orchestrationMode,
             useMiniPipeline: orchestratorChoice.usesMiniPipeline,
             portfolioRolloutMode: orchestratorChoice.rolloutMode,
+            portfolioEligibilityPolicy: orchestratorChoice.portfolioEligibilityPolicy,
             graphCompilationMode: graphCompilerChoice.mode
         )
         orchestrator = HomeCommandOrchestrator(dependencies: dependencies)
@@ -328,6 +370,7 @@ final class HomeAutomationViewModel {
         resultCore = nil
         resultDetailSections = []
         automationResult = nil
+        deviceCommandResult = nil
         pipelineEvents = []
         agentDashboard = []
         portfolioEvidence = []
@@ -359,6 +402,8 @@ final class HomeAutomationViewModel {
                 resultCore = Self.makeResultCore(output, engineName: engineName)
                 resultDetailSections = Self.makeResultDetailSections(from: resultText)
                 automationResult = Self.makeAutomationResult(output)
+                deviceCommandResult = Self.makeDeviceCommandResult(output)
+                await loadDeviceDashboard()
                 metricsText = await orchestrator.lastMetricsJSON() ?? ""
                 await refreshAgentDashboardFromMetrics()
                 await refreshPortfolioEvidenceFromMetrics()
@@ -393,6 +438,7 @@ final class HomeAutomationViewModel {
                     ResultDetailSection(id: "error", title: "Error", content: error.localizedDescription)
                 ]
                 automationResult = nil
+                deviceCommandResult = nil
                 currentPipelineStage = nil
                 commandHistory.insert(
                     HomeCommandHistoryItem(
@@ -699,8 +745,11 @@ final class HomeAutomationViewModel {
         let title: String
         let icon: String
         switch result.resolution {
-        case .readyToExecute, .executed:
+        case .readyToExecute:
             title = "Command ready"
+            icon = "checkmark.circle.fill"
+        case .executed:
+            title = "Command executed"
             icon = "checkmark.circle.fill"
         case .requiresConfirmation, .automationRequiresConfirmation:
             title = "Confirmation needed"
@@ -782,6 +831,125 @@ final class HomeAutomationViewModel {
             smartThingsStatus: smartThingsStatus(plan),
             json: plan.smartThingsRuleJSON
         )
+    }
+
+    private static func makeDeviceCommandResult(_ result: HomeAutomationResolverResult) -> DeviceCommandResultDisplay? {
+        let candidates = Dictionary(
+            (result.hydratedCandidates + result.retrievedCandidates)
+                .map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        switch result.resolution {
+        case .executed(let plan, let updatedDevice):
+            return DeviceCommandResultDisplay(
+                status: .executed,
+                title: plan.steps.allSatisfy { $0.type == "query" } ? "Device status retrieved" : "Device command executed",
+                summary: result.resolution.displaySummary,
+                statusLabel: plan.steps.allSatisfy { $0.type == "query" } ? "Status retrieved" : "Executed on mock devices",
+                statusSystemImage: "checkmark.circle.fill",
+                steps: commandStepDisplays(plan.steps, candidates: candidates),
+                stateItems: stateDisplays(updatedDevice.currentState)
+            )
+
+        case .readyToExecute(let plan):
+            return DeviceCommandResultDisplay(
+                status: .ready,
+                title: plan.steps.allSatisfy { $0.type == "query" } ? "Status query ready" : "Device command ready",
+                summary: result.resolution.displaySummary,
+                statusLabel: plan.steps.allSatisfy { $0.type == "query" } ? "Ready to query" : "Execution is turned off",
+                statusSystemImage: "pause.circle.fill",
+                steps: commandStepDisplays(plan.steps, candidates: candidates),
+                stateItems: []
+            )
+
+        case .requiresConfirmation(let draft):
+            let target = draft.targetDeviceID.flatMap { candidates[$0] }
+            let parameter = parameterDisplay(draft.parameters)
+            let action = [draft.command.map(humanize), parameter]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+                .ifEmpty(humanize(String(describing: draft.intent)))
+            let step = DeviceCommandStepDisplay(
+                id: "confirmation-\(draft.targetDeviceID ?? "unresolved")",
+                deviceName: target?.displayName ?? draft.targetDeviceID ?? "Unresolved device",
+                room: target?.room ?? "No room",
+                action: action,
+                capability: draft.capability.map(humanize) ?? "Capability unresolved",
+                systemImage: iconName(forDeviceType: target?.deviceType)
+            )
+            return DeviceCommandResultDisplay(
+                status: .confirmationRequired,
+                title: "Confirm device command",
+                summary: result.resolution.displaySummary,
+                statusLabel: "Not executed",
+                statusSystemImage: "exclamationmark.shield.fill",
+                steps: [step],
+                stateItems: []
+            )
+
+        case .automationDrafted, .automationRequiresConfirmation, .needsClarification, .unsupported:
+            return nil
+        }
+    }
+
+    private static func commandStepDisplays(
+        _ steps: [HomeAutomationExecutionStep],
+        candidates: [String: HomeCandidateRecord]
+    ) -> [DeviceCommandStepDisplay] {
+        steps.enumerated().map { index, step in
+            let candidate = candidates[step.deviceID]
+            return DeviceCommandStepDisplay(
+                id: "step-\(index)-\(step.id.uuidString)",
+                deviceName: candidate?.displayName ?? step.deviceName,
+                room: candidate?.room ?? "No room",
+                action: executionActionDisplay(step),
+                capability: humanize(step.capability),
+                systemImage: iconName(forDeviceType: candidate?.deviceType)
+            )
+        }
+    }
+
+    private static func executionActionDisplay(_ step: HomeAutomationExecutionStep) -> String {
+        let command = humanize(step.command)
+        let value = step.valueFormula ?? step.value
+        guard let value, !value.isEmpty else { return command }
+        return "\(command) · \(value)"
+    }
+
+    private static func parameterDisplay(_ parameters: [HomeResolvedParameter]) -> String? {
+        let values = parameters.compactMap { parameter -> String? in
+            let rawValue: String?
+            if let value = parameter.value, !value.isEmpty {
+                rawValue = value
+            } else if let number = parameter.numericValue {
+                rawValue = number.rounded() == number ? String(Int(number)) : String(number)
+            } else {
+                rawValue = nil
+            }
+            guard let rawValue else { return nil }
+            return [rawValue, parameter.unit].compactMap { $0 }.joined(separator: " ")
+        }
+        return values.isEmpty ? nil : values.joined(separator: ", ")
+    }
+
+    private static func stateDisplays(_ state: [String: String]) -> [DeviceCommandStateItem] {
+        state.sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+            .map { key, value in
+                DeviceCommandStateItem(id: key, name: humanize(key), value: value)
+            }
+    }
+
+    private static func humanize(_ value: String) -> String {
+        let spaced = value
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+        return spaced
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { $0.lowercased() }
+            .joined(separator: " ")
+            .capitalized
     }
 
     private static func automationTriggerDisplay(_ trigger: HomeAutomationTrigger?) -> (title: String, subtitle: String) {

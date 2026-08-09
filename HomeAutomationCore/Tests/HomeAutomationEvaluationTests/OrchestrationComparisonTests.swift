@@ -245,7 +245,7 @@ struct OrchestrationComparisonTests {
 
         #expect(report.caseCount == 4)
         #expect(report.telemetryComplete)
-        #expect(report.armSummaries.count == 3)
+        #expect(report.armSummaries.count == OrchestrationArm.allCases.count)
         #expect(report.armCategorySummaries[OrchestrationSuiteCategory.directCommand.rawValue] != nil)
         #expect(report.armCategorySummaries[OrchestrationSuiteCategory.automation.rawValue] != nil)
         #expect(!report.exitCriteriaResults.isEmpty)
@@ -262,10 +262,10 @@ struct OrchestrationComparisonTests {
 
     @Test
     func seededArmOrderIsReproducibleAndCounterbalanced() {
-        let first = (0..<3).map {
+        let first = (0..<OrchestrationArm.allCases.count).map {
             OrchestrationComparisonRunner.armOrder(caseIndex: $0, repetitionIndex: 0, seed: 20260713).first
         }
-        let second = (0..<3).map {
+        let second = (0..<OrchestrationArm.allCases.count).map {
             OrchestrationComparisonRunner.armOrder(caseIndex: $0, repetitionIndex: 0, seed: 20260713).first
         }
 
@@ -331,7 +331,7 @@ struct OrchestrationComparisonTests {
             exitCriteriaResults: OrchestrationExitCriteria.evaluate(summaries: summaries)
         )
 
-        #expect(report.armSummaries.count == 3)
+        #expect(report.armSummaries.count == OrchestrationArm.allCases.count)
         #expect(report.exitCriteriaResults.count >= 5)
     }
 
@@ -357,7 +357,7 @@ struct OrchestrationComparisonTests {
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(OrchestrationComparisonReport.self, from: data)
         #expect(decoded.caseCount == 1)
-        #expect(decoded.armSummaries.count == 3)
+        #expect(decoded.armSummaries.count == OrchestrationArm.allCases.count)
     }
 
     // MARK: - Helpers

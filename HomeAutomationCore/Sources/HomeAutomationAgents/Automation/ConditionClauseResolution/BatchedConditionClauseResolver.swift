@@ -8,6 +8,9 @@ public struct BatchedConditionClauseResolver: Sendable {
     private let foundationModelAvailability: @Sendable () -> Bool
     private let resolveBatchOutput: (@Sendable ([AutomationConditionClauseResolutionInput]) async throws -> BatchedConditionClauseFMOutput)?
     private let deterministicAcceptThreshold: Double
+    private let timeoutConfiguration: FoundationModelTimeoutConfiguration
+    private let deterministicResolver = AutomationConditionDeterministicResolver()
+    private let roundTripTarget: AutomationConditionGraphTarget
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.BatchedConditionClause")
 
     public init(
@@ -16,12 +19,19 @@ public struct BatchedConditionClauseResolver: Sendable {
             SystemLanguageModel.default.isAvailable
         },
         resolveBatchOutput: (@Sendable ([AutomationConditionClauseResolutionInput]) async throws -> BatchedConditionClauseFMOutput)? = nil,
-        deterministicAcceptThreshold: Double = 0.8
+        deterministicAcceptThreshold: Double = 0.8,
+        timeoutConfiguration: FoundationModelTimeoutConfiguration = .default
     ) {
         self.singleResolver = singleResolver
         self.foundationModelAvailability = foundationModelAvailability
         self.resolveBatchOutput = resolveBatchOutput
         self.deterministicAcceptThreshold = deterministicAcceptThreshold
+        self.timeoutConfiguration = timeoutConfiguration
+        self.roundTripTarget = AutomationConditionGraphTarget()
+    }
+
+    private var serviceTimeoutNanoseconds: UInt64 {
+        UInt64(max(0, timeoutConfiguration.serviceTimeoutMs) * 1_000_000)
     }
 
     public func resolveAll(
@@ -36,18 +46,17 @@ public struct BatchedConditionClauseResolver: Sendable {
         var residuals = [(index: Int, input: AutomationConditionClauseResolutionInput)]()
 
         for (index, input) in inputs.enumerated() {
-            let deterministic = deterministicCondition(for: input)
-            if let deterministic {
-                let confidence = deterministicConfidence(deterministic, input: input)
-                if confidence >= deterministicAcceptThreshold {
-                    logger.debug("[τ-gate] Batched condition \(input.component.id) accepted deterministically (\(confidence)).")
-                    results[input.component.id] = makeResult(
-                        condition: deterministic,
-                        input: input,
-                        confidence: confidence
-                    )
-                    continue
-                }
+            let assessment = deterministicResolver.assess(input: input)
+            if assessment.isSafeToAccept(for: roundTripTarget), assessment.confidence >= deterministicAcceptThreshold {
+                logger.debug("[τ-gate] Batched condition \(input.component.id) accepted deterministically (\(assessment.confidence)).")
+                results[input.component.id] = AutomationConditionClauseResolutionResult(
+                    id: input.component.id,
+                    rawText: input.component.rawText,
+                    condition: assessment.condition,
+                    records: assessment.records,
+                    confidence: assessment.confidence
+                )
+                continue
             }
             residuals.append((index, input))
         }
@@ -80,8 +89,12 @@ public struct BatchedConditionClauseResolver: Sendable {
         guard foundationModelAvailability() else {
             logger.debug("[BatchedCondition] FM unavailable; returning deterministic fallbacks for \(inputs.count) residuals.")
             return inputs.map { input in
-                let fallback = deterministicCondition(for: input)
-                return makeResult(condition: fallback, input: input, confidence: 0.72)
+                let assessment = deterministicResolver.assess(input: input)
+                return makeResult(
+                    condition: fallbackCondition(from: assessment),
+                    input: input,
+                    confidence: assessment.confidence
+                )
             }
         }
 
@@ -115,7 +128,8 @@ public struct BatchedConditionClauseResolver: Sendable {
                     policyMode: "batched-model-first-with-fallback",
                     modelAvailability: "available",
                     promptCharacterCount: batchedInstructions.count + prompt.count,
-                    selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"]
+                    selectedToolNames: ["availableConditionDevices", "capabilityAttributeCatalog"],
+                    serviceTimeoutNanoseconds: serviceTimeoutNanoseconds
                 ) {
                     try await session.respond(
                         to: Prompt(prompt),
@@ -128,47 +142,46 @@ public struct BatchedConditionClauseResolver: Sendable {
             let outputsByID = validOutputsByItemID(fmOutput.items, expectedIDs: Set(inputs.map(\.component.id)))
             return inputs.map { input in
                 let itemOutput = outputsByID[input.component.id]
-                let fallback = deterministicCondition(for: input)
+                let assessment = deterministicResolver.assess(input: input)
                 if let itemOutput, itemOutput.confidence >= 0.5 {
                     return makeResult(
                         from: itemOutput,
                         input: input,
-                        fallback: fallback
+                        fallback: assessment.condition
                     )
                 }
-                return makeResult(condition: fallback, input: input, confidence: 0.72)
+                return makeResult(
+                    condition: fallbackCondition(from: assessment),
+                    input: input,
+                    confidence: assessment.confidence
+                )
             }
         } catch {
             logger.error("[BatchedConditionError] \(error.localizedDescription, privacy: .public); returning deterministic fallbacks.")
             return inputs.map { input in
-                let fallback = deterministicCondition(for: input)
-                return makeResult(condition: fallback, input: input, confidence: 0.72)
+                let assessment = deterministicResolver.assess(input: input)
+                return makeResult(
+                    condition: fallbackCondition(from: assessment),
+                    input: input,
+                    confidence: assessment.confidence
+                )
             }
         }
     }
 
-    // MARK: - Deterministic
-
-    private func deterministicCondition(
-        for input: AutomationConditionClauseResolutionInput
+    private func fallbackCondition(
+        from assessment: AutomationConditionDeterministicAssessment
     ) -> HomeAutomationCondition? {
-        guard let output = AutomationPatternParser.condition(
-            from: input.component.rawText,
-            triggerPolicy: triggerPolicyOutput(input.triggerPolicy)
-        ),
-        let condition = try? output.makeHomeCondition(defaultTriggerPolicy: input.triggerPolicy) else {
-            return nil
+        if assessment.isSafeToAccept(for: roundTripTarget),
+           assessment.confidence >= deterministicAcceptThreshold {
+            return assessment.condition
         }
-        return resolveDeterministically(condition, devices: input.availableDevices)
+        if assessment.isClarificationSafeFallback {
+            return assessment.condition
+        }
+        return nil
     }
 
-    private func deterministicConfidence(
-        _ condition: HomeAutomationCondition,
-        input: AutomationConditionClauseResolutionInput
-    ) -> Double {
-        let hasDevice = hasResolvedDevice(condition)
-        return hasDevice ? 0.84 : 0.72
-    }
 
     // MARK: - Result Construction
 
@@ -286,19 +299,22 @@ public struct BatchedConditionClauseResolver: Sendable {
     }
 
     private func batchedPrompt(for inputs: [AutomationConditionClauseResolutionInput]) -> String {
-        let allDevices = stableUniqueDevices(inputs.flatMap(\.availableDevices))
+        let uniqueDevices = stableUniqueDevices(inputs.flatMap(\.availableDevices))
+        // Hard prompt budget: a large registry must not inflate the batch prompt. Keep only
+        // clause-relevant devices, then stable-fill up to the cap.
+        let allDevices = budgetedDevices(uniqueDevices, for: inputs)
         let allCapabilities = Array(Set(allDevices.flatMap(\.capabilities))).sorted()
 
         var clauses = ""
         for (index, input) in inputs.enumerated() {
-            let fallback = deterministicCondition(for: input)
+            let assessment = deterministicResolver.assess(input: input)
             clauses += """
 
             --- Clause \(index + 1) ---
             itemID: \(input.component.id)
             rawText: \(input.component.rawText)
             triggerPolicy: \(input.triggerPolicy.rawValue)
-            deterministicHint: \(String(describing: fallback))
+            deterministicHint: \(String(describing: assessment.condition))
 
             """
         }
@@ -335,6 +351,48 @@ public struct BatchedConditionClauseResolver: Sendable {
         return valid
     }
 
+    // MARK: - Prompt budgeting
+
+    /// Hard cap on devices listed in a batch condition prompt. Sized so the device
+    /// section stays well within the ~8k-character condition prompt budget.
+    public static let maxBatchPromptDevices = 48
+
+    /// Selects a bounded device subset for the batch prompt: clause-relevant devices
+    /// first (token overlap with any clause text), then stable-fill up to the cap.
+    func budgetedDevices(
+        _ devices: [HomeCandidateRecord],
+        for inputs: [AutomationConditionClauseResolutionInput]
+    ) -> [HomeCandidateRecord] {
+        guard devices.count > Self.maxBatchPromptDevices else { return devices }
+
+        let clauseTokenSets = inputs.map { promptTokens($0.component.rawText) }
+        func isRelevant(_ device: HomeCandidateRecord) -> Bool {
+            let deviceTokens = promptTokens(device.displayName).union(promptTokens(device.deviceType))
+            guard !deviceTokens.isEmpty else { return false }
+            return clauseTokenSets.contains { !$0.isDisjoint(with: deviceTokens) }
+        }
+
+        var selected: [HomeCandidateRecord] = []
+        var seen = Set<String>()
+        for device in devices where isRelevant(device) {
+            if seen.insert(device.id).inserted { selected.append(device) }
+            if selected.count >= Self.maxBatchPromptDevices { return selected }
+        }
+        for device in devices {
+            if selected.count >= Self.maxBatchPromptDevices { break }
+            if seen.insert(device.id).inserted { selected.append(device) }
+        }
+        return selected
+    }
+
+    private func promptTokens(_ value: String) -> Set<String> {
+        let normalized = value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9\s]+"#, with: " ", options: .regularExpression)
+        return Set(normalized.split(separator: " ").map(String.init).filter { $0.count >= 3 })
+    }
+
     // MARK: - Helpers
 
     private func stableUniqueDevices(_ devices: [HomeCandidateRecord]) -> [HomeCandidateRecord] {
@@ -344,24 +402,6 @@ public struct BatchedConditionClauseResolver: Sendable {
             seen.insert(device.id)
             return true
         }
-    }
-
-    private func hasResolvedDevice(_ condition: HomeAutomationCondition) -> Bool {
-        switch condition {
-        case .comparison(let comparison):
-            return operandHasDevice(comparison.left) || operandHasDevice(comparison.right)
-        case .and(let children), .or(let children):
-            return children.contains { hasResolvedDevice($0) }
-        case .not(let child), .changes(let child):
-            return hasResolvedDevice(child)
-        }
-    }
-
-    private func operandHasDevice(_ operand: HomeAutomationConditionOperand) -> Bool {
-        if case .deviceAttribute(_, let deviceID, _, _) = operand {
-            return deviceID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        }
-        return false
     }
 
     private func replaceFirstUnresolvedDeviceOperand(
@@ -409,158 +449,11 @@ public struct BatchedConditionClauseResolver: Sendable {
         )
     }
 
-    private func resolveDeterministically(
-        _ condition: HomeAutomationCondition,
-        devices: [HomeCandidateRecord]
-    ) -> HomeAutomationCondition {
-        switch condition {
-        case .comparison(let comparison):
-            return .comparison(
-                HomeAutomationComparisonCondition(
-                    left: resolveDeterministicOperand(comparison.left, comparison: comparison, devices: devices),
-                    operatorName: comparison.operatorName,
-                    right: resolveDeterministicOperand(comparison.right, comparison: comparison, devices: devices),
-                    triggerPolicy: comparison.triggerPolicy
-                )
-            )
-        case .and(let children):
-            return .and(children.map { resolveDeterministically($0, devices: devices) })
-        case .or(let children):
-            return .or(children.map { resolveDeterministically($0, devices: devices) })
-        case .not(let child):
-            return .not(resolveDeterministically(child, devices: devices))
-        case .changes(let child):
-            return .changes(resolveDeterministically(child, devices: devices))
-        }
-    }
-
-    private func resolveDeterministicOperand(
-        _ operand: HomeAutomationConditionOperand,
-        comparison: HomeAutomationComparisonCondition,
-        devices: [HomeCandidateRecord]
-    ) -> HomeAutomationConditionOperand {
-        guard case .deviceAttribute(let description, let deviceID, let capability, let attribute) = operand,
-              isEmpty(deviceID) || isEmpty(capability) || isEmpty(attribute),
-              let device = bestDevice(for: description, devices: devices),
-              let resolvedCapability = bestCapability(for: description, device: device, comparison: comparison) else {
-            return operand
-        }
-        let resolvedAttribute = validAttribute(nil, capability: resolvedCapability)
-        return .deviceAttribute(
-            description: description,
-            deviceID: device.id,
-            capability: resolvedCapability,
-            attribute: resolvedAttribute
-        )
-    }
-
-    private func bestDevice(for description: String, devices: [HomeCandidateRecord]) -> HomeCandidateRecord? {
-        let query = normalize(description)
-        let scored: [(device: HomeCandidateRecord, score: Int)] = devices.map { device in
-            (device: device, score: score(device, query: query))
-        }
-        let sorted = scored
-            .filter { $0.score > 0 }
-            .sorted {
-                $0.score == $1.score
-                    ? $0.device.displayName < $1.device.displayName
-                    : $0.score > $1.score
-            }
-        guard let best = sorted.first else { return nil }
-        if sorted.dropFirst().contains(where: { $0.score == best.score }) {
-            return nil
-        }
-        return best.device
-    }
-
-    private func score(_ device: HomeCandidateRecord, query: String) -> Int {
-        var total = 0
-        let name = normalize(device.displayName)
-        let type = normalize(device.deviceType)
-        let room = device.room.map(normalize)
-        if query.contains(name) { total += 12 }
-        if name.contains(query) { total += 10 }
-        if query.contains(type) { total += 8 }
-        if let room, query.contains(room) { total += 5 }
-        total += Set(query.split(separator: " ").map(String.init))
-            .intersection(Set(name.split(separator: " ").map(String.init)))
-            .count * 2
-        if (query.contains("locked") || query.contains("unlocked") || query.contains("lock")),
-           device.capabilities.contains("lock") {
-            total += 8
-        }
-        if query.contains("motion"), device.capabilities.contains("motionSensor") { total += 6 }
-        if query.contains("temperature"), device.capabilities.contains("temperatureMeasurement") { total += 6 }
-        if query.contains("contact"), device.capabilities.contains("contactSensor") { total += 6 }
-        return total
-    }
-
-    private func bestCapability(
-        for description: String,
-        device: HomeCandidateRecord,
-        comparison: HomeAutomationComparisonCondition
-    ) -> String? {
-        let query = normalize(description)
-        if query.contains("brightness") || query.contains("level") || query.contains("dim") {
-            if device.capabilities.contains("switchLevel") { return "switchLevel" }
-        }
-        if query.contains("color temperature") || query.contains("colour temperature") {
-            if device.capabilities.contains("colorTemperature") { return "colorTemperature" }
-        }
-        if query.contains("motion"), device.capabilities.contains("motionSensor") { return "motionSensor" }
-        if query.contains("temperature"), device.capabilities.contains("temperatureMeasurement") { return "temperatureMeasurement" }
-        if query.contains("contact"), device.capabilities.contains("contactSensor") { return "contactSensor" }
-        if case .literalString(let value) = comparison.right {
-            switch value {
-            case "locked", "unlocked":
-                if device.capabilities.contains("lock") { return "lock" }
-            case "open", "closed":
-                if device.capabilities.contains("contactSensor") { return "contactSensor" }
-                if device.capabilities.contains("garageDoorControl") { return "garageDoorControl" }
-                if device.capabilities.contains("doorControl") { return "doorControl" }
-                if device.capabilities.contains("windowShade") { return "windowShade" }
-            case "on", "off":
-                if device.capabilities.contains("switch") { return "switch" }
-            case "active", "inactive":
-                if device.capabilities.contains("motionSensor") { return "motionSensor" }
-            default:
-                break
-            }
-        }
-        return device.capabilities.first { capability in
-            HomeCapabilityRegistry.definitions[capability]?.attributeNames.isEmpty == false
-        }
-    }
-
     private func validAttribute(_ attribute: String?, capability: String) -> String {
-        guard let definition = HomeCapabilityRegistry.definitions[capability] else {
-            return attribute ?? capability
-        }
-        if let attribute, definition.attributeNames.contains(attribute) {
-            return attribute
-        }
-        return definition.attributeNames.first ?? attribute ?? capability
-    }
-
-    private func normalize(_ value: String) -> String {
-        value
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-            .replacingOccurrences(of: #"[^a-z0-9\s]+"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        AutomationConditionDeterministicResolver.validAttribute(attribute, capability: capability)
     }
 
     private func isEmpty(_ value: String?) -> Bool {
         value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-    }
-
-    private func triggerPolicyOutput(
-        _ policy: HomeAutomationConditionTriggerPolicy
-    ) -> AutomationConditionTriggerPolicyOutput {
-        switch policy {
-        case .always: return .always
-        case .never: return .never
-        }
     }
 }

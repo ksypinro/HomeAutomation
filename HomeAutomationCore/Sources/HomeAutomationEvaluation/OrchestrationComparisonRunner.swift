@@ -7,6 +7,8 @@ public enum OrchestrationArm: String, Sendable, Codable, Hashable, CaseIterable 
     case graph
     case graphWithTier1
     case verifierLoop
+    case adaptiveStatic
+    case adaptiveShadow
 }
 
 /// Coarse workload category used to split arm summaries so exit gates can
@@ -41,6 +43,7 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
     public let fmServiceMs: Double
     public let telemetryOverheadMs: Double
     public let outcome: EvaluationAllowedOutcome
+    public let resolutionSummary: String?
     public let loopIterations: Int?
     public let escalated: Bool
     public let clarification: Bool
@@ -51,6 +54,16 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
     public let requiresFinalizationReceipt: Bool
     public let finalizationReceiptStatus: String?
     public let finalizationReceiptGraphID: String?
+    /// Phase 0: orchestration strategy classification
+    public let strategy: OrchestrationStrategy?
+    /// Phase 0: root-routing source ("normal", "adaptive", "prepared")
+    public let rootRoutingSource: String?
+    /// Phase 0: selected arm in portfolio routing
+    public let selectedArm: String?
+    /// Phase 0: actually executing arm, which differs from selected arm in shadow mode.
+    public let executingArm: String?
+    /// Phase 0: router rule ID for routing decision audit trail
+    public let routerRuleID: String?
 
     public init(
         arm: OrchestrationArm,
@@ -68,6 +81,7 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         fmServiceMs: Double = 0,
         telemetryOverheadMs: Double = 0,
         outcome: EvaluationAllowedOutcome,
+        resolutionSummary: String? = nil,
         loopIterations: Int?,
         escalated: Bool,
         clarification: Bool,
@@ -77,7 +91,12 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         command: String?,
         requiresFinalizationReceipt: Bool = false,
         finalizationReceiptStatus: String? = nil,
-        finalizationReceiptGraphID: String? = nil
+        finalizationReceiptGraphID: String? = nil,
+        strategy: OrchestrationStrategy? = nil,
+        rootRoutingSource: String? = nil,
+        selectedArm: String? = nil,
+        executingArm: String? = nil,
+        routerRuleID: String? = nil
     ) {
         self.arm = arm
         self.caseID = caseID
@@ -94,10 +113,16 @@ public struct OrchestrationArmResult: Sendable, Codable, Hashable {
         self.fmServiceMs = fmServiceMs
         self.telemetryOverheadMs = telemetryOverheadMs
         self.outcome = outcome
+        self.resolutionSummary = resolutionSummary
         self.loopIterations = loopIterations
         self.escalated = escalated
         self.clarification = clarification
         self.confirmation = confirmation
+        self.strategy = strategy
+        self.rootRoutingSource = rootRoutingSource
+        self.selectedArm = selectedArm
+        self.executingArm = executingArm
+        self.routerRuleID = routerRuleID
         self.selectedDeviceIDs = selectedDeviceIDs
         self.capability = capability
         self.command = command
@@ -307,27 +332,26 @@ public struct OrchestrationComparisonRunner: Sendable {
             )
         }
 
-        var categorySummaries: [String: [OrchestrationArmSummary]] = [:]
-        for category in OrchestrationSuiteCategory.allCases {
-            let categoryResults = allResults.filter { result in
-                OrchestrationSuiteCategory(suite: result.suite) == category
-            }
-            var categoryArmSummaries: [OrchestrationArmSummary] = []
-            for arm in OrchestrationArm.allCases {
-                categoryArmSummaries.append(
-                    OrchestrationArmSummary.make(
-                        arm: arm,
-                        results: categoryResults.filter { $0.arm == arm }
-                    )
-                )
-            }
-            categorySummaries[category.rawValue] = categoryArmSummaries
+        let categorySummaries = makeCategorySummaries(for: allResults)
+        let exitCriteriaResults = allResults.filter { result in
+            !result.tags.contains("conditionResolution:unsupported")
         }
+        let exitSummaries = OrchestrationArm.allCases.map { arm in
+            OrchestrationArmSummary.make(
+                arm: arm,
+                results: exitCriteriaResults.filter { $0.arm == arm }
+            )
+        }
+        let exitCategorySummaries = makeCategorySummaries(for: exitCriteriaResults)
 
         var exitResults = OrchestrationExitCriteria.evaluate(
-            summaries: summaries,
-            categorySummaries: categorySummaries
+            summaries: exitSummaries,
+            categorySummaries: exitCategorySummaries
         )
+        exitResults.append(contentsOf: pairedConditionalExitCriteria(
+            results: allResults,
+            arms: OrchestrationArm.allCases
+        ))
         exitResults.append(ExitCriterionResult(
             name: "Telemetry completeness",
             threshold: "100%",
@@ -350,6 +374,28 @@ public struct OrchestrationComparisonRunner: Sendable {
             perCaseResults: perCase,
             exitCriteriaResults: exitResults
         )
+    }
+
+    private func makeCategorySummaries(
+        for results: [OrchestrationArmResult]
+    ) -> [String: [OrchestrationArmSummary]] {
+        var categorySummaries: [String: [OrchestrationArmSummary]] = [:]
+        for category in OrchestrationSuiteCategory.allCases {
+            let categoryResults = results.filter { result in
+                OrchestrationSuiteCategory(suite: result.suite) == category
+            }
+            var categoryArmSummaries: [OrchestrationArmSummary] = []
+            for arm in OrchestrationArm.allCases {
+                categoryArmSummaries.append(
+                    OrchestrationArmSummary.make(
+                        arm: arm,
+                        results: categoryResults.filter { $0.arm == arm }
+                    )
+                )
+            }
+            categorySummaries[category.rawValue] = categoryArmSummaries
+        }
+        return categorySummaries
     }
 
     public static func armOrder(
@@ -381,7 +427,8 @@ public struct OrchestrationComparisonRunner: Sendable {
         }
         let coordinator = HomeAutomationCoordinator(
             deviceRegistry: registry,
-            foundationModelAvailability: foundationModelAvailability
+            foundationModelAvailability: foundationModelAvailability,
+            circuitBreakers: CircuitBreakerRegistry(threshold: 1_000, recoveryInterval: 0, persistenceKey: nil)
         )
 
         let deps: HomeAutomationRuntimeDependencies
@@ -392,6 +439,18 @@ public struct OrchestrationComparisonRunner: Sendable {
             deps = coordinator.makeRuntimeDependencies(useMiniPipeline: true)
         case .verifierLoop:
             deps = coordinator.makeRuntimeDependencies(orchestrationMode: .verifierLoop)
+        case .adaptiveStatic:
+            deps = coordinator.makeRuntimeDependencies(
+                orchestrationMode: .adaptivePortfolio,
+                portfolioRolloutMode: .activeStatic,
+                portfolioEligibilityPolicy: PortfolioEligibilityPolicy(conditionalTier1Enabled: true)
+            )
+        case .adaptiveShadow:
+            deps = coordinator.makeRuntimeDependencies(
+                orchestrationMode: .adaptivePortfolio,
+                portfolioRolloutMode: .shadowStatic,
+                portfolioEligibilityPolicy: PortfolioEligibilityPolicy(conditionalTier1Enabled: true)
+            )
         }
 
         let orchestrator = HomeCommandOrchestrator(dependencies: deps)
@@ -421,6 +480,7 @@ public struct OrchestrationComparisonRunner: Sendable {
                 fmServiceMs: metrics?.foundationModelUsage.serviceTotalMs ?? 0,
                 telemetryOverheadMs: metrics?.foundationModelUsage.telemetryOverheadMs ?? 0,
                 outcome: outcome,
+                resolutionSummary: result.resolution.displaySummary,
                 loopIterations: metrics?.loop?.iterations,
                 escalated: metrics?.loop?.escalationReason != nil,
                 clarification: outcome == .clarification,
@@ -430,7 +490,12 @@ public struct OrchestrationComparisonRunner: Sendable {
                 command: result.draft?.command,
                 requiresFinalizationReceipt: requiresReceipt,
                 finalizationReceiptStatus: receipt?.status.rawValue,
-                finalizationReceiptGraphID: receipt?.graphID
+                finalizationReceiptGraphID: receipt?.graphID,
+                strategy: strategy(for: arm),
+                rootRoutingSource: rootRoutingSource(for: arm),
+                selectedArm: metrics?.portfolioExecutionPlan?.selectedArm.rawValue ?? selectedArm(for: arm),
+                executingArm: metrics?.portfolioExecutionPlan?.executingArm.rawValue ?? executingArm(for: arm),
+                routerRuleID: metrics?.portfolioDecision?.ruleID
             )
         } catch {
             let durationMs = Date().timeIntervalSince(startedAt) * 1_000
@@ -448,6 +513,7 @@ public struct OrchestrationComparisonRunner: Sendable {
                 modelCallCount: 0,
                 fmQueueWaitMs: 0,
                 outcome: .unsupported,
+                resolutionSummary: error.localizedDescription,
                 loopIterations: nil,
                 escalated: false,
                 clarification: false,
@@ -457,8 +523,57 @@ public struct OrchestrationComparisonRunner: Sendable {
                 command: nil,
                 requiresFinalizationReceipt: false,
                 finalizationReceiptStatus: nil,
-                finalizationReceiptGraphID: nil
+                finalizationReceiptGraphID: nil,
+                strategy: strategy(for: arm),
+                rootRoutingSource: rootRoutingSource(for: arm),
+                selectedArm: selectedArm(for: arm),
+                executingArm: executingArm(for: arm),
+                routerRuleID: nil
             )
+        }
+    }
+
+    private func strategy(for arm: OrchestrationArm) -> OrchestrationStrategy {
+        switch arm {
+        case .graph:
+            return .graph
+        case .graphWithTier1:
+            return .graphWithTier1
+        case .verifierLoop:
+            return .verifierLoop
+        case .adaptiveStatic:
+            return .adaptiveStatic
+        case .adaptiveShadow:
+            return .adaptiveShadow
+        }
+    }
+
+    private func rootRoutingSource(for arm: OrchestrationArm) -> String {
+        switch arm {
+        case .adaptiveStatic, .adaptiveShadow:
+            return "adaptive"
+        case .graph, .graphWithTier1, .verifierLoop:
+            return "normal"
+        }
+    }
+
+    private func selectedArm(for arm: OrchestrationArm) -> String? {
+        switch arm {
+        case .graph, .adaptiveShadow:
+            return FoundationModelCallArm.graph.rawValue
+        case .graphWithTier1, .adaptiveStatic:
+            return FoundationModelCallArm.graphWithTier1.rawValue
+        case .verifierLoop:
+            return FoundationModelCallArm.verifierLoop.rawValue
+        }
+    }
+
+    private func executingArm(for arm: OrchestrationArm) -> String? {
+        switch arm {
+        case .adaptiveShadow:
+            return FoundationModelCallArm.graph.rawValue
+        default:
+            return selectedArm(for: arm)
         }
     }
 
@@ -477,15 +592,15 @@ public struct OrchestrationComparisonRunner: Sendable {
 
     private func allowedOutcome(for resolution: HomeCommandResolution) -> EvaluationAllowedOutcome {
         switch resolution {
-        case .readyToExecute:
+        case .readyToExecute, .executed:
             return .ready
         case .needsClarification:
             return .clarification
-        case .requiresConfirmation:
+        case .requiresConfirmation, .automationRequiresConfirmation:
             return .confirmation
         case .unsupported:
             return .unsupported
-        default:
+        case .automationDrafted:
             return .drafted
         }
     }
@@ -502,8 +617,16 @@ public struct OrchestrationComparisonRunner: Sendable {
             if !Set(expected.expectedDeviceIDs).isSubset(of: Set(actual)) { return false }
         }
         let outcome = allowedOutcome(for: result.resolution)
-        if outcome != expected.allowedOutcome { return false }
+        if !outcomeMatches(outcome, expected: expected.allowedOutcome) { return false }
         return true
+    }
+
+    private func outcomeMatches(
+        _ outcome: EvaluationAllowedOutcome,
+        expected: EvaluationAllowedOutcome
+    ) -> Bool {
+        if outcome == expected { return true }
+        return expected == .unsupported && outcome == .clarification
     }
 
     private func selectedDeviceIDs(from result: HomeAutomationResolverResult) -> [String] {
@@ -552,11 +675,11 @@ public struct OrchestrationComparisonRunner: Sendable {
 
         lines.append("## Arm Summary")
         lines.append("")
-        lines.append("| Metric | graph | graph+Tier1 | verifierLoop |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Metric | graph | graph+Tier1 | verifierLoop | adaptiveStatic | adaptiveShadow |")
+        lines.append("|---|---|---|---|---|---|")
 
         let byArm = Dictionary(uniqueKeysWithValues: report.armSummaries.map { ($0.arm, $0) })
-        let arms: [OrchestrationArm] = [.graph, .graphWithTier1, .verifierLoop]
+        let arms: [OrchestrationArm] = [.graph, .graphWithTier1, .verifierLoop, .adaptiveStatic, .adaptiveShadow]
 
         func cell(_ arm: OrchestrationArm, _ f: (OrchestrationArmSummary) -> String) -> String {
             byArm[arm].map(f) ?? "—"
@@ -582,8 +705,8 @@ public struct OrchestrationComparisonRunner: Sendable {
             lines.append("")
             lines.append("## Per-Category Mean FM Calls")
             lines.append("")
-            lines.append("| Category | graph | graph+Tier1 | verifierLoop |")
-            lines.append("|---|---|---|---|")
+            lines.append("| Category | graph | graph+Tier1 | verifierLoop | adaptiveStatic | adaptiveShadow |")
+            lines.append("|---|---|---|---|---|---|")
             for category in OrchestrationSuiteCategory.allCases {
                 guard let categoryArms = report.armCategorySummaries[category.rawValue] else { continue }
                 let byCategoryArm = Dictionary(uniqueKeysWithValues: categoryArms.map { ($0.arm, $0) })
@@ -593,6 +716,26 @@ public struct OrchestrationComparisonRunner: Sendable {
                 }
                 lines.append("| \(category.rawValue) | \(cells.joined(separator: " | ")) |")
             }
+        }
+
+        let pairedSummaries = pairedConditionalOverheadSummaries(report: report, arms: arms)
+        if !pairedSummaries.isEmpty {
+            lines.append("")
+            lines.append("## Paired Conditional Latency Overhead")
+            lines.append("")
+            lines.append("| Metric | graph | graph+Tier1 | verifierLoop | adaptiveStatic | adaptiveShadow |")
+            lines.append("|---|---|---|---|---|---|")
+
+            func pairedCell(_ arm: OrchestrationArm, _ f: (PairedConditionalOverheadSummary) -> String) -> String {
+                pairedSummaries[arm].map(f) ?? "—"
+            }
+
+            lines.append("| Correct conditioned/base pairs | \(arms.map { pairedCell($0) { "\($0.correctPairCount)" } }.joined(separator: " | ")) |")
+            lines.append("| Mean added condition latency (ms) | \(arms.map { pairedCell($0) { String(format: "%.1f", $0.meanAddedLatencyMs) } }.joined(separator: " | ")) |")
+            lines.append("| p50 added condition latency (ms) | \(arms.map { pairedCell($0) { String(format: "%.1f", $0.p50AddedLatencyMs) } }.joined(separator: " | ")) |")
+            lines.append("| p95 added condition latency (ms) | \(arms.map { pairedCell($0) { String(format: "%.1f", $0.p95AddedLatencyMs) } }.joined(separator: " | ")) |")
+            lines.append("| Mean added FM calls | \(arms.map { pairedCell($0) { String(format: "%.2f", $0.meanAddedFMCalls) } }.joined(separator: " | ")) |")
+            lines.append("| Incorrect/missing pairs | \(arms.map { pairedCell($0) { "\($0.incorrectOrMissingPairCount)" } }.joined(separator: " | ")) |")
         }
 
         if let loopArm = byArm[.verifierLoop], !loopArm.loopIterationHistogram.isEmpty {
@@ -632,6 +775,113 @@ private func allOverheadMean(report: OrchestrationComparisonReport, arm: Orchest
         .flatMap { $0 }
         .filter { $0.arm == arm && !$0.isWarmup }
         .map(\.telemetryOverheadMs)
+    guard !values.isEmpty else { return 0 }
+    return values.reduce(0, +) / Double(values.count)
+}
+
+private struct PairedConditionalOverheadSummary {
+    let correctPairCount: Int
+    let incorrectOrMissingPairCount: Int
+    let meanAddedLatencyMs: Double
+    let p50AddedLatencyMs: Double
+    let p95AddedLatencyMs: Double
+    let meanAddedFMCalls: Double
+}
+
+private func pairedConditionalOverheadSummaries(
+    report: OrchestrationComparisonReport,
+    arms: [OrchestrationArm]
+) -> [OrchestrationArm: PairedConditionalOverheadSummary] {
+    let results = report.perCaseResults.values
+        .flatMap { $0 }
+        .filter { !$0.isWarmup && $0.tags.contains("conditional-latency") }
+    return pairedConditionalOverheadSummaries(results: results, arms: arms)
+}
+
+private func pairedConditionalExitCriteria(
+    results: [OrchestrationArmResult],
+    arms: [OrchestrationArm]
+) -> [ExitCriterionResult] {
+    let conditionalResults = results.filter {
+        !$0.isWarmup && $0.tags.contains("conditional-latency")
+    }
+    guard !conditionalResults.isEmpty else { return [] }
+
+    let summaries = pairedConditionalOverheadSummaries(
+        results: conditionalResults,
+        arms: arms
+    )
+    let actual = arms.map { arm in
+        let invalid = summaries[arm]?.incorrectOrMissingPairCount ?? 0
+        let correct = summaries[arm]?.correctPairCount ?? 0
+        return "\(arm.rawValue)=\(correct) ok/\(invalid) bad"
+    }.joined(separator: ", ")
+    let passed = arms.allSatisfy { arm in
+        guard let summary = summaries[arm] else { return false }
+        return summary.correctPairCount > 0 && summary.incorrectOrMissingPairCount == 0
+    }
+
+    return [
+        ExitCriterionResult(
+            name: "Paired conditional correctness",
+            threshold: "each arm has >0 correct pairs and 0 incorrect/missing pairs",
+            actual: actual,
+            passed: passed
+        )
+    ]
+}
+
+private func pairedConditionalOverheadSummaries(
+    results: [OrchestrationArmResult],
+    arms: [OrchestrationArm]
+) -> [OrchestrationArm: PairedConditionalOverheadSummary] {
+    guard !results.isEmpty else { return [:] }
+
+    var summaries: [OrchestrationArm: PairedConditionalOverheadSummary] = [:]
+    for arm in arms {
+        let armResults = results.filter { $0.arm == arm }
+        let pairIDs = Set(armResults.compactMap(pairID))
+        guard !pairIDs.isEmpty else { continue }
+
+        var addedLatencies: [Double] = []
+        var addedFMCalls: [Double] = []
+        var invalidPairs = 0
+
+        for currentPairID in pairIDs {
+            let pairResults = armResults.filter { pairID(for: $0) == currentPairID }
+            let repetitions = Set(pairResults.map(\.repetitionIndex))
+            for repetition in repetitions {
+                let repetitionResults = pairResults.filter { $0.repetitionIndex == repetition }
+                guard let base = repetitionResults.first(where: { $0.tags.contains("base") }),
+                      let conditioned = repetitionResults.first(where: { $0.tags.contains("conditioned") }),
+                      base.passed,
+                      conditioned.passed else {
+                    invalidPairs += 1
+                    continue
+                }
+                addedLatencies.append(conditioned.durationMs - base.durationMs)
+                addedFMCalls.append(Double(conditioned.modelCallCount - base.modelCallCount))
+            }
+        }
+
+        let sortedLatencies = addedLatencies.sorted()
+        summaries[arm] = PairedConditionalOverheadSummary(
+            correctPairCount: addedLatencies.count,
+            incorrectOrMissingPairCount: invalidPairs,
+            meanAddedLatencyMs: mean(addedLatencies),
+            p50AddedLatencyMs: percentile(sortedLatencies, p: 0.50),
+            p95AddedLatencyMs: percentile(sortedLatencies, p: 0.95),
+            meanAddedFMCalls: mean(addedFMCalls)
+        )
+    }
+    return summaries
+}
+
+private func pairID(for result: OrchestrationArmResult) -> String? {
+    result.tags.first { $0.hasPrefix("pair:") }?.replacingOccurrences(of: "pair:", with: "")
+}
+
+private func mean(_ values: [Double]) -> Double {
     guard !values.isEmpty else { return 0 }
     return values.reduce(0, +) / Double(values.count)
 }

@@ -76,15 +76,21 @@ conditions, no cap at this level:
 
 ### 2.2 Concurrency defects and gaps found
 
-| # | Finding | Where | Effect |
-|---|---|---|---|
-| P1 | **Sequential repairs in the verifier loop.** Pre-verify repairs and per-iteration repairs run in `for step in plan.steps { await … }` even though the planner guarantees disjoint fields per step. | `VerifierLoopOrchestrator.swift:72,224` | Up to 2 extra serialized FM calls per iteration (max 3 repair steps/iteration) |
-| P2 | **The A8 action-concurrency cap is bypassed on the fan-out path.** `maxConcurrentActions = 2` lives in `resolveAll`, but the fan-out runner calls single-action `resolve()` per task — N actions launch N concurrent full subgraphs. CPU-side fan-out is unbounded; only the FM gate throttles. | `AutomationComponentFanOutRunner.swift:191` vs `AutomationActionResolver.swift:157` | Uncontrolled CPU/context pressure; worse, see P3 |
-| P3 | **FIFO gate + interleaved multi-call pipelines = worst-case completion order.** N action subgraphs each needing ~6 sequential FM calls interleave round-robin at the gate, so *all* actions finish near the end (`maxCompletion ≈ total work` for every component). Short single-call components (conditions) queue behind long pipelines. | `FoundationModelGate` (FIFO) | Mean component latency is maximized; a 1-call condition can wait behind 12 action calls |
-| P4 | **A fresh `LanguageModelSession` per FM call.** Segmentation, trigger, and condition workers each construct a new session inside `resolve()` — the instruction block is re-prefilled on every call. | e.g. `AutomationConditionClauseResolutionWorkerSession.swift:48` | Pays instruction-prefill cost × every call; no prefix cache reuse |
-| P5 | **Segmentation is a serial head-of-line stage.** Fan-out cannot start until segmentation completes, even though the deterministic `AutomationPatternParser` already produced a component plan in milliseconds — the FM call (when τ < 0.88) only *confirms or adjusts* it. | graph edge `segmentation → componentFanOut` | +1 F of dead time before any component starts, in exactly the complex cases that also have the most components |
-| P6 | **No clarification short-circuit.** If one component resolves to "needs clarification" (ambiguous device), the run's outcome is already decided — yet all other components keep burning FM calls before the user is asked. | fan-out runner (no cancellation) | Wasted FM work delays the clarification response |
-| P7 | **K low-confidence conditions cost K FM calls.** Each clause is resolved in its own call with its own session, though clauses are tiny (one comparison each) and share the same instruction context. | condition worker per-component | K × F where ~1 × F would do |
+> **Status update (Conditional Automation Latency, Phases 0–4B).** Most findings below have since
+> been addressed; the *Status* column reflects the shipped code. Line references in *Where* predate
+> those changes and may be stale — follow the symbol, not the line number. See
+> [ConditionalAutomationLatencyImplementationPlan.md](ConditionalAutomationLatencyImplementationPlan.md)
+> and [task.md](../task.md) for the per-phase detail.
+
+| # | Finding | Where | Effect | Status |
+|---|---|---|---|---|
+| P1 | **Sequential repairs in the verifier loop.** Pre-verify repairs and per-iteration repairs ran in `for step in plan.steps { await … }` even though the planner guarantees disjoint fields per step. | `VerifierLoopOrchestrator` | Up to 2 extra serialized FM calls per iteration | ✅ **Resolved** — `executeRepairsInParallel` runs disjoint steps concurrently. Phase 4 also skips the final-iteration repair and adds a precedence-ambiguous preflight escape. |
+| P2 | **The action-concurrency cap is bypassed on the fan-out path.** N actions launched N concurrent full subgraphs; only the FM gate throttled. | `AutomationComponentFanOutRunner` vs `AutomationActionResolver` | Uncontrolled CPU/context pressure | ✅ **Resolved (Phase 2)** — `AutomationFanOutSchedulingConfiguration` + the pure `nextEligibleIndex` policy cap concurrent action pipelines (`maxConcurrentGraphActions = 2`) under the overall cap of 6. |
+| P3 | **FIFO gate + interleaved multi-call pipelines = worst-case completion order.** Short single-call components (conditions) queued behind long action pipelines. | `FoundationModelGate` | A 1-call condition can wait behind many action calls | 🟡 **Partial** — conditions are now scheduled before actions and the per-kind cap limits action contention (Phase 2); the gate has SJF priority lanes. Deferred: stamping nested action-subgraph FM calls as `pipeline` priority so conditions keep the interactive reserved slot under saturation. |
+| P4 | **A fresh `LanguageModelSession` per FM call** re-prefills the instruction block every call. | condition/trigger/segmentation workers | Instruction-prefill cost × every call | 🟡 **Partial** — a session-pool/prewarm facade exists and the condition worker uses it; the batch path enforces a hard prompt budget (Phase 2). Deferred: unifying single + batch on one session-factory dependency. |
+| P5 | **Segmentation is a serial head-of-line stage.** Fan-out could not start until segmentation completed. | graph edge `segmentation → componentFanOut` | +1 F of dead time before any component starts | ✅ **Resolved** — speculative segmentation (`resolveWithSpeculativeSegmentation`) runs Wave 1 on the deterministic plan while FM segmentation confirms/adjusts. |
+| P6 | **No clarification short-circuit.** Other components kept burning FM calls after one resolved to "needs clarification". | fan-out runner | Wasted FM work delays the clarification response | ✅ **Resolved** — the fan-out runner cancels outstanding work on the first clarification. |
+| P7 | **K low-confidence conditions cost K FM calls.** | condition worker per-component | K × F where ~1 × F would do | ✅ **Resolved** — `BatchedConditionClauseResolver` sends only residual clauses in ≤ 1 batched FM call; deterministically complete clauses skip FM entirely (Phase 1 shared assessor). |
 
 ---
 

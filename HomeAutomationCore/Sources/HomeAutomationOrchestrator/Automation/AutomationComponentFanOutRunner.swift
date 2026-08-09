@@ -19,6 +19,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
     private let speculativeCompiler: SpeculativeAssemblyCompiler?
     private let speculativeSegmentationThreshold: Double
     private let maxConcurrentComponents: Int
+    private let schedulingConfiguration: AutomationFanOutSchedulingConfiguration
     private let logger = Logger(subsystem: "HomeAutomation", category: "Automation.ComponentFanOut")
 
     public init(
@@ -30,7 +31,8 @@ public struct AutomationComponentFanOutRunner: Sendable {
         segmentationWorker: AutomationComponentSegmentationWorkerSession? = nil,
         speculativeCompiler: SpeculativeAssemblyCompiler? = SpeculativeAssemblyCompiler(),
         speculativeSegmentationThreshold: Double = 0.88,
-        maxConcurrentComponents: Int = Self.defaultMaxConcurrentComponents
+        maxConcurrentComponents: Int = Self.defaultMaxConcurrentComponents,
+        schedulingConfiguration: AutomationFanOutSchedulingConfiguration = .default
     ) {
         self.triggerAgent = triggerAgent
         self.conditionAgent = conditionAgent
@@ -41,6 +43,7 @@ public struct AutomationComponentFanOutRunner: Sendable {
         self.speculativeCompiler = speculativeCompiler
         self.speculativeSegmentationThreshold = speculativeSegmentationThreshold
         self.maxConcurrentComponents = max(1, maxConcurrentComponents)
+        self.schedulingConfiguration = schedulingConfiguration
     }
 
     public func resolve(
@@ -182,12 +185,12 @@ public struct AutomationComponentFanOutRunner: Sendable {
             case condition(AutomationConditionComponent)
             case batchedConditions([AutomationConditionComponent])
         }
+
+        // Phase 2 scheduling order: trigger → conditions (early) → actions
+        // This ensures conditions run while FM gate has capacity, reducing queue contention
         var workQueue: [ComponentWork] = []
         if let trigger = plan.trigger {
             workQueue.append(.trigger(trigger))
-        }
-        for action in plan.actions {
-            workQueue.append(.action(action))
         }
         if useBatchedConditions {
             workQueue.append(.batchedConditions(plan.conditions))
@@ -196,73 +199,100 @@ public struct AutomationComponentFanOutRunner: Sendable {
                 workQueue.append(.condition(condition))
             }
         }
+        for action in plan.actions {
+            workQueue.append(.action(action))
+        }
 
-        let outcomes = await withTaskGroup(of: [AutomationComponentOutcome].self) { group in
-            var nextIndex = 0
+        // Phase 2 per-kind cap: at most `maxConcurrentGraphActions` action pipelines run
+        // at once so concurrent action subgraphs cannot starve the (already earlier-queued)
+        // condition work at the 2-wide FM gate. Trigger and conditions are bounded only by
+        // the overall component cap. Scheduling still prefers front-of-queue items
+        // (trigger → conditions → actions), so conditions start before long action pipelines.
+        let maxConcurrentActions = max(1, schedulingConfiguration.maxConcurrentGraphActions)
+
+        func isActionWork(_ work: ComponentWork) -> Bool {
+            if case .action = work { return true }
+            return false
+        }
+
+        typealias TaggedOutcomes = (isAction: Bool, outcomes: [AutomationComponentOutcome])
+        let outcomes = await withTaskGroup(of: TaggedOutcomes.self) { group in
+            var pending = workQueue
+            var runningTotal = 0
+            var runningActions = 0
 
             func enqueueNext() -> Bool {
-                guard nextIndex < workQueue.count else { return false }
-                let work = workQueue[nextIndex]
-                nextIndex += 1
+                guard let index = Self.nextEligibleIndex(
+                    pendingIsAction: pending.map(isActionWork),
+                    runningActions: runningActions,
+                    runningTotal: runningTotal,
+                    maxConcurrentActions: maxConcurrentActions,
+                    maxConcurrentComponents: maxConcurrentComponents
+                ) else { return false }
+
+                let work = pending.remove(at: index)
+                runningTotal += 1
+                if isActionWork(work) { runningActions += 1 }
+
                 switch work {
                 case .trigger(let component):
                     group.addTask {
-                        [await self.resolveTrigger(
+                        (isAction: false, outcomes: [await self.resolveTrigger(
                             component,
                             context: context,
                             eventBus: eventBus,
                             runID: runID
-                        )]
+                        )])
                     }
                 case .action(let component):
                     group.addTask {
-                        [await self.resolveAction(
+                        (isAction: true, outcomes: [await self.resolveAction(
                             component,
                             context: context,
                             eventBus: eventBus,
                             runID: runID
-                        )]
+                        )])
                     }
                 case .condition(let component):
                     group.addTask {
-                        [await self.resolveCondition(
+                        (isAction: false, outcomes: [await self.resolveCondition(
                             component,
                             devices: devices,
                             triggerPolicy: conditionTriggerPolicy,
                             context: context,
                             eventBus: eventBus,
                             runID: runID
-                        )]
+                        )])
                     }
                 case .batchedConditions(let components):
                     group.addTask {
-                        await self.resolveBatchedConditions(
+                        (isAction: false, outcomes: await self.resolveBatchedConditions(
                             components,
                             devices: devices,
                             triggerPolicy: conditionTriggerPolicy,
                             context: context,
                             eventBus: eventBus,
                             runID: runID
-                        )
+                        ))
                     }
                 }
                 return true
             }
 
-            for _ in 0..<min(maxConcurrentComponents, workQueue.count) {
-                _ = enqueueNext()
-            }
+            while enqueueNext() {}
 
             var outcomes: [AutomationComponentOutcome] = []
             var clarificationDetected = false
-            for await batch in group {
-                outcomes.append(contentsOf: batch)
-                if batch.contains(where: \.needsClarification) && !clarificationDetected {
+            for await tagged in group {
+                runningTotal -= 1
+                if tagged.isAction { runningActions -= 1 }
+                outcomes.append(contentsOf: tagged.outcomes)
+                if tagged.outcomes.contains(where: \.needsClarification) && !clarificationDetected {
                     clarificationDetected = true
                     group.cancelAll()
                 }
                 if !clarificationDetected {
-                    _ = enqueueNext()
+                    while enqueueNext() {}
                 }
             }
             return outcomes
@@ -278,11 +308,24 @@ public struct AutomationComponentFanOutRunner: Sendable {
             .map(\.result)
         let unsupportedFragments = plan.unsupportedFragments + outcomes.flatMap(\.unsupportedFragments)
 
+        // Collect condition-specific telemetry for Phase 0 baseline
+        let conditionTelemetry = ConditionTelemetryCollector().collectMetrics(
+            from: conditionResults,
+            tree: plan.conditionTree,
+            triggerKind: plan.trigger?.kindHint == .device ? "device" : "schedule",
+            deviceCount: devices.count,
+            isOnCriticalPath: true // simplified for Phase 0; refine with critical-path analysis
+        )
+
         var payload: [String: String] = [
             "componentCount": String((plan.trigger == nil ? 0 : 1) + plan.actions.count + plan.conditions.count),
             "triggerCount": plan.trigger == nil ? "0" : "1",
             "actionCount": String(plan.actions.count),
             "conditionCount": String(plan.conditions.count),
+            "conditionLeafCount": String(conditionTelemetry.first?.leafCount ?? 0),
+            "conditionTreeNodeCount": String(conditionTelemetry.first?.treeNodeCount ?? 0),
+            "conditionTreeDepth": String(conditionTelemetry.first?.treeDepth ?? 0),
+            "conditionTreeShape": conditionTelemetry.first?.treeShape ?? "none",
             "maxConcurrentComponents": String(Self.maxConcurrentComponents(outcomes.map(\.timing))),
             "maxConcurrentComponentsStarted": String(Self.maxConcurrentComponents(outcomes.map(\.timing))),
             "componentStartSpreadMs": String(Self.startSpreadMs(outcomes.map(\.timing))),
@@ -296,6 +339,10 @@ public struct AutomationComponentFanOutRunner: Sendable {
         ]
         if let speculativeLabel {
             payload["speculativePhase"] = speculativeLabel
+        }
+        if !conditionTelemetry.isEmpty {
+            payload["conditionCompleteness"] = conditionTelemetry.first?.completeness ?? "unknown"
+            payload["conditionConfidence"] = String(conditionTelemetry.first?.confidence ?? 0)
         }
 
         await HomeAutomationTelemetry.shared.log(
@@ -604,6 +651,24 @@ public struct AutomationComponentFanOutRunner: Sendable {
             result.append(trimmed)
         }
         return result
+    }
+
+    /// Pure scheduling policy for the fan-out task group. Returns the index of the next
+    /// pending work item to start, or nil if none may start right now. An action item is
+    /// eligible only while fewer than `maxConcurrentActions` actions are running; any
+    /// non-action item is eligible while under the overall component cap. Front-of-list
+    /// order is preserved so trigger/conditions (queued first) start before actions.
+    static func nextEligibleIndex(
+        pendingIsAction: [Bool],
+        runningActions: Int,
+        runningTotal: Int,
+        maxConcurrentActions: Int,
+        maxConcurrentComponents: Int
+    ) -> Int? {
+        guard runningTotal < maxConcurrentComponents else { return nil }
+        return pendingIsAction.firstIndex(where: { isAction in
+            isAction ? runningActions < maxConcurrentActions : true
+        })
     }
 
     private static func maxConcurrentComponents(_ timings: [AutomationComponentTiming]) -> Int {

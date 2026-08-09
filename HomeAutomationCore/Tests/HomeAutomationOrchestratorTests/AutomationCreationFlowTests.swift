@@ -234,6 +234,127 @@ struct AutomationCreationFlowTests {
     }
 
     @Test
+    func orchestratorDraftsMixedVerbMultiActionScheduleFromSmallFixture() async throws {
+        let registry = HomeAutomationCoordinator.makeMockDeviceRegistry(devices: [
+            HomeCandidateRecord(
+                id: "latency_bedroom_ac",
+                displayName: "Bedroom AC",
+                deviceType: "airConditioner",
+                room: "bedroom",
+                capabilities: [
+                    "switch",
+                    "temperatureMeasurement",
+                    "relativeHumidityMeasurement",
+                    "thermostatCoolingSetpoint",
+                    "airConditionerMode",
+                    "airConditionerFanMode"
+                ],
+                supportedCommands: [
+                    "switch": ["on", "off"],
+                    "thermostatCoolingSetpoint": ["setCoolingSetpoint"],
+                    "airConditionerMode": ["setAirConditionerMode"],
+                    "airConditionerFanMode": ["setFanMode"]
+                ],
+                currentState: [
+                    "switch": "off",
+                    "temperature": "25",
+                    "humidity": "55",
+                    "coolingSetpoint": "24"
+                ],
+                riskLevel: .medium
+            ),
+            HomeCandidateRecord(
+                id: "latency_living_room_blinds",
+                displayName: "Living Room Blinds",
+                deviceType: "blind",
+                room: "living room",
+                capabilities: ["windowShade", "windowShadeLevel"],
+                supportedCommands: ["windowShade": ["open", "close"]],
+                currentState: ["windowShade": "closed", "shadeLevel": "0"],
+                riskLevel: .medium
+            ),
+            HomeCandidateRecord(
+                id: "latency_living_room_lights",
+                displayName: "Living Room Lights",
+                deviceType: "light",
+                room: "living room",
+                capabilities: ["switch", "switchLevel"],
+                supportedCommands: ["switch": ["on", "off"]],
+                currentState: ["switch": "off", "level": "60"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_front_door_lock",
+                displayName: "Front Door Lock",
+                deviceType: "lock",
+                room: "entry",
+                capabilities: ["lock", "contactSensor", "battery"],
+                supportedCommands: ["lock": ["lock", "unlock"]],
+                currentState: ["lock": "locked", "contact": "closed", "battery": "85"],
+                riskLevel: .high
+            ),
+            HomeCandidateRecord(
+                id: "latency_entry_contact_sensor",
+                displayName: "Entry Contact Sensor",
+                deviceType: "contactSensor",
+                room: "entry",
+                capabilities: ["contactSensor", "battery"],
+                supportedCommands: [:],
+                currentState: ["contact": "closed", "battery": "90"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_hallway_motion_sensor",
+                displayName: "Hallway Motion Sensor",
+                deviceType: "motionSensor",
+                room: "hallway",
+                capabilities: ["motionSensor", "battery"],
+                supportedCommands: [:],
+                currentState: ["motion": "inactive", "battery": "86"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_home_presence_sensor",
+                displayName: "Home Presence Sensor",
+                deviceType: "presenceSensor",
+                room: "home",
+                capabilities: ["presenceSensor"],
+                supportedCommands: [:],
+                currentState: ["presence": "present"]
+            ),
+            HomeCandidateRecord(
+                id: "latency_living_room_temperature_sensor",
+                displayName: "Living Room Temperature Sensor",
+                deviceType: "temperatureSensor",
+                room: "living room",
+                capabilities: ["temperatureMeasurement", "battery"],
+                supportedCommands: [:],
+                currentState: ["temperature": "25", "battery": "92"]
+            )
+        ])
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: registry,
+            foundationModelAvailability: { false }
+        )
+        let orchestrator = HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies()
+        )
+
+        let result = try await orchestrator.resolve(
+            "turn on the Bedroom AC and open the Living Room Blinds at 7 AM",
+            executeLowRiskCommands: false
+        )
+
+        guard case .automationRequiresConfirmation(let plan) = result.resolution else {
+            Issue.record("Expected automation confirmation, got \(result.resolution.displaySummary)")
+            return
+        }
+        #expect(plan.resolvedActions.map(\.draft.targetDeviceID) == [
+            "latency_bedroom_ac",
+            "latency_living_room_blinds"
+        ])
+        #expect(plan.resolvedActions.map(\.draft.command) == ["on", "open"])
+        #expect(plan.smartThingsRuleJSON?.contains(#""command""#) == true)
+    }
+
+    @Test
     func conversationalTemperatureRoutineCreatesResolvedAutomation() async throws {
         let orchestrator = HomeCommandOrchestrator(
             deviceRegistry: MockHomeDeviceRegistry(),

@@ -42,7 +42,7 @@ struct DraftEnvelopeTests {
         let decoded = try JSONDecoder().decode(DraftEnvelope.self, from: data)
 
         #expect(decoded == envelope)
-        #expect(decoded.version == 1)
+        #expect(decoded.version == DraftEnvelope.currentVersion)
         #expect(decoded.userText == "turn on the bedroom lamp")
         #expect(decoded.operation == .executeDeviceCommand)
         #expect(decoded.command?.targetDeviceID == "bedroom_lamp")
@@ -51,6 +51,54 @@ struct DraftEnvelopeTests {
         #expect(decoded.risk.level == .low)
         #expect(decoded.provenance[.command(.capability)] == .model)
         #expect(decoded.fieldConfidence[.command(.targetDeviceID)] == 0.88)
+    }
+
+    @Test("Phase 4B: a v1 condition-leaf payload decodes with a nil structured condition")
+    func v1ConditionLeafDecodesBackCompat() throws {
+        // A pre-4B (v1) payload has no `structuredCondition` key; it must still decode.
+        let json = Data(#"{"id":"c0","rawText":"the front door is locked","candidateTable":[],"confidence":0.84}"#.utf8)
+        let decoded = try JSONDecoder().decode(ConditionLeafDraft.self, from: json)
+        #expect(decoded.id == "c0")
+        #expect(decoded.structuredCondition == nil)
+        #expect(decoded.confidence == 0.84)
+    }
+
+    @Test("Phase 4B: structured condition round-trips through the structural draft builder")
+    func structuredConditionRoundTripsThroughBuilder() {
+        let structured = HomeAutomationCondition.comparison(
+            HomeAutomationComparisonCondition(
+                left: .deviceAttribute(
+                    description: "the temperature sensor",
+                    deviceID: "bedroom_temperature_sensor",
+                    capability: "temperatureMeasurement",
+                    attribute: "temperature"
+                ),
+                operatorName: .between,
+                right: .literalRange(start: 20, end: 26, unit: nil)
+            )
+        )
+        let leaf = ConditionLeafDraft(
+            id: "c0",
+            rawText: "the temperature sensor is between 20 and 26",
+            structuredCondition: structured,
+            confidence: 0.84
+        )
+        let automation = AutomationDraftSection(
+            conditionTree: .leaf("c0"),
+            conditionLeaves: [leaf],
+            actions: []
+        )
+        let envelope = DraftEnvelope(
+            userText: "cool if the temperature sensor is between 20 and 26",
+            operation: .automationCreation,
+            operationConfidence: 0.9,
+            automation: automation,
+            risk: RiskSection(level: .low, floorReason: "test")
+        )
+
+        let plan = StructuralDraftBuilder.automationCreationPlan(from: envelope)
+        // The flat fields could not express a range; the structured condition must survive exactly.
+        #expect(plan.ruleDraft.condition == structured)
     }
 
     @Test("AutomationDraftSection round-trips through JSON")

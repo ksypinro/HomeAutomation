@@ -110,6 +110,37 @@ struct AdaptivePortfolioIntegrationTests {
         #expect(plan.fallbackReason == .none)
     }
 
+    @Test("active static executes Tier-1 for eligible single-condition schedule")
+    func activeStaticExecutesTier1ForEligibleSingleConditionSchedule() async throws {
+        let coordinator = HomeAutomationCoordinator(
+            deviceRegistry: HomeAutomationCoordinator.makeMockDeviceRegistry(),
+            foundationModelAvailability: { true }
+        )
+        let orchestrator = HomeCommandOrchestrator(
+            dependencies: coordinator.makeRuntimeDependencies(
+                orchestrationMode: .adaptivePortfolio,
+                portfolioRolloutMode: .activeStatic,
+                portfolioEligibilityPolicy: PortfolioEligibilityPolicy(conditionalTier1Enabled: true)
+            )
+        )
+
+        let result = try await orchestrator.resolve(
+            "Turn on living Room TV everyday at 7 PM if bedroom AC is off.",
+            executeLowRiskCommands: false
+        )
+        let metrics = await orchestrator.lastMetrics()
+
+        guard case .automationDrafted(let plan) = result.resolution else {
+            Issue.record("Expected automation draft, got \(result.resolution.displaySummary)")
+            return
+        }
+        #expect(plan.resolvedActions.map(\.draft.targetDeviceID) == ["living_room_tv"])
+        #expect(plan.ruleDraft.condition != nil)
+        #expect(metrics?.portfolioDecision?.selectedArm == .graphWithTier1)
+        #expect(metrics?.portfolioDecision?.ruleID == "static.automation.conditionalSchedule.tier1")
+        #expect(metrics?.portfolioExecutionPlan?.executingArm == .graphWithTier1)
+    }
+
     @Test("controller falls back when selected executor is missing")
     func controllerFallsBackWhenExecutorMissing() async {
         let prepared = await preparedRequest(

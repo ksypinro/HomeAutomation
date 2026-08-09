@@ -200,6 +200,9 @@ extension AutomationPatternParser {
             (" turned off", "off"),
             (" is on", "on"),
             (" is off", "off"),
+            ("someone is home", "present"),
+            ("someone is not home", "not present"),
+            ("no one is home", "not present"),
             ("motion is detected", "active"),
             ("detects motion", "active")
         ]

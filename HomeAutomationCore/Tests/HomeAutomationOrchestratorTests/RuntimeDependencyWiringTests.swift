@@ -35,6 +35,22 @@ struct RuntimeDependencyWiringTests {
         #expect(deps.portfolioRolloutMode == .activeStatic)
     }
 
+    @Test("runtime dependencies preserve conditional Tier-1 policy opt-in")
+    func runtimeDependenciesPreserveConditionalTier1Policy() {
+        let defaultDeps = makeCoordinator().makeRuntimeDependencies(
+            orchestrationMode: .adaptivePortfolio,
+            portfolioRolloutMode: .activeStatic
+        )
+        let enabledDeps = makeCoordinator().makeRuntimeDependencies(
+            orchestrationMode: .adaptivePortfolio,
+            portfolioRolloutMode: .activeStatic,
+            portfolioEligibilityPolicy: PortfolioEligibilityPolicy(conditionalTier1Enabled: true)
+        )
+
+        #expect(!defaultDeps.portfolioEligibilityPolicy.conditionalTier1Enabled)
+        #expect(enabledDeps.portfolioEligibilityPolicy.conditionalTier1Enabled)
+    }
+
     @Test("graph mode carries no loop orchestrator")
     func graphModeHasNoLoopOrchestrator() {
         let deps = makeCoordinator().makeRuntimeDependencies(orchestrationMode: .graph)

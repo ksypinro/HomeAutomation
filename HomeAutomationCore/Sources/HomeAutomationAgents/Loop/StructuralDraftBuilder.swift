@@ -202,6 +202,12 @@ public enum StructuralDraftBuilder {
     }
 
     private static func comparisonCondition(_ leaf: ConditionLeafDraft) -> HomeAutomationCondition {
+        // Phase 4B: prefer the lossless structured condition when present. The flat-field
+        // reconstruction below can only express a single device-attribute comparison, so it
+        // silently drops ranges, `.changes`, units, and cross-device operands.
+        if let structured = leaf.structuredCondition {
+            return structured
+        }
         let left = HomeAutomationConditionOperand.deviceAttribute(
             description: leaf.rawText,
             deviceID: leaf.target,

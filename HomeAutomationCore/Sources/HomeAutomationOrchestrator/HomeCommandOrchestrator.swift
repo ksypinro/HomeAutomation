@@ -83,11 +83,15 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         self.featureExtractor = OrchestrationFeatureExtractor(registry: dependencies.deviceRegistry)
         self.portfolioRolloutMode = dependencies.portfolioRolloutMode
         self.portfolioRolloutConfiguration = dependencies.portfolioRolloutConfiguration
-        let staticPortfolioRouter = StaticPortfolioRouter(rolloutMode: dependencies.portfolioRolloutMode)
+        let staticPortfolioRouter = StaticPortfolioRouter(
+            policy: dependencies.portfolioEligibilityPolicy,
+            rolloutMode: dependencies.portfolioRolloutMode
+        )
         self.staticPortfolioRouter = staticPortfolioRouter
         let learnedRouter = dependencies.portfolioModelArtifact.map {
             LearnedPortfolioRouter(
                 artifact: $0,
+                policy: dependencies.portfolioEligibilityPolicy,
                 staticRouter: staticPortfolioRouter,
                 rolloutMode: dependencies.portfolioRolloutMode
             )
@@ -296,6 +300,7 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
     ) -> AsyncThrowingStream<OrchestratorUpdate, Error> {
         AsyncThrowingStream { continuation in
             Task {
+                let requestStartedAt = Date()
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedText.isEmpty else {
                     logger.error("Rejecting empty command request.")
@@ -597,7 +602,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 continuation: continuation,
                                 appendConversationMemory: true,
                                 userText: trimmedText,
-                                logCompletion: false
+                                logCompletion: false,
+                                requestStartedAt: requestStartedAt,
+                                portfolioExecutionPlan: portfolioExecutionPlan
                             )
                         }
                         return
@@ -665,7 +672,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 continuation: continuation,
                                 appendConversationMemory: true,
                                 userText: trimmedText,
-                                logCompletion: false
+                                logCompletion: false,
+                                requestStartedAt: requestStartedAt,
+                                portfolioExecutionPlan: portfolioExecutionPlan
                             )
                         }
                         return
@@ -695,7 +704,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                                 continuation: continuation,
                                 appendConversationMemory: false,
                                 userText: trimmedText,
-                                logCompletion: false
+                                logCompletion: false,
+                                requestStartedAt: requestStartedAt,
+                                portfolioExecutionPlan: portfolioExecutionPlan
                             )
                         }
                         return
@@ -751,7 +762,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         eventForwarder: eventForwarder,
                         continuation: continuation,
                         appendConversationMemory: false,
-                        userText: trimmedText
+                        userText: trimmedText,
+                        requestStartedAt: requestStartedAt,
+                        portfolioExecutionPlan: portfolioExecutionPlan
                     )
                     return
                 }
@@ -795,7 +808,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                         eventForwarder: eventForwarder,
                         continuation: continuation,
                         appendConversationMemory: false,
-                        userText: trimmedText
+                        userText: trimmedText,
+                        requestStartedAt: requestStartedAt,
+                        portfolioExecutionPlan: portfolioExecutionPlan
                     )
                     return
                 }
@@ -856,11 +871,59 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
                     eventForwarder: eventForwarder,
                     continuation: continuation,
                     appendConversationMemory: true,
-                    userText: trimmedText
+                    userText: trimmedText,
+                    requestStartedAt: requestStartedAt,
+                    portfolioExecutionPlan: portfolioExecutionPlan
                 )
                 logger.info("Stream resolution completed successfully.")
             }
         }
+    }
+
+    private func captureRequestTelemetry(
+        result: HomeAutomationResolverResult,
+        startedAt: Date,
+        metrics: OrchestratorMetrics,
+        runContext: OrchestrationRunContext,
+        portfolioExecutionPlan: PortfolioArmExecutionPlan,
+        orchestrationMode: OrchestrationMode
+    ) async {
+        let endedAt = Date()
+        let totalDurationMs = endedAt.timeIntervalSince(startedAt) * 1_000
+
+        let strategy: OrchestrationStrategy
+        switch orchestrationMode {
+        case .graph:
+            strategy = portfolioExecutionPlan.executingArm == .graphWithTier1 ? .graphWithTier1 : .graph
+        case .verifierLoop:
+            strategy = .verifierLoop
+        case .adaptivePortfolio:
+            strategy = portfolioRolloutMode == .shadowStatic || portfolioRolloutMode == .shadowLearned
+                ? .adaptiveShadow
+                : .adaptiveStatic
+        }
+        let preparationDurationMs = (metrics.stageDurations["adaptivePreparation"] ?? 0) * 1_000
+        let routerDurationMs = (metrics.stageDurations["portfolioRouter"] ?? 0) * 1_000
+        let totalPreparationMs = preparationDurationMs + routerDurationMs
+        let operationExecutionMs = max(0, totalDurationMs - totalPreparationMs)
+
+        let snapshot = RequestTelemetrySnapshot(
+            strategy: strategy,
+            rootRoutingSource: orchestrationMode == .adaptivePortfolio ? "adaptive" : "normal",
+            selectedArm: portfolioExecutionPlan.selectedArm.rawValue,
+            executingArm: portfolioExecutionPlan.executingArm.rawValue,
+            routerRuleID: metrics.portfolioDecision?.ruleID,
+            preparationDurationMs: totalPreparationMs,
+            operationExecutionDurationMs: operationExecutionMs,
+            requestToOutcomeDurationMs: totalDurationMs,
+            conditionMetrics: nil,
+            fmCallCount: metrics.foundationModelUsage.modelCallCount
+        )
+
+        await RequestTelemetryCapture().captureAndLog(
+            snapshot: snapshot,
+            context: HomeAutomationTelemetryScope.current
+        )
     }
 
     public func lastMetricsJSON() async -> String? {
@@ -884,7 +947,9 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         continuation: AsyncThrowingStream<OrchestratorUpdate, Error>.Continuation,
         appendConversationMemory: Bool,
         userText: String,
-        logCompletion: Bool = true
+        logCompletion: Bool = true,
+        requestStartedAt: Date? = nil,
+        portfolioExecutionPlan: PortfolioArmExecutionPlan? = nil
     ) async {
         await metricsCollector.store(metrics)
         if appendConversationMemory {
@@ -905,6 +970,18 @@ public final class HomeCommandOrchestrator: HomeCommandResolving, Sendable {
         }
         await runContext.eventBus.finish()
         await eventForwarder.value
+
+        if let requestStartedAt, let portfolioExecutionPlan {
+            await captureRequestTelemetry(
+                result: result,
+                startedAt: requestStartedAt,
+                metrics: metrics,
+                runContext: runContext,
+                portfolioExecutionPlan: portfolioExecutionPlan,
+                orchestrationMode: orchestrationMode
+            )
+        }
+
         continuation.yield(.result(result))
         continuation.finish()
     }

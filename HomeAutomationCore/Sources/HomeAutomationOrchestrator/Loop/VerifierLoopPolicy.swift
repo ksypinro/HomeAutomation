@@ -43,6 +43,9 @@ public enum EscalationReason: String, Sendable, Hashable {
     case noProgress
     case repairLatch
     case verifierUnavailable
+    /// A preflight suitability check rejected the envelope before any verification —
+    /// e.g. a precedence-ambiguous automation that cannot be repaired field-by-field.
+    case preflightUnsupported
 }
 
 // MARK: - LoopRunMetrics
