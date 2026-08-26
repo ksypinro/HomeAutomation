@@ -29,9 +29,10 @@ public enum FoundationModelDiagnostics {
             return .toolFailure
         }
 
-        if error is SystemLanguageModel.Adapter.AssetError {
-            return .adapterUnavailable
-        }
+        // `SystemLanguageModel.Adapter.AssetError` is obsoleted as of iOS 27, and
+        // adapters can no longer be loaded at all, so that error can no longer be
+        // thrown. `.adapterUnavailable` is now reported directly by
+        // `HomeAdapterModelProvider` instead.
 
         return failureKind(forDescription: error.localizedDescription)
     }

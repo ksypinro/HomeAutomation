@@ -325,50 +325,28 @@ public struct HomeAdapterModelProvider: Sendable {
             )
         }
 
-        do {
-            switch configuration.source {
-            case .file, .bundle, .injectedURL, .backgroundAsset:
-                guard let fileURL = configuration.fileURL else {
-                    throw FoundationLabCoreError.invalidRequest("Adapter file URL missing")
-                }
-                let adapter = try SystemLanguageModel.Adapter(fileURL: fileURL)
-                return (
-                    SystemLanguageModel(adapter: adapter),
-                    HomeAdapterModelDiagnostic(
-                        attempted: true,
-                        succeeded: true,
-                        adapterSource: configuration.source.rawValue,
-                        adapterIdentifier: configuration.identifier,
-                        compatibilityVersion: HomeAdapterCompatibilityManifest.current.runtimeVersion
-                    )
-                )
-            case .name:
-                let adapter = try SystemLanguageModel.Adapter(name: configuration.identifier)
-                return (
-                    SystemLanguageModel(adapter: adapter),
-                    HomeAdapterModelDiagnostic(
-                        attempted: true,
-                        succeeded: true,
-                        adapterSource: configuration.source.rawValue,
-                        adapterIdentifier: configuration.identifier,
-                        compatibilityVersion: HomeAdapterCompatibilityManifest.current.runtimeVersion
-                    )
-                )
-            }
-        } catch {
-            return (
-                nil,
-                HomeAdapterModelDiagnostic(
-                    attempted: true,
-                    succeeded: false,
-                    errorDescription: error.localizedDescription,
-                    errorKind: FoundationModelDiagnostics.failureKind(for: error),
-                    adapterSource: configuration.source.rawValue,
-                    adapterIdentifier: configuration.identifier,
-                    compatibilityVersion: HomeAdapterCompatibilityManifest.current.runtimeVersion
-                )
+        // `SystemLanguageModel.Adapter` and `SystemLanguageModel(adapter:)` are
+        // obsoleted as of iOS/macOS/visionOS 27.0 — the OS no longer supports
+        // loading a custom LoRA adapter, and there is no replacement API. Report
+        // it as "not attempted" rather than "failed" so `makeSmartHomeSession`
+        // falls back to the base model instead of throwing; the diagnostic
+        // records why the configured adapter was ignored.
+        return (
+            nil,
+            HomeAdapterModelDiagnostic(
+                attempted: false,
+                succeeded: false,
+                errorDescription: """
+                Custom Foundation Models adapters are unavailable on iOS 27 and later; \
+                using the base system model instead.
+                """,
+                errorKind: .adapterUnavailable,
+                adapterSource: configuration.source.rawValue,
+                adapterIdentifier: configuration.identifier,
+                compatibilityVersion: HomeAdapterCompatibilityManifest.current.runtimeVersion,
+                loadOutcome: "unsupportedOS"
             )
-        }
+        )
     }
 }
 

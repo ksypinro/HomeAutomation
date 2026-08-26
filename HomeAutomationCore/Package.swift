@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "HomeAutomationCore",
     platforms: [
-        .iOS("26.0"),
+        .iOS("27.0"),
         .macOS("26.0")
     ],
     products: [
