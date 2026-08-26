@@ -307,9 +307,13 @@ final class HomeAutomationViewModel {
     var architectureCards: [ArchitectureCardItem] = []
     var currentPipelineStage: String?
 
-    private let registry = MockHomeDeviceRegistry()
-    private var coordinator: HomeAutomationCoordinator
-    private var orchestrator: HomeCommandOrchestrator
+    /// The registry, coordinator, and orchestrator are owned by
+    /// `HomeAutomationRuntime` so that the App Intents share one device world
+    /// and one RAG index with the UI.
+    private let runtime = HomeAutomationRuntime.shared
+    private var registry: MockHomeDeviceRegistry { runtime.registry }
+    private var coordinator: HomeAutomationCoordinator { runtime.coordinator }
+    private var orchestrator: HomeCommandOrchestrator { runtime.orchestrator }
 
     let sampleCommands = [
         "Turn on the living room ceiling light",
@@ -324,10 +328,6 @@ final class HomeAutomationViewModel {
     ]
 
     init() {
-        let initialCoordinator = HomeAutomationCoordinator(deviceRegistry: registry)
-        coordinator = initialCoordinator
-        orchestrator = initialCoordinator.makeOrchestrator()
-
         Task {
             await initializeRAG()
         }
@@ -340,22 +340,15 @@ final class HomeAutomationViewModel {
     }
 
     func initializeRAG() async {
-        coordinator = await HomeCommandOrchestrator.makeRAGEnabledCoordinator(deviceRegistry: registry)
-        rebuildOrchestrator()
+        await runtime.upgradeToRAG()
+        refreshArchitectureCards()
     }
 
     /// Mints a fresh orchestrator from the retained coordinator for the
     /// selected mode. The RAG index and device registry are reused; only the
     /// runtime dependencies (agent registry, loop orchestrator) are rebuilt.
     private func rebuildOrchestrator() {
-        let dependencies = coordinator.makeRuntimeDependencies(
-            orchestrationMode: orchestratorChoice.orchestrationMode,
-            useMiniPipeline: orchestratorChoice.usesMiniPipeline,
-            portfolioRolloutMode: orchestratorChoice.rolloutMode,
-            portfolioEligibilityPolicy: orchestratorChoice.portfolioEligibilityPolicy,
-            graphCompilationMode: graphCompilerChoice.mode
-        )
-        orchestrator = HomeCommandOrchestrator(dependencies: dependencies)
+        runtime.rebuildOrchestrator(choice: orchestratorChoice, compiler: graphCompilerChoice)
         refreshArchitectureCards()
     }
 
@@ -741,7 +734,7 @@ final class HomeAutomationViewModel {
         return sections.joined(separator: "\n\n")
     }
 
-    private static func makeResultCore(_ result: HomeAutomationResolverResult, engineName: String) -> ResultCoreDisplay {
+    static func makeResultCore(_ result: HomeAutomationResolverResult, engineName: String) -> ResultCoreDisplay {
         let title: String
         let icon: String
         switch result.resolution {
@@ -791,7 +784,7 @@ final class HomeAutomationViewModel {
             }
     }
 
-    private static func makeAutomationResult(_ result: HomeAutomationResolverResult) -> AutomationResultDisplay? {
+    static func makeAutomationResult(_ result: HomeAutomationResolverResult) -> AutomationResultDisplay? {
         let plan: HomeAutomationCreationPlan
         switch result.resolution {
         case .automationDrafted(let draftPlan), .automationRequiresConfirmation(let draftPlan):
@@ -833,7 +826,7 @@ final class HomeAutomationViewModel {
         )
     }
 
-    private static func makeDeviceCommandResult(_ result: HomeAutomationResolverResult) -> DeviceCommandResultDisplay? {
+    static func makeDeviceCommandResult(_ result: HomeAutomationResolverResult) -> DeviceCommandResultDisplay? {
         let candidates = Dictionary(
             (result.hydratedCandidates + result.retrievedCandidates)
                 .map { ($0.id, $0) },
